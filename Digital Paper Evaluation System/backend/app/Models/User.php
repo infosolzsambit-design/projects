@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Traits\HasAuditContext;
 use App\Traits\HasDateTimeTimestamps;
 use App\Traits\HasUserstamps;
 use Database\Factories\UserFactory;
@@ -18,7 +19,9 @@ use Spatie\Permission\Traits\HasRoles;
 class User extends Authenticatable implements AuditableContract
 {
     /** @use HasFactory<UserFactory> */
-    use Auditable, HasApiTokens, HasDateTimeTimestamps, HasFactory, HasRoles, HasUserstamps, Notifiable, SoftDeletes;
+    use Auditable, HasApiTokens, HasAuditContext, HasDateTimeTimestamps, HasFactory, HasRoles, HasUserstamps, Notifiable, SoftDeletes {
+        HasAuditContext::transformAudit insteadof Auditable;
+    }
 
     /**
      * The attributes that are mass assignable.

@@ -2,14 +2,17 @@
 import { ref, shallowRef, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePapersStore } from '../stores/papers'
+import { useTeacherStore } from '../stores/teacher'
 import { loadPdf, renderPageToCanvas } from '../utils/pdf'
 import { questionScheme, maxTotalMarks } from '../data/questionScheme'
+import FaceScanModal from '../components/FaceScanModal.vue'
 
 // Teacher-facing marking screen. Must never read papersStore.studentMap —
 // the paper is identified only by its QR / Serial number (paper.id).
 const route = useRoute()
 const router = useRouter()
 const papersStore = usePapersStore()
+const teacherStore = useTeacherStore()
 
 const paper = computed(() => papersStore.paperById(route.params.id))
 const pageNumbers = computed(() => Array.from({ length: paper.value?.pageCount || 0 }, (_, i) => i + 1))
@@ -60,15 +63,14 @@ const totalAwarded = computed(() =>
 )
 
 // --- checking timer ---
-// NOTE: this used to be gated behind a face-scan verification step (start
-// and finish). Removed for now until a camera is installed on the checking
-// machine — re-add the FaceScanModal gate around startChecking/finishChecking
-// when that's ready. The timer/duration tracking itself is independent of
-// that and stays in place.
 const checkingStarted = ref(false)
 const elapsedSeconds = ref(0)
 let timerInterval = null
 let checkingStartTimestamp = null
+
+// --- face-scan gate: teacher must match their registered profile before
+// they can start checking, and again before they can finish. ---
+const faceScanPurpose = ref(null) // null | 'start' | 'finish'
 
 function startTimer() {
   checkingStartTimestamp = Date.now()
@@ -91,6 +93,21 @@ const elapsedDisplay = computed(() => {
   const pad = (n) => String(n).padStart(2, '0')
   return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`
 })
+
+function requestStartChecking() {
+  faceScanPurpose.value = 'start'
+}
+
+function requestFinishChecking() {
+  faceScanPurpose.value = 'finish'
+}
+
+function onFaceMatched() {
+  const purpose = faceScanPurpose.value
+  faceScanPurpose.value = null
+  if (purpose === 'start') startChecking()
+  else if (purpose === 'finish') finishChecking()
+}
 
 function startChecking() {
   checkingStarted.value = true
@@ -468,6 +485,7 @@ watch(
     scale.value = 1
     rotation.value = 0
     checkingStarted.value = false
+    faceScanPurpose.value = null
     stopTimer()
     elapsedSeconds.value = 0
     loadCurrentPaper()
@@ -495,7 +513,7 @@ watch(
       <button class="rail-btn accent" title="Save" @click="saveEvaluation">
         <span class="rail-icon">💾</span><span>Save</span>
       </button>
-      <button class="rail-btn accent submit" title="Submit" @click="finishChecking">
+      <button class="rail-btn accent submit" title="Submit" @click="requestFinishChecking">
         <span class="rail-icon">🔒</span><span>Submit</span>
       </button>
       <button class="rail-btn danger" title="Close" @click="closeViewer">
@@ -610,11 +628,26 @@ watch(
     <div v-if="!checkingStarted" class="start-gate-overlay">
       <div class="start-gate-card">
         <h1>Paper {{ paper.id }}</h1>
-        <p>Start checking this paper. This starts the checking timer.</p>
-        <button class="cta" @click="startChecking">Start Checking</button>
+        <template v-if="teacherStore.isRegistered">
+          <p>Verify your face to start checking this paper. This starts the checking timer.</p>
+          <button class="cta" @click="requestStartChecking">Start Checking</button>
+        </template>
+        <template v-else>
+          <p class="warn-text">
+            You need to register your face before you can check papers.
+          </p>
+          <RouterLink to="/teacher/register" class="cta">Register Now</RouterLink>
+        </template>
         <RouterLink to="/review" class="back-link">&larr; Back to list</RouterLink>
       </div>
     </div>
+
+    <FaceScanModal
+      v-if="faceScanPurpose"
+      :title="faceScanPurpose === 'start' ? 'Verify Your Face to Start Checking' : 'Verify Your Face to Finish Checking'"
+      @matched="onFaceMatched"
+      @cancel="faceScanPurpose = null"
+    />
 
     <p v-if="saved" class="saved-toast">✅ Saved (dummy &mdash; in-memory only, not sent to a server).</p>
   </section>
@@ -667,6 +700,11 @@ watch(
 .start-gate-card p {
   color: var(--color-text);
   opacity: 0.8;
+}
+
+.start-gate-card .warn-text {
+  color: #e57373;
+  opacity: 1;
 }
 
 .start-gate-card .cta {

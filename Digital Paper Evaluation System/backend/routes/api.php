@@ -1,10 +1,12 @@
 <?php
 
 use App\Http\Controllers\API\V1\AuditController;
-use App\Http\Controllers\API\V1\AuthController;
-use App\Http\Controllers\API\V1\PermissionController;
-use App\Http\Controllers\API\V1\RoleController;
-use App\Http\Controllers\API\V1\UserController;
+use App\Http\Controllers\API\V1\Auth\AuthController;
+use App\Http\Controllers\API\V1\Auth\PermissionController;
+use App\Http\Controllers\API\V1\Auth\RoleController;
+use App\Http\Controllers\API\V1\Master\CourseController;
+use App\Http\Controllers\API\V1\Master\ProgramController;
+use App\Http\Controllers\API\V1\User\UserController;
 use Illuminate\Support\Facades\Route;
 
 // Every route below is automatically prefixed with /api/v1 (see bootstrap/app.php)
@@ -37,6 +39,12 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::apiResource('roles', RoleController::class);
 
     Route::apiResource('permissions', PermissionController::class);
+
+    Route::post('courses/{course}/restore', [CourseController::class, 'restore'])->withTrashed();
+    Route::apiResource('courses', CourseController::class);
+
+    Route::post('programs/{program}/restore', [ProgramController::class, 'restore'])->withTrashed();
+    Route::apiResource('programs', ProgramController::class);
 
     Route::get('audits', [AuditController::class, 'index']);
     Route::get('audits/{audit}', [AuditController::class, 'show']);

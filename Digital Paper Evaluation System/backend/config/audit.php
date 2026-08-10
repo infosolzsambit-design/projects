@@ -32,7 +32,11 @@ return [
 
     'user' => [
         'morph_prefix' => 'user',
+        // 'sanctum' first — every /api/v1 request in this app authenticates
+        // through it (see auth.defaults.guard); 'web'/'api' are kept as a
+        // fallback but would never actually match here.
         'guards' => [
+            'sanctum',
             'web',
             'api',
         ],

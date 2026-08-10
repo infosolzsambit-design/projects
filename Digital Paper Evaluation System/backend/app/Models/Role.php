@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Traits\HasAuditContext;
 use App\Traits\HasDateTimeTimestamps;
 use App\Traits\HasUserstamps;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -11,7 +12,9 @@ use Spatie\Permission\Models\Role as SpatieRole;
 
 class Role extends SpatieRole implements AuditableContract
 {
-    use Auditable, HasDateTimeTimestamps, HasUserstamps, SoftDeletes;
+    use Auditable, HasAuditContext, HasDateTimeTimestamps, HasUserstamps, SoftDeletes {
+        HasAuditContext::transformAudit insteadof Auditable;
+    }
 
     /**
      * @var list<string>
