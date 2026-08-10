@@ -24,6 +24,9 @@ class StoreProgramRequest extends FormRequest
             // free to be reused (see courses.code for the same fix).
             'code' => ['required', 'string', 'max:50', Rule::unique('programs', 'code')->whereNull('deleted_at')],
             'status' => ['sometimes', 'boolean'],
+            // A program must map to at least one course when created.
+            'course_ids' => ['required', 'array', 'min:1'],
+            'course_ids.*' => ['distinct', 'integer', Rule::exists('courses', 'id')->whereNull('deleted_at')],
         ];
     }
 }

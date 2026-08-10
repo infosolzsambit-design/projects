@@ -2,14 +2,14 @@
 
 namespace App\Http\Resources;
 
-use App\Models\Program;
+use App\Models\Department;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @mixin Program
+ * @mixin Department
  */
-class ProgramResource extends JsonResource
+class DepartmentResource extends JsonResource
 {
     /**
      * @return array<string, mixed>
@@ -19,18 +19,9 @@ class ProgramResource extends JsonResource
         return [
             'id' => $this->id,
             'name' => $this->name,
-            'department' => $this->department,
             'code' => $this->code,
+            'short_description' => $this->short_description,
             'status' => (bool) $this->status,
-            // Always eager-loaded as courses:id,name,code (see
-            // ProgramController) — kept to just those fields here too, so
-            // this never shows a misleading null for a column that was
-            // deliberately never selected.
-            'courses' => $this->whenLoaded('courses', fn () => $this->courses->map(fn ($course) => [
-                'id' => $course->id,
-                'name' => $course->name,
-                'code' => $course->code,
-            ])),
             'created_by' => $this->created_by,
             'updated_by' => $this->updated_by,
             'deleted_by' => $this->when($this->trashed(), $this->deleted_by),

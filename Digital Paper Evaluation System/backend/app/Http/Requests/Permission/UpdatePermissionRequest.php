@@ -20,7 +20,7 @@ class UpdatePermissionRequest extends FormRequest
         $permissionId = $this->route('permission')?->id;
 
         return [
-            'name' => ['required', 'string', 'max:255', Rule::unique('permissions', 'name')->ignore($permissionId)],
+            'name' => ['required', 'string', 'max:255', Rule::unique('permissions', 'name')->ignore($permissionId)->whereNull('deleted_at')],
         ];
     }
 }

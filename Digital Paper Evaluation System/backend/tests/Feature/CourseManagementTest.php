@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Course;
+use App\Models\Program;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -114,5 +115,46 @@ class CourseManagementTest extends TestCase
 
         $response->assertOk();
         $this->assertDatabaseHas('courses', ['id' => $course->id, 'deleted_at' => null]);
+    }
+
+    public function test_cannot_delete_a_course_mapped_to_a_program(): void
+    {
+        $this->actingAdmin();
+        $course = Course::factory()->create();
+        $program = Program::factory()->create();
+        $program->courses()->sync([$course->id]);
+
+        $response = $this->withApiKey()->deleteJson("/api/v1/courses/{$course->id}");
+
+        $response->assertStatus(409);
+        $this->assertDatabaseHas('courses', ['id' => $course->id, 'deleted_at' => null]);
+    }
+
+    public function test_can_delete_a_course_once_it_is_unmapped_from_every_program(): void
+    {
+        $this->actingAdmin();
+        $course = Course::factory()->create();
+        $program = Program::factory()->create();
+        $program->courses()->sync([$course->id]);
+        $program->courses()->sync([]);
+
+        $response = $this->withApiKey()->deleteJson("/api/v1/courses/{$course->id}");
+
+        $response->assertOk();
+        $this->assertSoftDeleted('courses', ['id' => $course->id]);
+    }
+
+    public function test_can_delete_a_course_whose_only_mapped_program_is_soft_deleted(): void
+    {
+        $this->actingAdmin();
+        $course = Course::factory()->create();
+        $program = Program::factory()->create();
+        $program->courses()->sync([$course->id]);
+        $program->delete();
+
+        $response = $this->withApiKey()->deleteJson("/api/v1/courses/{$course->id}");
+
+        $response->assertOk();
+        $this->assertSoftDeleted('courses', ['id' => $course->id]);
     }
 }

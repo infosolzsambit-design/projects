@@ -3,10 +3,10 @@
 namespace App\Http\Controllers\API\V1\Master;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Course\StoreCourseRequest;
-use App\Http\Requests\Course\UpdateCourseRequest;
-use App\Http\Resources\CourseResource;
-use App\Models\Course;
+use App\Http\Requests\Department\StoreDepartmentRequest;
+use App\Http\Requests\Department\UpdateDepartmentRequest;
+use App\Http\Resources\DepartmentResource;
+use App\Models\Department;
 use App\Traits\ApiResponse;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -14,40 +14,40 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 // NOTE: no permission gating yet — every authenticated user (auth:sanctum,
-// applied at the route-group level) can manage courses for now. Per-action
-// permission middleware (course-list/create/view/update/delete/restore) is
-// intentionally deferred until permissions are set up separately.
-class CourseController extends Controller
+// applied at the route-group level) can manage departments for now.
+// Per-action permission middleware is intentionally deferred until
+// permissions are set up separately (same as CourseController).
+class DepartmentController extends Controller
 {
     use ApiResponse;
 
     /**
-     * One multi-purpose listing endpoint:
+     * One multi-purpose listing endpoint (same shape as CourseController::index):
      *  - ?id=5                    → single record (like show(), but via query param)
-     *  - ?status=deleted          → only soft-deleted courses
-     *  - ?status=all              → every matching course, unpaginated
+     *  - ?status=deleted          → only soft-deleted departments
+     *  - ?status=all              → every matching department, unpaginated
      *      - ?table_fields=["name","code"]  → trims the SELECT to just those columns (+id)
-     *      - ?is_active=yes|no    → filter by the course's own active/inactive flag
+     *      - ?is_active=yes|no    → filter by the department's own active/inactive flag
      *  - default                  → paginated, searchable listing
-     *      - ?search=, ?name=, ?code=, ?is_active=yes|no, ?sort_by=, ?sort_by_field=, ?per_page=
+     *      - ?search=, ?name=, ?code=, ?short_description=, ?is_active=yes|no, ?sort_by=, ?sort_by_field=, ?per_page=
      *      - ?table_fields=["name","code"]  → same column-trimming as the "all" branch
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Course::query();
+        $query = Department::query();
 
         if ($request->filled('status') && $request->string('status')->toString() === 'deleted') {
             $query->onlyTrashed();
         }
 
         if ($request->filled('id')) {
-            $course = $query->find($request->input('id'));
+            $department = $query->find($request->input('id'));
 
-            if (! $course) {
-                return $this->notFound('No course found.');
+            if (! $department) {
+                return $this->notFound('No department found.');
             }
 
-            return $this->success(new CourseResource($course), 'Course fetched successfully.');
+            return $this->success(new DepartmentResource($department), 'Department fetched successfully.');
         }
 
         if ($request->filled('status') && $request->string('status')->toString() === 'all') {
@@ -58,16 +58,17 @@ class CourseController extends Controller
             $this->applyActiveFilter($query, $request);
             $this->applySorting($query, $request);
 
-            $courses = $query->get();
+            $departments = $query->get();
 
-            return $this->success($courses, 'Courses fetched successfully.');
+            return $this->success($departments, 'Departments fetched successfully.');
         }
 
         if ($request->filled('search')) {
             $search = $request->string('search')->toString();
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('code', 'like', "%{$search}%");
+                    ->orWhere('code', 'like', "%{$search}%")
+                    ->orWhere('short_description', 'like', "%{$search}%");
             });
         }
 
@@ -79,11 +80,10 @@ class CourseController extends Controller
             $query->where('code', 'like', '%'.$request->string('code')->toString().'%');
         }
 
-        // Trimming the SELECT is one of the cheapest wins for fetch speed —
-        // available here too, not just on the ?status=all branch. When used,
-        // the raw (already-trimmed) rows are returned instead of routing
-        // through CourseResource, so a requester never sees a field they
-        // didn't select come back as a misleading null.
+        if ($request->filled('short_description')) {
+            $query->where('short_description', 'like', '%'.$request->string('short_description')->toString().'%');
+        }
+
         $fieldsRequested = $request->filled('table_fields');
         if ($fieldsRequested) {
             $this->applyFieldSelection($query, $request);
@@ -97,19 +97,19 @@ class CourseController extends Controller
             (int) config('pagination.max_per_page'),
         ));
 
-        $courses = $query->paginate($perPage);
+        $departments = $query->paginate($perPage);
 
         return $this->paginated(
-            $courses,
-            'Courses fetched successfully.',
-            $fieldsRequested ? null : CourseResource::collection($courses),
+            $departments,
+            'Departments fetched successfully.',
+            $fieldsRequested ? null : DepartmentResource::collection($departments),
         );
     }
 
     /**
      * Trims the SELECT to just the requested column names (always keeping
-     * id). Course has no relations, so — unlike the multi-module version of
-     * this pattern — there's no dot-notation relation-field handling here.
+     * id). Department has no relations, so there's no dot-notation
+     * relation-field handling here.
      */
     private function applyFieldSelection(Builder $query, Request $request): void
     {
@@ -148,48 +148,39 @@ class CourseController extends Controller
         $query->orderBy($sortField, $sortDir);
     }
 
-    public function store(StoreCourseRequest $request): JsonResponse
+    public function store(StoreDepartmentRequest $request): JsonResponse
     {
         $data = $request->validated();
         $data['status'] ??= true;
 
-        $course = Course::create($data);
+        $department = Department::create($data);
 
-        return $this->success(new CourseResource($course), 'Course created successfully.', 201);
+        return $this->success(new DepartmentResource($department), 'Department created successfully.', 201);
     }
 
-    public function show(Course $course): JsonResponse
+    public function show(Department $department): JsonResponse
     {
-        return $this->success(new CourseResource($course), 'Course retrieved successfully.');
+        return $this->success(new DepartmentResource($department), 'Department retrieved successfully.');
     }
 
-    public function update(UpdateCourseRequest $request, Course $course): JsonResponse
+    public function update(UpdateDepartmentRequest $request, Department $department): JsonResponse
     {
-        $course->update($request->validated());
+        $department->update($request->validated());
 
-        return $this->success(new CourseResource($course->fresh()), 'Course updated successfully.');
+        return $this->success(new DepartmentResource($department->fresh()), 'Department updated successfully.');
     }
 
-    public function destroy(Course $course): JsonResponse
+    public function destroy(Department $department): JsonResponse
     {
-        // A program requires at least one mapped course (see
-        // Store/UpdateProgramRequest) — silently letting a mapped course
-        // get deleted would leave that program with zero, since a
-        // soft-deleted course drops out of Program::with('courses') via
-        // Course's own SoftDeletes scope while the pivot row survives.
-        if ($course->programs()->exists()) {
-            return $this->error('This course is mapped to one or more programs and cannot be deleted.', 409);
-        }
+        $department->delete();
 
-        $course->delete();
-
-        return $this->success(null, 'Course deleted successfully.');
+        return $this->success(null, 'Department deleted successfully.');
     }
 
-    public function restore(Course $course): JsonResponse
+    public function restore(Department $department): JsonResponse
     {
-        $course->restore();
+        $department->restore();
 
-        return $this->success(new CourseResource($course), 'Course restored successfully.');
+        return $this->success(new DepartmentResource($department), 'Department restored successfully.');
     }
 }

@@ -50,7 +50,13 @@ return [
     |
     */
 
-    'expiration' => null,
+    // Primary theft protection is PinTokenToClient (IP/browser pinning), not
+    // this timer — so this is set generously (a full working day) purely as
+    // a backstop for a token nobody ever revoked, not as a session-length
+    // control. The frontend still calls POST /refresh periodically (see
+    // stores/auth.js) to rotate the token, but going past this window
+    // shouldn't happen in ordinary use.
+    'expiration' => env('SANCTUM_TOKEN_EXPIRATION', 480),
 
     /*
     |--------------------------------------------------------------------------

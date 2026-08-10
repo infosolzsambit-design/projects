@@ -7,6 +7,7 @@ use App\Http\Requests\Program\StoreProgramRequest;
 use App\Http\Requests\Program\UpdateProgramRequest;
 use App\Http\Resources\ProgramResource;
 use App\Models\Program;
+use App\Services\AuditLogService;
 use App\Traits\ApiResponse;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -20,6 +21,8 @@ use Illuminate\Support\Str;
 class ProgramController extends Controller
 {
     use ApiResponse;
+
+    public function __construct(private readonly AuditLogService $auditLog) {}
 
     /**
      * One multi-purpose listing endpoint (same shape as CourseController::index):
@@ -41,7 +44,7 @@ class ProgramController extends Controller
         }
 
         if ($request->filled('id')) {
-            $program = $query->find($request->input('id'));
+            $program = $query->with('courses')->find($request->input('id'));
 
             if (! $program) {
                 return $this->notFound('No program found.');
@@ -51,8 +54,11 @@ class ProgramController extends Controller
         }
 
         if ($request->filled('status') && $request->string('status')->toString() === 'all') {
-            if ($request->filled('table_fields')) {
+            $fieldsRequested = $request->filled('table_fields');
+            if ($fieldsRequested) {
                 $this->applyFieldSelection($query, $request);
+            } else {
+                $query->with('courses:id,name,code');
             }
 
             $this->applyActiveFilter($query, $request);
@@ -87,6 +93,8 @@ class ProgramController extends Controller
         $fieldsRequested = $request->filled('table_fields');
         if ($fieldsRequested) {
             $this->applyFieldSelection($query, $request);
+        } else {
+            $query->with('courses:id,name,code');
         }
 
         $this->applyActiveFilter($query, $request);
@@ -152,22 +160,54 @@ class ProgramController extends Controller
     {
         $data = $request->validated();
         $data['status'] ??= true;
+        $courseIds = $data['course_ids'];
+        unset($data['course_ids']);
 
         $program = Program::create($data);
+        $program->courses()->sync($courseIds);
 
-        return $this->success(new ProgramResource($program), 'Program created successfully.', 201);
+        $this->auditLog->log(
+            event: 'courses-synced',
+            module: 'Program Management',
+            description: 'Courses mapped to newly created program.',
+            auditable: $program,
+            newValues: ['course_ids' => $courseIds],
+            tags: ['course-mapping'],
+        );
+
+        return $this->success(new ProgramResource($program->load('courses')), 'Program created successfully.', 201);
     }
 
     public function show(Program $program): JsonResponse
     {
-        return $this->success(new ProgramResource($program), 'Program retrieved successfully.');
+        return $this->success(new ProgramResource($program->load('courses')), 'Program retrieved successfully.');
     }
 
     public function update(UpdateProgramRequest $request, Program $program): JsonResponse
     {
-        $program->update($request->validated());
+        $data = $request->validated();
 
-        return $this->success(new ProgramResource($program->fresh()), 'Program updated successfully.');
+        if (array_key_exists('course_ids', $data)) {
+            $courseIds = $data['course_ids'];
+            unset($data['course_ids']);
+
+            $before = $program->courses()->pluck('courses.id')->all();
+            $program->courses()->sync($courseIds);
+
+            $this->auditLog->log(
+                event: 'courses-synced',
+                module: 'Program Management',
+                description: 'Courses mapped to program updated.',
+                auditable: $program,
+                oldValues: ['course_ids' => $before],
+                newValues: ['course_ids' => $courseIds],
+                tags: ['course-mapping'],
+            );
+        }
+
+        $program->update($data);
+
+        return $this->success(new ProgramResource($program->fresh()->load('courses')), 'Program updated successfully.');
     }
 
     public function destroy(Program $program): JsonResponse

@@ -52,6 +52,11 @@ const router = createRouter({
           name: 'master-programs',
           component: () => import('../views/master/ProgramsView.vue'),
         },
+        {
+          path: 'master/departments',
+          name: 'master-departments',
+          component: () => import('../views/master/DepartmentsView.vue'),
+        },
       ],
     },
     { path: '/:pathMatch(.*)*', redirect: { name: 'dashboard' } },

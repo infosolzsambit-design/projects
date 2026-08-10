@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, watch } from 'vue'
 import api from '../../utils/api'
 
-const programs = ref([])
+const departments = ref([])
 const loading = ref(true)
 const loadError = ref('')
 
@@ -11,26 +11,14 @@ const statusFilter = ref('') // '' | 'yes' | 'no'
 
 const pagination = reactive({ current_page: 1, per_page: 20, total: 0, last_page: 1 })
 
-const availableCourses = ref([])
-
 const showModal = ref(false)
-const editingProgram = ref(null) // null = create mode
-const form = reactive({ name: '', department: '', code: '', status: true, course_ids: [] })
+const editingDepartment = ref(null) // null = create mode
+const form = reactive({ name: '', code: '', short_description: '', status: true })
 const formError = ref('')
 const saving = ref(false)
 const deletingId = ref(null)
 
-async function fetchAvailableCourses() {
-  try {
-    const res = await api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] } })
-    availableCourses.value = res.data.data
-  } catch {
-    // Non-fatal — the modal just shows an empty course list if this fails;
-    // the page itself still works.
-  }
-}
-
-async function fetchPrograms(page = 1) {
+async function fetchDepartments(page = 1) {
   loading.value = true
   loadError.value = ''
   try {
@@ -38,11 +26,11 @@ async function fetchPrograms(page = 1) {
     if (search.value) params.search = search.value
     if (statusFilter.value !== '') params.is_active = statusFilter.value
 
-    const res = await api.get('/programs', { params })
-    programs.value = res.data.data.items
+    const res = await api.get('/departments', { params })
+    departments.value = res.data.data.items
     Object.assign(pagination, res.data.data.pagination)
   } catch (err) {
-    loadError.value = err.response?.data?.message || 'Could not load programs.'
+    loadError.value = err.response?.data?.message || 'Could not load departments.'
   } finally {
     loading.value = false
   }
@@ -51,28 +39,26 @@ async function fetchPrograms(page = 1) {
 let searchDebounce = null
 watch(search, () => {
   clearTimeout(searchDebounce)
-  searchDebounce = setTimeout(() => fetchPrograms(1), 350)
+  searchDebounce = setTimeout(() => fetchDepartments(1), 350)
 })
-watch(statusFilter, () => fetchPrograms(1))
+watch(statusFilter, () => fetchDepartments(1))
 
 function openCreate() {
-  editingProgram.value = null
+  editingDepartment.value = null
   form.name = ''
-  form.department = ''
   form.code = ''
+  form.short_description = ''
   form.status = true
-  form.course_ids = []
   formError.value = ''
   showModal.value = true
 }
 
-function openEdit(program) {
-  editingProgram.value = program
-  form.name = program.name
-  form.department = program.department
-  form.code = program.code
-  form.status = program.status
-  form.course_ids = (program.courses || []).map((c) => c.id)
+function openEdit(department) {
+  editingDepartment.value = department
+  form.name = department.name
+  form.code = department.code
+  form.short_description = department.short_description || ''
+  form.status = department.status
   formError.value = ''
   showModal.value = true
 }
@@ -83,75 +69,60 @@ function closeModal() {
 }
 
 async function submitForm() {
-  if (form.course_ids.length === 0) {
-    formError.value = 'Select at least one course.'
-    return
-  }
-
   saving.value = true
   formError.value = ''
   try {
-    if (editingProgram.value) {
-      await api.put(`/programs/${editingProgram.value.id}`, form)
+    if (editingDepartment.value) {
+      await api.put(`/departments/${editingDepartment.value.id}`, form)
     } else {
-      await api.post('/programs', form)
+      await api.post('/departments', form)
     }
     showModal.value = false
-    await fetchPrograms(pagination.current_page)
+    await fetchDepartments(pagination.current_page)
   } catch (err) {
-    formError.value = err.response?.data?.message || 'Could not save program.'
+    formError.value = err.response?.data?.message || 'Could not save department.'
   } finally {
     saving.value = false
   }
 }
 
-async function removeProgram(program) {
-  if (!confirm(`Delete program "${program.name}"? This can be undone by an admin later.`)) return
-  deletingId.value = program.id
+async function removeDepartment(department) {
+  if (!confirm(`Delete department "${department.name}"? This can be undone by an admin later.`)) return
+  deletingId.value = department.id
   try {
-    await api.delete(`/programs/${program.id}`)
-    if (programs.value.length === 1 && pagination.current_page > 1) {
-      await fetchPrograms(pagination.current_page - 1)
+    await api.delete(`/departments/${department.id}`)
+    if (departments.value.length === 1 && pagination.current_page > 1) {
+      await fetchDepartments(pagination.current_page - 1)
     } else {
-      await fetchPrograms(pagination.current_page)
+      await fetchDepartments(pagination.current_page)
     }
   } catch (err) {
-    loadError.value = err.response?.data?.message || 'Could not delete program.'
+    loadError.value = err.response?.data?.message || 'Could not delete department.'
   } finally {
     deletingId.value = null
   }
 }
 
-function courseSummary(program) {
-  const names = (program.courses || []).map((c) => c.name)
-  if (names.length === 0) return '—'
-  if (names.length <= 2) return names.join(', ')
-  return `${names.slice(0, 2).join(', ')} +${names.length - 2} more`
-}
-
 function goToPage(page) {
   if (page < 1 || page > pagination.last_page || page === pagination.current_page) return
-  fetchPrograms(page)
+  fetchDepartments(page)
 }
 
-onMounted(() => {
-  fetchPrograms(1)
-  fetchAvailableCourses()
-})
+onMounted(() => fetchDepartments(1))
 </script>
 
 <template>
-  <section class="programs-page">
+  <section class="departments-page">
     <div class="page-header">
       <div>
-        <h1>Programs</h1>
-        <p class="hint">Master data &mdash; manage the list of programs available across the system.</p>
+        <h1>Departments</h1>
+        <p class="hint">Master data &mdash; manage the list of departments available across the system.</p>
       </div>
-      <button class="primary-btn" @click="openCreate">+ Add Program</button>
+      <button class="primary-btn" @click="openCreate">+ Add Department</button>
     </div>
 
     <div class="toolbar">
-      <input v-model="search" type="text" placeholder="Search by name, department or code…" class="search-input" />
+      <input v-model="search" type="text" placeholder="Search by name, code or description…" class="search-input" />
       <select v-model="statusFilter" class="status-select">
         <option value="">All Status</option>
         <option value="yes">Active</option>
@@ -162,44 +133,42 @@ onMounted(() => {
     <p v-if="loadError" class="error-banner">{{ loadError }}</p>
 
     <div class="table-card">
-      <table class="programs-table">
+      <table class="departments-table">
         <thead>
           <tr>
             <th>Name</th>
-            <th>Department</th>
             <th>Code</th>
-            <th>Courses</th>
+            <th>Description</th>
             <th>Status</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="6" class="empty-cell">Loading&hellip;</td>
+            <td colspan="5" class="empty-cell">Loading&hellip;</td>
           </tr>
-          <tr v-else-if="!programs.length">
-            <td colspan="6" class="empty-cell">No programs found.</td>
+          <tr v-else-if="!departments.length">
+            <td colspan="5" class="empty-cell">No departments found.</td>
           </tr>
-          <tr v-for="program in programs" :key="program.id" v-else>
-            <td>{{ program.name }}</td>
-            <td>{{ program.department }}</td>
-            <td><code>{{ program.code }}</code></td>
-            <td class="courses-cell" :title="(program.courses || []).map((c) => c.name).join(', ')">
-              {{ courseSummary(program) }}
+          <tr v-for="department in departments" :key="department.id" v-else>
+            <td>{{ department.name }}</td>
+            <td><code>{{ department.code }}</code></td>
+            <td class="description-cell" :title="department.short_description">
+              {{ department.short_description || '—' }}
             </td>
             <td>
-              <span class="badge" :class="program.status ? 'active' : 'inactive'">
-                {{ program.status ? 'Active' : 'Inactive' }}
+              <span class="badge" :class="department.status ? 'active' : 'inactive'">
+                {{ department.status ? 'Active' : 'Inactive' }}
               </span>
             </td>
             <td class="actions-cell">
-              <button class="link-btn" @click="openEdit(program)">Edit</button>
+              <button class="link-btn" @click="openEdit(department)">Edit</button>
               <button
                 class="link-btn danger"
-                :disabled="deletingId === program.id"
-                @click="removeProgram(program)"
+                :disabled="deletingId === department.id"
+                @click="removeDepartment(department)"
               >
-                {{ deletingId === program.id ? 'Deleting…' : 'Delete' }}
+                {{ deletingId === department.id ? 'Deleting…' : 'Delete' }}
               </button>
             </td>
           </tr>
@@ -219,7 +188,7 @@ onMounted(() => {
 
     <div v-if="showModal" class="modal-backdrop" @click.self="closeModal">
       <div class="modal-card">
-        <h2>{{ editingProgram ? 'Edit Program' : 'Add Program' }}</h2>
+        <h2>{{ editingDepartment ? 'Edit Department' : 'Add Department' }}</h2>
 
         <form @submit.prevent="submitForm">
           <label>
@@ -228,25 +197,14 @@ onMounted(() => {
           </label>
 
           <label>
-            Department
-            <input v-model="form.department" type="text" required />
-          </label>
-
-          <label>
             Code
             <input v-model="form.code" type="text" required />
           </label>
 
-          <div class="field-group">
-            <span class="field-label">Courses <span class="required-mark">*</span></span>
-            <div class="checkbox-list">
-              <p v-if="!availableCourses.length" class="empty-hint">No courses available yet.</p>
-              <label v-for="course in availableCourses" :key="course.id" class="checkbox-item">
-                <input v-model="form.course_ids" type="checkbox" :value="course.id" />
-                {{ course.name }} <span class="course-code">({{ course.code }})</span>
-              </label>
-            </div>
-          </div>
+          <label>
+            Short Description
+            <textarea v-model="form.short_description" rows="3" maxlength="500"></textarea>
+          </label>
 
           <label class="status-toggle">
             <input v-model="form.status" type="checkbox" />
@@ -346,12 +304,12 @@ onMounted(() => {
   overflow: hidden;
 }
 
-.programs-table {
+.departments-table {
   width: 100%;
   border-collapse: collapse;
 }
 
-.programs-table th {
+.departments-table th {
   text-align: left;
   padding: 0.75rem 1rem;
   background: var(--color-background-soft);
@@ -360,30 +318,30 @@ onMounted(() => {
   border-bottom: 1px solid var(--color-border);
 }
 
-.courses-cell {
-  max-width: 220px;
+.departments-table td {
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.92rem;
+}
+
+.departments-table tr:last-child td {
+  border-bottom: none;
+}
+
+.departments-table code {
+  background: var(--color-background-soft);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+}
+
+.description-cell {
+  max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text);
   opacity: 0.85;
   font-size: 0.85rem;
-}
-
-.programs-table td {
-  padding: 0.7rem 1rem;
-  border-bottom: 1px solid var(--color-border);
-  font-size: 0.92rem;
-}
-
-.programs-table tr:last-child td {
-  border-bottom: none;
-}
-
-.programs-table code {
-  background: var(--color-background-soft);
-  padding: 0.15rem 0.4rem;
-  border-radius: 4px;
 }
 
 .empty-cell {
@@ -471,7 +429,7 @@ onMounted(() => {
   border: 1px solid var(--color-border);
   border-radius: 10px;
   padding: 1.75rem;
-  width: 440px;
+  width: 420px;
   max-width: 90vw;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
 }
@@ -497,67 +455,22 @@ onMounted(() => {
   font-size: 0.88rem;
 }
 
-.modal-card input[type='text'] {
+.modal-card input[type='text'],
+.modal-card textarea {
   font-weight: normal;
+  font-family: inherit;
   padding: 0.55rem 0.75rem;
   border: 1px solid var(--color-border);
   border-radius: 6px;
   background: var(--color-background-soft);
   color: var(--color-text);
+  resize: vertical;
 }
 
 .status-toggle {
   flex-direction: row !important;
   align-items: center;
   gap: 0.5rem !important;
-}
-
-.field-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.field-label {
-  font-weight: 600;
-  color: var(--color-heading);
-  font-size: 0.88rem;
-}
-
-.required-mark {
-  color: hsl(0, 70%, 55%);
-}
-
-.checkbox-list {
-  max-height: 160px;
-  overflow-y: auto;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-  background: var(--color-background-soft);
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.checkbox-item {
-  flex-direction: row !important;
-  align-items: center;
-  gap: 0.5rem !important;
-  font-weight: normal !important;
-  color: var(--color-text) !important;
-  font-size: 0.88rem !important;
-}
-
-.course-code {
-  opacity: 0.6;
-  font-size: 0.8em;
-}
-
-.empty-hint {
-  font-size: 0.85rem;
-  opacity: 0.6;
-  padding: 0.25rem 0;
 }
 
 .error-msg {

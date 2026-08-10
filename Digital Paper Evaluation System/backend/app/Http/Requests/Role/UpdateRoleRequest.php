@@ -20,7 +20,7 @@ class UpdateRoleRequest extends FormRequest
         $roleId = $this->route('role')?->id;
 
         return [
-            'name' => ['required', 'string', 'max:255', Rule::unique('roles', 'name')->ignore($roleId)],
+            'name' => ['required', 'string', 'max:255', Rule::unique('roles', 'name')->ignore($roleId)->whereNull('deleted_at')],
         ];
     }
 }

@@ -24,6 +24,10 @@ class UpdateProgramRequest extends FormRequest
             'department' => ['sometimes', 'required', 'string', 'max:255'],
             'code' => ['sometimes', 'required', 'string', 'max:50', Rule::unique('programs', 'code')->ignore($programId)->whereNull('deleted_at')],
             'status' => ['sometimes', 'boolean'],
+            // Optional to resend on update, but if included a program still
+            // can't be left with zero mapped courses.
+            'course_ids' => ['sometimes', 'array', 'min:1'],
+            'course_ids.*' => ['distinct', 'integer', Rule::exists('courses', 'id')->whereNull('deleted_at')],
         ];
     }
 }

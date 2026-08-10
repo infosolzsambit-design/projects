@@ -59,7 +59,7 @@ class AuthController extends Controller
             'last_login_ip' => $request->ip(),
         ])->saveQuietly();
 
-        $token = $user->createToken('api-token')->plainTextToken;
+        $token = $this->issueToken($user, $request);
 
         $this->auditLog->log(
             event: 'login',
@@ -74,6 +74,52 @@ class AuthController extends Controller
             'token_type' => 'Bearer',
             'user' => new UserResource($user->load(['roles', 'permissions'])),
         ], 'Login successful.');
+    }
+
+    /**
+     * POST /refresh — rotates the current session to a brand new token and
+     * revokes the old one immediately, extending the session without
+     * requiring a fresh login. Called periodically by the frontend (see
+     * stores/auth.js) while the token is still valid — a token that never
+     * gets refreshed (idle tab, stolen and replayed later) simply expires
+     * per sanctum.expiration and stops working.
+     */
+    public function refresh(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $user->currentAccessToken()->delete();
+
+        $token = $this->issueToken($user, $request);
+
+        $this->auditLog->log(
+            event: 'token-refreshed',
+            module: 'Authentication',
+            description: 'Session token refreshed.',
+            auditable: $user,
+            causer: $user,
+        );
+
+        return $this->success([
+            'token' => $token,
+            'token_type' => 'Bearer',
+        ], 'Token refreshed successfully.');
+    }
+
+    /**
+     * Creates a token and pins it to the requesting IP/browser (see
+     * PinTokenToClient middleware) — a copied token is only usable from the
+     * exact context it was issued to.
+     */
+    private function issueToken(User $user, Request $request): string
+    {
+        $result = $user->createToken('api-token');
+
+        $result->accessToken->forceFill([
+            'ip_address' => $request->ip(),
+            'user_agent' => substr((string) $request->userAgent(), 0, 255),
+        ])->save();
+
+        return $result->plainTextToken;
     }
 
     /**

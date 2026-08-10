@@ -1,11 +1,17 @@
 <script setup>
-import { computed, ref, watchEffect } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
+
+// This layout only ever mounts on authenticated routes (see router meta),
+// so its lifecycle is exactly "user is in an authenticated area" — the
+// right place to run the token auto-refresh loop.
+onMounted(() => authStore.startAutoRefresh())
+onBeforeUnmount(() => authStore.stopAutoRefresh())
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: '&#9635;', exact: true },
@@ -17,6 +23,7 @@ const navItems = [
 const masterItems = [
   { to: '/master/courses', label: 'Course', icon: '&#9636;' },
   { to: '/master/programs', label: 'Programs', icon: '&#9638;' },
+  { to: '/master/departments', label: 'Departments', icon: '&#9737;' },
 ]
 
 function isActive(item) {

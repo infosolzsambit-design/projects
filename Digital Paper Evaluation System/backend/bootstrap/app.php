@@ -2,6 +2,8 @@
 
 use App\Http\Middleware\ApiKeyAuth;
 use App\Http\Middleware\RequestId;
+use App\Http\Middleware\SanitizeInput;
+use App\Http\Middleware\SecurityHeaders;
 use App\Traits\ApiResponse;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
@@ -33,6 +35,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->append(RequestId::class);
+        $middleware->append(SecurityHeaders::class);
 
         // This is an API-only app with no "login" web route — without this,
         // Laravel's framework-registered default tries to redirect guests to
@@ -41,9 +44,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->redirectGuestsTo(fn () => null);
 
         // Every /api/v1 request must present a valid API key before anything
-        // else (Sanctum auth, permission checks) is evaluated.
+        // else (Sanctum auth, permission checks) is evaluated. SanitizeInput
+        // runs after that (no point cleaning a request we're about to
+        // reject) but before routing/validation ever sees the body — see
+        // its docblock for why this is global instead of per-field.
         $middleware->api(prepend: [
             ApiKeyAuth::class,
+            SanitizeInput::class,
         ]);
 
         $middleware->alias([

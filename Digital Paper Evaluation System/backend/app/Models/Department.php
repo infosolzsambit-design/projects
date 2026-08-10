@@ -5,18 +5,17 @@ namespace App\Models;
 use App\Traits\HasAuditContext;
 use App\Traits\HasDateTimeTimestamps;
 use App\Traits\HasUserstamps;
-use Database\Factories\CourseFactory;
+use Database\Factories\DepartmentFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use OwenIt\Auditing\Auditable;
 use OwenIt\Auditing\Contracts\Auditable as AuditableContract;
 
-class Course extends Model implements AuditableContract
+class Department extends Model implements AuditableContract
 {
-    /** @use HasFactory<CourseFactory> */
+    /** @use HasFactory<DepartmentFactory> */
     use Auditable, HasAuditContext, HasDateTimeTimestamps, HasFactory, HasUserstamps, SoftDeletes {
         HasAuditContext::transformAudit insteadof Auditable;
     }
@@ -27,6 +26,7 @@ class Course extends Model implements AuditableContract
     protected $fillable = [
         'name',
         'code',
+        'short_description',
         'status',
     ];
 
@@ -38,11 +38,6 @@ class Course extends Model implements AuditableContract
         return [
             'status' => 'boolean',
         ];
-    }
-
-    public function programs(): BelongsToMany
-    {
-        return $this->belongsToMany(Program::class, 'program_course_mappings');
     }
 
     public function creator(): BelongsTo
