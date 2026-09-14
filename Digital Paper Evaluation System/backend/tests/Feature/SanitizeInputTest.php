@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Course;
+use App\Models\Department;
 use App\Models\User;
 use Database\Seeders\PermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -55,16 +56,17 @@ class SanitizeInputTest extends TestCase
     {
         $this->actingAdmin();
         $course = Course::factory()->create();
+        $department = Department::factory()->create();
 
         $response = $this->withApiKey()->postJson('/api/v1/programs', [
-            'name' => 'Engineering',
-            'department' => '<img src=x onerror=alert(1)>Science',
+            'name' => '<img src=x onerror=alert(1)>Engineering',
+            'department_id' => $department->id,
             'code' => 'SAN-02',
             'course_ids' => [$course->id],
         ]);
 
         $response->assertStatus(201);
-        $this->assertSame('Science', $response->json('data.department'));
+        $this->assertSame('Engineering', $response->json('data.name'));
     }
 
     public function test_a_script_tag_in_a_user_name_is_stripped(): void

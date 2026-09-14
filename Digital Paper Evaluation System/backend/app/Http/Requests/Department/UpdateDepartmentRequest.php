@@ -21,7 +21,8 @@ class UpdateDepartmentRequest extends FormRequest
 
         return [
             'name' => ['sometimes', 'required', 'string', 'max:255', Rule::unique('departments', 'name')->ignore($departmentId)->whereNull('deleted_at')],
-            'code' => ['sometimes', 'required', 'string', 'max:50'],
+            // Not required and never unique (by design) — just an optional label.
+            'code' => ['nullable', 'string', 'max:50'],
             'short_description' => ['nullable', 'string', 'max:500'],
             'status' => ['sometimes', 'boolean'],
         ];

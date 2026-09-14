@@ -15,4 +15,6 @@ return [
 
     'super_admin_id' => (int) env('SUPER_ADMIN_ROLE_ID', 1),
 
+    'teacher_id' => (int) env('TEACHER_ROLE_ID', 2),
+
 ];

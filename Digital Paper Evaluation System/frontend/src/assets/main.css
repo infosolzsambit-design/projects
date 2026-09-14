@@ -1,19 +1,623 @@
-@import './base.css';
+@import 'tailwindcss';
 
-#app {
-  font-weight: normal;
+/*
+ * Design tokens ported from designed_files/js/tailwind-config.js (the
+ * designer's Tailwind CDN config for the real "CJ Paper Check" design) —
+ * kept as the single source of truth so every future page pulls the same
+ * palette/gradients/shadows instead of re-guessing hex values.
+ */
+@theme {
+  --font-poppins: 'Poppins', sans-serif;
+
+  --color-brand: #e81b26;
+  --color-brand-blue: #2f56c0;
+  --color-footer: #101412;
+  --color-page-bg: #f0f3f8;
+  --color-input-bg: #f0f3f8;
+  --color-input-border: #dae2f0;
+  --color-label: #a0a7b4;
+  --color-muted: #5b6475;
+  --color-notice: #7a8aa0;
+  --color-soft: #eaf1ff;
+  --color-pending-border: #d6e4f7;
+  --color-badge: #f9a228;
+  --color-support: #6b9bff;
+  --color-success: #22c55e;
+  --color-status-pink: #e8a0b4;
+  --color-chip-border: #c5d6f0;
+
+  --background-image-sidebar-gradient: linear-gradient(184.67deg, #e81b26 -21.23%, #2f56c0 132.72%);
+  --background-image-btn-gradient: linear-gradient(162.6deg, #e81b26 -38.85%, #2f56c0 101.2%);
+  --background-image-support-gradient: linear-gradient(to right, #2f56c0, #6b9bff);
+  --background-image-subject-header: linear-gradient(274deg, #3a4f88 17.76%, #4763b1 85.1%);
+  --background-image-subject: linear-gradient(129.57deg, #3463e4 -3.7%, #3c12a7 106.18%);
+  --background-image-evaluated: linear-gradient(136.35deg, #44e15b -0.23%, #169e2a 98.8%);
+  --background-image-pending: linear-gradient(311.03deg, #f9a228 6.04%, #f9cf28 103.39%);
+  --background-image-aveday: linear-gradient(121.37deg, #bb19e8 -3.67%, #7c1399 95.34%);
+  --background-image-highestday: linear-gradient(136.8deg, #fc19c7 -0.85%, #bb1996 108.39%);
+  --background-image-evaluation: linear-gradient(128.78deg, #34dee4 -3.54%, #3370d3 84.99%);
+  --background-image-report: linear-gradient(310.41deg, #f93228 -20.52%, #f97528 103.12%);
+  --background-image-appointment: linear-gradient(136.8deg, #8319fc -0.85%, #bb19b6 108.39%);
+  --background-image-help: linear-gradient(321.12deg, #b5e526 5.32%, #94c71b 89.55%);
+
+  --shadow-card: 0 18px 50px rgba(47, 86, 192, 0.1);
+  --shadow-panel: 0 10px 30px rgba(0, 0, 0, 0.18);
+  --shadow-field: 0 6px 18px rgba(47, 86, 192, 0.1);
+  --shadow-chip: 0px 17px 18.5px 0px #e4e9f3;
+  --shadow-subject: 0 10px 28px rgba(52, 99, 228, 0.35);
+  --shadow-evaluated: 0 10px 28px rgba(22, 158, 42, 0.35);
+  --shadow-pending: 0 10px 28px rgba(249, 162, 40, 0.35);
+  --shadow-aveday: 0 10px 28px rgba(187, 25, 232, 0.35);
+  --shadow-highestday: 0 10px 28px rgba(252, 25, 199, 0.35);
 }
 
-a,
-.green {
-  text-decoration: none;
-  color: hsla(160, 100%, 37%, 1);
-  transition: 0.4s;
-  padding: 3px;
+body {
+  font-family: var(--font-poppins);
 }
 
-@media (hover: hover) {
-  a:hover {
-    background-color: hsla(160, 100%, 37%, 0.2);
+/*
+ * Tailwind's Preflight resets `button` to the browser's own historical
+ * default (`cursor: default`, i.e. the plain arrow) rather than the hand
+ * cursor most people expect on anything clickable — restored globally here
+ * instead of adding `cursor-pointer` one at a time to every button in the
+ * app. Disabled buttons stay `not-allowed`, matching how disabled controls
+ * already read elsewhere (e.g. .form-switch's own disabled state below).
+ */
+button:not(:disabled),
+[role='button']:not([aria-disabled='true']) {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/*
+ * Sidebar chrome ported from designed_files/css/style.css — the
+ * collapse/expand + off-canvas behavior isn't expressible as Tailwind
+ * utility classes alone, so it lives here as plain CSS. Selectors are
+ * generalized to classes (.sidebar-*) instead of the designer's one-off
+ * ids (#lms-*) since AppSidebar.vue's collapsible group is "Master", not
+ * "LMS". #sidebar / .page-wrapper / #site-footer ids are kept because
+ * they're shared coordination points between AppSidebar.vue and
+ * DashboardLayout.vue.
+ */
+#sidebar {
+  transition: width 0.35s ease, transform 0.35s ease, box-shadow 0.35s ease;
+}
+
+#sidebar:not(.is-ready),
+#sidebar:not(.is-ready) * {
+  transition: none !important;
+}
+
+#sidebar .sidebar-logo-wrap,
+#sidebar nav,
+#sidebar nav a,
+#sidebar nav button,
+#sidebar .sidebar-label,
+#sidebar .sidebar-chevron,
+#sidebar .sidebar-logo-full,
+#sidebar .sidebar-logo-icon {
+  transition:
+    all 0.35s ease,
+    opacity 0.22s ease,
+    transform 0.35s ease;
+}
+
+@media (min-width: 992px) {
+  #sidebar .sidebar-logo-wrap {
+    width: 240px;
+    height: 240px;
+    padding: 0;
+    border-radius: 9999px;
+    top: -120px;
+    left: -40px;
+    margin-bottom: -60px;
   }
+}
+
+#sidebar.is-collapsed {
+  width: 60px;
+}
+
+#sidebar.is-collapsed .sidebar-logo-wrap {
+  height: 70px;
+  width: 60px;
+  border-radius: 0;
+  top: 0 !important;
+  left: 0 !important;
+  margin-bottom: 0 !important;
+  padding: 0.5rem;
+}
+
+#sidebar.is-collapsed .sidebar-logo-wrap > a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+#sidebar.is-collapsed .sidebar-logo-full {
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  position: absolute;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  height: 0 !important;
+  overflow: hidden;
+}
+
+#sidebar.is-collapsed:not(.is-ready) .sidebar-logo-full {
+  display: none !important;
+}
+
+#sidebar.is-collapsed .sidebar-logo-icon {
+  opacity: 1;
+  transform: scale(1);
+  margin: 0 auto;
+}
+
+.sidebar-logo-icon {
+  display: block;
+  opacity: 0;
+  transform: scale(0.85);
+}
+
+#sidebar:not(.is-ready) .sidebar-logo-icon {
+  display: none;
+}
+
+#sidebar.is-collapsed:not(.is-ready) .sidebar-logo-icon {
+  display: block;
+  opacity: 1;
+  transform: none;
+}
+
+#sidebar.is-collapsed .sidebar-label,
+#sidebar.is-collapsed .sidebar-chevron {
+  opacity: 0;
+  transform: translateX(-8px);
+  pointer-events: none;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  margin: 0 !important;
+  overflow: hidden;
+}
+
+#sidebar.is-collapsed:not(.is-ready) .sidebar-label,
+#sidebar.is-collapsed:not(.is-ready) .sidebar-chevron {
+  display: none !important;
+}
+
+#sidebar.is-collapsed nav {
+  padding-left: 6px;
+  padding-right: 6px;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+#sidebar.is-collapsed nav::-webkit-scrollbar {
+  display: none;
+  width: 0;
+}
+
+#sidebar.is-collapsed nav > a,
+#sidebar.is-collapsed nav > button {
+  justify-content: center;
+  align-items: center;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 0;
+  gap: 0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+#sidebar.is-collapsed nav > a svg,
+#sidebar.is-collapsed nav > button svg {
+  margin: 0 auto;
+  flex: 0 0 18px;
+}
+
+#sidebar:not(.is-collapsed) nav a,
+#sidebar:not(.is-collapsed) nav button {
+  justify-content: flex-start;
+}
+
+#sidebar nav a,
+#sidebar nav button {
+  min-height: 44px;
+}
+
+#sidebar .sidebar-label {
+  white-space: nowrap;
+}
+
+#sidebar.is-collapsed .sidebar-submenu {
+  display: none;
+}
+
+@media (min-width: 992px) {
+  #sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 40;
+    height: 100vh;
+    max-height: 100vh;
+  }
+
+  .page-wrapper {
+    padding-left: 60px;
+    transition: padding-left 0.3s ease;
+  }
+
+  .page-wrapper.sidebar-pinned {
+    padding-left: 250px;
+  }
+
+  .page-wrapper #site-footer {
+    margin-left: -60px;
+    width: calc(100% + 60px);
+  }
+
+  .page-wrapper.sidebar-pinned #site-footer {
+    margin-left: -250px;
+    width: calc(100% + 250px);
+  }
+}
+
+@media (max-width: 991px) {
+  #sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 40;
+    height: 100vh;
+    max-height: 100vh;
+    width: 250px !important;
+    transform: translateX(-100%);
+  }
+
+  #sidebar.is-open {
+    transform: translateX(0);
+  }
+}
+
+/*
+ * The rest of designed_files/css/style.css, ported verbatim — these belong
+ * to the Subject List / Profile / Change-Password pages, which don't exist
+ * in this app yet, so they're dormant until those views are built (nothing
+ * currently renders a .subject-chip, #popup-tbody, .profile-field, etc.).
+ */
+.subject-chip {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.subject-chip:hover {
+  transform: translateY(-2px);
+  border-color: #2f56c0;
+}
+
+@media (max-width: 676px) {
+  .subject-chip {
+    flex: 0 0 calc(50% - 6px);
+    max-width: calc(50% - 6px);
+    justify-content: flex-start;
+    padding-left: 6px;
+    padding-right: 6px;
+    white-space: normal;
+  }
+}
+
+#popup-tbody tr {
+  border-bottom: 1px solid #f0f0f0;
+}
+
+#popup-tbody tr:last-child {
+  border-bottom: none;
+}
+
+#popup-tbody td {
+  padding: 14px 20px;
+  font-size: 13px;
+  color: #374151;
+  background: #fff;
+}
+
+#popup-tbody tr:nth-child(even) td {
+  background: #fafafa;
+}
+
+#popup-tbody td:last-child {
+  overflow: visible;
+  position: relative;
+  z-index: 1;
+}
+
+#popup-tbody tr:has(.action-menu:not(.hidden)) td:last-child {
+  z-index: 5;
+}
+
+.action-menu {
+  position: fixed;
+  z-index: 200;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+}
+
+.popup-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 16px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #fff;
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+}
+
+.profile-field[readonly] {
+  cursor: not-allowed;
+  pointer-events: none;
+  color: #6b7280;
+  background-color: #e8edf5 !important;
+  border-color: #d3dce8 !important;
+  box-shadow: none;
+  opacity: 0.85;
+}
+
+.profile-field:not([readonly]) {
+  cursor: text;
+  color: #1f2937;
+  background-color: #ffffff !important;
+  border-color: #dae2f0;
+}
+
+.profile-field:not([readonly]):focus {
+  border-color: #2f56c0 !important;
+  box-shadow: 0 0 0 2px rgba(47, 86, 192, 0.15);
+}
+
+.profile-avatar-upload {
+  z-index: 2;
+}
+
+.camera-video {
+  transform: scaleX(-1);
+}
+
+.camera-flash-active {
+  animation: cameraFlash 0.28s ease-out;
+}
+
+@keyframes cameraFlash {
+  0% {
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.status-gradient-border {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(#ffffff, #ffffff) padding-box,
+    linear-gradient(137.66deg, #e81b26 -6.24%, #2f56c0 100%) border-box;
+}
+
+/*
+ * Native form-control skins ported from designed_files/css/style.css's "Form
+ * demo controls" section — these just restyle plain <input type="checkbox
+ * /radio/range/file/color">, no library involved, so they're safe to have
+ * ready. Deliberately NOT porting that section's Select2 / jQuery UI
+ * Datepicker / jQuery Timepicker rules: this app stays jQuery-free (see
+ * form.html in designed_files), so those class names
+ * (.select2-container--default, .ui-datepicker, .ui-timepicker-wrapper)
+ * will never be produced by anything in this app. When a page needs a
+ * multiselect/date/time picker, it gets a native <input>-based or small
+ * custom Vue component styled to match instead.
+ */
+.form-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+  user-select: none;
+}
+
+.form-checkbox,
+.form-radio {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border: 1.5px solid #dae2f0;
+  background: #fff;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form-checkbox {
+  border-radius: 5px;
+}
+
+.form-radio {
+  border-radius: 9999px;
+}
+
+.form-checkbox:checked,
+.form-radio:checked {
+  border-color: #2f56c0;
+  background-color: #2f56c0;
+  box-shadow: 0 0 0 3px rgba(47, 86, 192, 0.15);
+}
+
+.form-checkbox:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.2'%3E%3Cpolyline points='3.5 8.5 6.5 11.5 12.5 4.5'/%3E%3C/svg%3E");
+  background-size: 12px 12px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.form-radio:checked {
+  background-image: radial-gradient(circle, #fff 0 3px, transparent 3.5px);
+}
+
+.form-checkbox:focus-visible,
+.form-radio:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(47, 86, 192, 0.25);
+}
+
+.form-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.form-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.form-switch-slider {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border-radius: 9999px;
+  background: #dae2f0;
+  flex-shrink: 0;
+  transition: background-color 0.2s ease;
+}
+
+.form-switch-slider::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  transition: transform 0.2s ease;
+}
+
+.form-switch input:checked + .form-switch-slider {
+  background: linear-gradient(162.6deg, #e81b26 -38.85%, #2f56c0 101.2%);
+}
+
+.form-switch input:checked + .form-switch-slider::after {
+  transform: translateX(20px);
+}
+
+.form-switch input:disabled + .form-switch-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.form-switch input:disabled ~ .form-switch-label {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.form-switch-label {
+  font-size: 13px;
+  color: #374151;
+}
+
+.form-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid #dae2f0;
+  background: #f0f3f8;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form-chip:has(.form-checkbox:checked) {
+  border-color: #2f56c0;
+  background: #eaf1ff;
+  box-shadow: 0 0 0 3px rgba(47, 86, 192, 0.1);
+}
+
+.form-range {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  background: #dae2f0;
+  outline: none;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #2f56c0;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 6px rgba(47, 86, 192, 0.35);
+  cursor: pointer;
+}
+
+.form-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #2f56c0;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 6px rgba(47, 86, 192, 0.35);
+  cursor: pointer;
+}
+
+.form-file {
+  padding: 0.5rem 0.65rem;
+  border: 1px dashed #dae2f0;
+  border-radius: 10px;
+  background: #f0f3f8;
+}
+
+.form-color {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.form-color::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-color::-webkit-color-swatch {
+  border: none;
+  border-radius: 10px;
 }

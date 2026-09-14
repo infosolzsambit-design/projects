@@ -8,6 +8,8 @@ use App\Traits\HasUserstamps;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -78,6 +80,26 @@ class User extends Authenticatable implements AuditableContract
     public function guardName(): string
     {
         return 'sanctum';
+    }
+
+    /**
+     * Present only on users created through the Teacher module (see
+     * TeacherController) — a plain user has none.
+     */
+    public function teacherDetail(): HasOne
+    {
+        return $this->hasOne(TeacherDetail::class);
+    }
+
+    /**
+     * Answer sheets this teacher has been assigned to evaluate — see
+     * AssignTeacherService's own docblock. Backs the "Already Allocated"
+     * count/breakdown in AssignTeacherView.vue (TeacherController::index()'s
+     * ->withCount() and TeacherController::assignments()).
+     */
+    public function assignedAnswerSheets(): HasMany
+    {
+        return $this->hasMany(AnswerSheet::class, 'teacher_id');
     }
 
     public function creator(): BelongsTo

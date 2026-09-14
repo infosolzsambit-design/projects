@@ -56,6 +56,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Frontend URL
+    |--------------------------------------------------------------------------
+    |
+    | The Vue SPA's own origin(s) — comma-separated (see config/cors.php,
+    | which reads FRONTEND_URL directly since it needs the full list). This
+    | key exposes just the first/primary one via config() for anything that
+    | needs to build a link back into the SPA, e.g. the password-reset email
+    | (see AppServiceProvider::boot()) — env() itself is off-limits outside
+    | config files once config is cached.
+    |
+    */
+
+    'frontend_url' => rtrim(explode(',', env('FRONTEND_URL', 'http://localhost:5173'))[0], '/'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

@@ -19,13 +19,18 @@ class StoreProgramRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:255'],
-            'department' => ['required', 'string', 'max:255'],
+            // department_id is what's actually selected (a searchable
+            // dropdown sourced from the Department master list); the
+            // `department` name column is resolved from it server-side —
+            // see ProgramController::store().
+            'department_id' => ['required', 'integer', Rule::exists('departments', 'id')->whereNull('deleted_at')],
             // Scoped to non-deleted rows — a soft-deleted program's code is
             // free to be reused (see courses.code for the same fix).
             'code' => ['required', 'string', 'max:50', Rule::unique('programs', 'code')->whereNull('deleted_at')],
             'status' => ['sometimes', 'boolean'],
-            // A program must map to at least one course when created.
-            'course_ids' => ['required', 'array', 'min:1'],
+            // Courses are optional — a program can be created without any
+            // mapped yet and have them added later via update.
+            'course_ids' => ['sometimes', 'array'],
             'course_ids.*' => ['distinct', 'integer', Rule::exists('courses', 'id')->whereNull('deleted_at')],
         ];
     }

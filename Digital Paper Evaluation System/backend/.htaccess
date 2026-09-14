@@ -1,0 +1,11 @@
+# Root-level bridge for shared hosting where digipaperchkapi.campusjadugar.com's
+# document root is this project's root folder (not backend/public/ directly).
+# Without this, Apache has no index file to serve at the root and returns a
+# plain 403 before PHP/Laravel ever runs — every request needs to be handed
+# off to public/, whose own .htaccess (already in place, untouched) does the
+# actual Laravel front-controller rewriting from there.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>

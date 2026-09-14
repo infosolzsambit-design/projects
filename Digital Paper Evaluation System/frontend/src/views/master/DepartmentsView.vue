@@ -1,6 +1,17 @@
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '../../utils/api'
+import { useAuthStore } from '../../stores/auth'
+import { useConfirm } from '../../composables/useConfirm'
+import { useToast } from '../../composables/useToast'
+import Pagination from '../../components/common/Pagination.vue'
+import RowActionMenu from '../../components/common/RowActionMenu.vue'
+
+const router = useRouter()
+const { confirmDialog } = useConfirm()
+const toast = useToast()
+const authStore = useAuthStore()
 
 const departments = ref([])
 const loading = ref(true)
@@ -10,13 +21,6 @@ const search = ref('')
 const statusFilter = ref('') // '' | 'yes' | 'no'
 
 const pagination = reactive({ current_page: 1, per_page: 20, total: 0, last_page: 1 })
-
-const showModal = ref(false)
-const editingDepartment = ref(null) // null = create mode
-const form = reactive({ name: '', code: '', short_description: '', status: true })
-const formError = ref('')
-const saving = ref(false)
-const deletingId = ref(null)
 
 async function fetchDepartments(page = 1) {
   loading.value = true
@@ -36,58 +40,67 @@ async function fetchDepartments(page = 1) {
   }
 }
 
-let searchDebounce = null
-watch(search, () => {
-  clearTimeout(searchDebounce)
-  searchDebounce = setTimeout(() => fetchDepartments(1), 350)
-})
-watch(statusFilter, () => fetchDepartments(1))
-
-function openCreate() {
-  editingDepartment.value = null
-  form.name = ''
-  form.code = ''
-  form.short_description = ''
-  form.status = true
-  formError.value = ''
-  showModal.value = true
+function runSearch() {
+  fetchDepartments(1)
 }
 
-function openEdit(department) {
-  editingDepartment.value = department
-  form.name = department.name
-  form.code = department.code
-  form.short_description = department.short_description || ''
-  form.status = department.status
-  formError.value = ''
-  showModal.value = true
+const statusOptions = [
+  { value: '', label: 'All Status' },
+  { value: 'yes', label: 'Active' },
+  { value: 'no', label: 'Inactive' },
+]
+const showFilter = ref(false)
+function toggleFilter() {
+  showFilter.value = !showFilter.value
+}
+function closeFilter() {
+  showFilter.value = false
+}
+function selectStatus(value) {
+  statusFilter.value = value
+  showFilter.value = false
+  fetchDepartments(1)
+}
+onMounted(() => document.addEventListener('click', closeFilter))
+onBeforeUnmount(() => document.removeEventListener('click', closeFilter))
+
+function goToPage(page) {
+  if (page < 1 || page > pagination.last_page || page === pagination.current_page) return
+  fetchDepartments(page)
 }
 
-function closeModal() {
-  if (saving.value) return
-  showModal.value = false
-}
+const deletingId = ref(null)
+const togglingId = ref(null)
 
-async function submitForm() {
-  saving.value = true
-  formError.value = ''
+async function toggleStatus(department) {
+  togglingId.value = department.id
+  const next = !department.status
   try {
-    if (editingDepartment.value) {
-      await api.put(`/departments/${editingDepartment.value.id}`, form)
-    } else {
-      await api.post('/departments', form)
-    }
-    showModal.value = false
-    await fetchDepartments(pagination.current_page)
+    await api.put(`/departments/${department.id}`, { status: next })
+    department.status = next
+    toast.success(`Department ${next ? 'activated' : 'deactivated'} successfully.`)
   } catch (err) {
-    formError.value = err.response?.data?.message || 'Could not save department.'
+    loadError.value = err.response?.data?.message || 'Could not update department status.'
   } finally {
-    saving.value = false
+    togglingId.value = null
   }
 }
 
+function goToCreate() {
+  router.push({ name: 'master-departments-create' })
+}
+
+function goToEdit(department) {
+  router.push({ name: 'master-departments-edit', params: { id: department.id } })
+}
+
 async function removeDepartment(department) {
-  if (!confirm(`Delete department "${department.name}"? This can be undone by an admin later.`)) return
+  const confirmed = await confirmDialog({
+    title: 'Delete Department',
+    message: `Delete department "${department.name}"? This can be undone by an admin later.`,
+    confirmText: 'Delete',
+  })
+  if (!confirmed) return
   deletingId.value = department.id
   try {
     await api.delete(`/departments/${department.id}`)
@@ -96,6 +109,7 @@ async function removeDepartment(department) {
     } else {
       await fetchDepartments(pagination.current_page)
     }
+    toast.success('Department deleted successfully.')
   } catch (err) {
     loadError.value = err.response?.data?.message || 'Could not delete department.'
   } finally {
@@ -103,401 +117,191 @@ async function removeDepartment(department) {
   }
 }
 
-function goToPage(page) {
-  if (page < 1 || page > pagination.last_page || page === pagination.current_page) return
-  fetchDepartments(page)
-}
-
-onMounted(() => fetchDepartments(1))
+// Guards against a false "no permission" flash on a hard refresh — see
+// CoursesView.vue for why.
+const permissionChecked = ref(false)
+onMounted(async () => {
+  if (!authStore.user) await authStore.fetchMe().catch(() => {})
+  permissionChecked.value = true
+  if (authStore.can('department-list')) fetchDepartments(1)
+})
 </script>
 
 <template>
-  <section class="departments-page">
-    <div class="page-header">
-      <div>
-        <h1>Departments</h1>
-        <p class="hint">Master data &mdash; manage the list of departments available across the system.</p>
+  <p v-if="!permissionChecked" class="text-center text-sm text-muted py-10">Loading&hellip;</p>
+  <div v-else-if="!authStore.can('department-list')" class="bg-white rounded-2xl shadow-panel p-10 text-center">
+    <p class="text-[15px] font-semibold text-gray-900">You don't have permission to view this page.</p>
+    <p class="mt-1 text-[13px] text-muted">Contact an administrator if you think this is a mistake.</p>
+  </div>
+  <div v-else>
+    <!-- Breadcrumb + page action -->
+    <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-5 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <RouterLink to="/dashboard" class="inline-flex items-center gap-2 text-[13px] sm:text-sm text-gray-700 hover:text-brand-blue">
+          <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5z" /></svg>
+          Home
+        </RouterLink>
+        <span class="w-px h-4 bg-gray-300 shrink-0"></span>
+        <span class="text-[13px] sm:text-sm text-gray-700">Department List</span>
       </div>
-      <button class="primary-btn" @click="openCreate">+ Add Department</button>
-    </div>
-
-    <div class="toolbar">
-      <input v-model="search" type="text" placeholder="Search by name, code or description…" class="search-input" />
-      <select v-model="statusFilter" class="status-select">
-        <option value="">All Status</option>
-        <option value="yes">Active</option>
-        <option value="no">Inactive</option>
-      </select>
-    </div>
-
-    <p v-if="loadError" class="error-banner">{{ loadError }}</p>
-
-    <div class="table-card">
-      <table class="departments-table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Code</th>
-            <th>Description</th>
-            <th>Status</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="loading">
-            <td colspan="5" class="empty-cell">Loading&hellip;</td>
-          </tr>
-          <tr v-else-if="!departments.length">
-            <td colspan="5" class="empty-cell">No departments found.</td>
-          </tr>
-          <tr v-for="department in departments" :key="department.id" v-else>
-            <td>{{ department.name }}</td>
-            <td><code>{{ department.code }}</code></td>
-            <td class="description-cell" :title="department.short_description">
-              {{ department.short_description || '—' }}
-            </td>
-            <td>
-              <span class="badge" :class="department.status ? 'active' : 'inactive'">
-                {{ department.status ? 'Active' : 'Inactive' }}
-              </span>
-            </td>
-            <td class="actions-cell">
-              <button class="link-btn" @click="openEdit(department)">Edit</button>
-              <button
-                class="link-btn danger"
-                :disabled="deletingId === department.id"
-                @click="removeDepartment(department)"
-              >
-                {{ deletingId === department.id ? 'Deleting…' : 'Delete' }}
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div v-if="pagination.last_page > 1" class="pagination">
-      <button :disabled="pagination.current_page <= 1" @click="goToPage(pagination.current_page - 1)">
-        &larr; Prev
-      </button>
-      <span>Page {{ pagination.current_page }} of {{ pagination.last_page }} &middot; {{ pagination.total }} total</span>
-      <button :disabled="pagination.current_page >= pagination.last_page" @click="goToPage(pagination.current_page + 1)">
-        Next &rarr;
-      </button>
-    </div>
-
-    <div v-if="showModal" class="modal-backdrop" @click.self="closeModal">
-      <div class="modal-card">
-        <h2>{{ editingDepartment ? 'Edit Department' : 'Add Department' }}</h2>
-
-        <form @submit.prevent="submitForm">
-          <label>
-            Name
-            <input v-model="form.name" type="text" required autofocus />
-          </label>
-
-          <label>
-            Code
-            <input v-model="form.code" type="text" required />
-          </label>
-
-          <label>
-            Short Description
-            <textarea v-model="form.short_description" rows="3" maxlength="500"></textarea>
-          </label>
-
-          <label class="status-toggle">
-            <input v-model="form.status" type="checkbox" />
-            Active
-          </label>
-
-          <p v-if="formError" class="error-msg">{{ formError }}</p>
-
-          <div class="modal-actions">
-            <button type="button" class="secondary-btn" :disabled="saving" @click="closeModal">Cancel</button>
-            <button type="submit" class="primary-btn" :disabled="saving">
-              {{ saving ? 'Saving…' : 'Save' }}
-            </button>
-          </div>
-        </form>
+      <div v-if="authStore.can('department-add')" class="flex items-center gap-2">
+        <RouterLink
+          :to="{ name: 'master-departments-bulk-upload' }"
+          class="h-8 shrink-0 inline-flex items-center justify-center gap-2 rounded-xl border border-input-border bg-white text-[13px] font-semibold text-gray-700 px-4 sm:px-5 hover:border-brand-blue hover:text-brand-blue transition-colors"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+          Bulk Upload
+        </RouterLink>
+        <button
+          type="button"
+          class="h-8 shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-btn-gradient text-white text-[13px] font-semibold px-4 sm:px-5 hover:opacity-90 transition-opacity"
+          @click="goToCreate"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+          Add Department
+        </button>
       </div>
     </div>
-  </section>
+
+    <p v-if="loadError" class="text-[13px] text-brand mb-4">{{ loadError }}</p>
+
+    <!-- Section title bar, matching designed_files/subject-list.html's
+         colored info bar directly above its table — search/filter live here
+         on the right, same as the reference's "Available : 37" pill. -->
+    <section class="relative bg-subject-header rounded-t-2xl rounded-b-none px-4 sm:px-5 py-4 mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <span class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
+          <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <ellipse cx="12" cy="5" rx="9" ry="3" />
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+            <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" />
+          </svg>
+        </span>
+        <h2 class="text-white text-[16px] sm:text-lg font-medium truncate">All Departments</h2>
+      </div>
+      <div class="flex items-center gap-2" @click.stop>
+        <span class="inline-flex items-center rounded-[10px] bg-white/15 text-white text-[11px] sm:text-[12px] px-3.5 py-2 shrink-0 whitespace-nowrap">Total : {{ pagination.total }}</span>
+        <input
+          v-model="search"
+          type="text"
+          placeholder="Search departments…"
+          class="w-full sm:w-56 h-10 px-3.5 rounded-lg bg-white text-sm text-gray-800 outline-none border border-transparent focus:border-white/60 transition"
+          @keyup.enter="runSearch"
+        />
+        <button
+          type="button"
+          class="h-10 w-10 shrink-0 rounded-lg bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors"
+          aria-label="Search"
+          @click="runSearch"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+        </button>
+        <button
+          type="button"
+          class="h-10 shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[13px] font-medium px-3.5 transition-colors"
+          :aria-expanded="showFilter"
+          @click="toggleFilter"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+          Filter
+        </button>
+        <div
+          v-show="showFilter"
+          class="absolute right-4 sm:right-5 top-full mt-2 w-40 bg-white rounded-xl shadow-panel border border-soft py-1.5 z-30 text-left"
+        >
+          <button
+            v-for="option in statusOptions"
+            :key="option.value"
+            type="button"
+            class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] transition-colors"
+            :class="statusFilter === option.value ? 'text-brand-blue font-semibold bg-soft' : 'text-gray-700 hover:bg-soft hover:text-brand-blue'"
+            @click="selectStatus(option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Table -->
+    <section class="overflow-hidden rounded-2xl shadow-panel">
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[620px] text-left">
+          <thead>
+            <tr class="bg-subject-header text-white text-[13px] font-medium">
+              <th class="px-4 py-3.5 font-medium rounded-tl-2xl">#</th>
+              <th class="px-4 py-3.5 font-medium">Name</th>
+              <th class="px-4 py-3.5 font-medium">Code</th>
+              <th class="px-4 py-3.5 font-medium" v-if="authStore.can('department-status-change')">Status</th>
+              <th class="px-4 py-3.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('department-edit') || authStore.can('department-delete')">Action</th>
+            </tr>
+          </thead>
+          <tbody class="bg-white">
+            <tr v-if="loading">
+              <td colspan="5" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
+            </tr>
+            <tr v-else-if="!departments.length">
+              <td colspan="5" class="px-4 py-8 text-center text-sm text-muted">No departments found.</td>
+            </tr>
+            <tr
+              v-for="(department, index) in departments"
+              v-else
+              :key="department.id"
+              class="text-[13px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0"
+            >
+              <td class="px-4 py-3.5">
+                <span class="inline-flex items-center justify-center min-w-[46px] rounded-md status-gradient-border px-2 py-1.5 text-[12px] font-medium">
+                  # {{ (pagination.current_page - 1) * pagination.per_page + index + 1 }}
+                </span>
+              </td>
+              <td class="px-4 py-3.5 font-semibold">{{ department.name }}</td>
+              <td class="px-4 py-3.5">{{ department.code || '—' }}</td>
+              <td v-if="authStore.can('department-status-change')" class="px-4 py-3.5" @click.stop>
+                <button
+                  type="button"
+                  role="switch"
+                  :aria-checked="department.status"
+                  :disabled="togglingId === department.id"
+                  :title="department.status ? 'Click to deactivate' : 'Click to activate'"
+                  class="relative inline-flex items-center w-24 h-8 rounded-full text-[12px] font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  :class="department.status ? 'bg-btn-gradient text-white justify-start pl-3 pr-7' : 'bg-gray-300 text-gray-600 justify-end pl-7 pr-3'"
+                  @click="toggleStatus(department)"
+                >
+                  <span>{{ department.status ? 'Active' : 'Inactive' }}</span>
+                  <span
+                    class="absolute top-[7px] left-[7px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform duration-200"
+                    :class="department.status ? 'translate-x-16' : 'translate-x-0'"
+                  ></span>
+                </button>
+              </td>
+              <td v-if="authStore.can('department-edit') || authStore.can('department-delete')" class="px-4 py-3.5 text-center relative" @click.stop>
+                <RowActionMenu>
+                  <button v-if="authStore.can('department-edit')" type="button" class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors" @click="goToEdit(department)">
+                    Edit
+                  </button>
+                  <button
+                    v-if="authStore.can('department-delete')"
+                    type="button"
+                    class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand transition-colors disabled:opacity-50"
+                    :disabled="deletingId === department.id"
+                    @click="removeDepartment(department)"
+                  >
+                    {{ deletingId === department.id ? 'Deleting…' : 'Delete' }}
+                  </button>
+                </RowActionMenu>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Pagination -->
+    <Pagination
+      :current-page="pagination.current_page"
+      :last-page="pagination.last_page"
+      :total="pagination.total"
+      @change="goToPage"
+    />
+  </div>
 </template>
-
-<style scoped>
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.75rem;
-  flex-wrap: wrap;
-}
-
-.page-header h1 {
-  font-size: 1.5rem;
-  color: var(--color-heading);
-}
-
-.hint {
-  color: var(--color-text);
-  opacity: 0.7;
-  font-size: 0.9rem;
-  margin-top: 0.3rem;
-}
-
-.primary-btn {
-  padding: 0.6rem 1.3rem;
-  border: none;
-  border-radius: 8px;
-  background: hsla(160, 100%, 37%, 1);
-  color: white;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.primary-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.primary-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.toolbar {
-  display: flex;
-  gap: 0.75rem;
-  margin-bottom: 1.25rem;
-  flex-wrap: wrap;
-}
-
-.search-input {
-  flex: 1;
-  min-width: 220px;
-  padding: 0.6rem 0.85rem;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-background-soft);
-  color: var(--color-text);
-}
-
-.status-select {
-  padding: 0.6rem 0.85rem;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-background-soft);
-  color: var(--color-text);
-}
-
-.error-banner {
-  color: #e57373;
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
-}
-
-.table-card {
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.departments-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.departments-table th {
-  text-align: left;
-  padding: 0.75rem 1rem;
-  background: var(--color-background-soft);
-  color: var(--color-heading);
-  font-size: 0.85rem;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.departments-table td {
-  padding: 0.7rem 1rem;
-  border-bottom: 1px solid var(--color-border);
-  font-size: 0.92rem;
-}
-
-.departments-table tr:last-child td {
-  border-bottom: none;
-}
-
-.departments-table code {
-  background: var(--color-background-soft);
-  padding: 0.15rem 0.4rem;
-  border-radius: 4px;
-}
-
-.description-cell {
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text);
-  opacity: 0.85;
-  font-size: 0.85rem;
-}
-
-.empty-cell {
-  text-align: center;
-  padding: 2rem;
-  opacity: 0.6;
-}
-
-.badge {
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 600;
-}
-
-.badge.active {
-  background: hsla(160, 100%, 37%, 0.15);
-  color: hsla(160, 100%, 30%, 1);
-}
-
-.badge.inactive {
-  background: hsla(0, 70%, 50%, 0.12);
-  color: hsl(0, 70%, 45%);
-}
-
-.actions-cell {
-  text-align: right;
-  white-space: nowrap;
-}
-
-.link-btn {
-  border: none;
-  background: transparent;
-  color: hsla(160, 100%, 37%, 1);
-  font-weight: 600;
-  font-size: 0.85rem;
-  cursor: pointer;
-  padding: 0.2rem 0.5rem;
-}
-
-.link-btn.danger {
-  color: hsl(0, 70%, 50%);
-}
-
-.link-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.pagination {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  margin-top: 1.25rem;
-  font-size: 0.85rem;
-}
-
-.pagination button {
-  padding: 0.4rem 0.9rem;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-background-soft);
-  color: var(--color-text);
-  cursor: pointer;
-}
-
-.pagination button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-
-.modal-card {
-  background: var(--color-background);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  padding: 1.75rem;
-  width: 420px;
-  max-width: 90vw;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
-}
-
-.modal-card h2 {
-  color: var(--color-heading);
-  font-size: 1.15rem;
-  margin-bottom: 1.25rem;
-}
-
-.modal-card form {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.modal-card label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  font-weight: 600;
-  color: var(--color-heading);
-  font-size: 0.88rem;
-}
-
-.modal-card input[type='text'],
-.modal-card textarea {
-  font-weight: normal;
-  font-family: inherit;
-  padding: 0.55rem 0.75rem;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-background-soft);
-  color: var(--color-text);
-  resize: vertical;
-}
-
-.status-toggle {
-  flex-direction: row !important;
-  align-items: center;
-  gap: 0.5rem !important;
-}
-
-.error-msg {
-  color: #e57373;
-  font-size: 0.85rem;
-  margin: 0;
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.6rem;
-  margin-top: 0.25rem;
-}
-
-.secondary-btn {
-  padding: 0.6rem 1.2rem;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--color-text);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.secondary-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-</style>

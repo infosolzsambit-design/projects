@@ -27,6 +27,7 @@ class Program extends Model implements AuditableContract
     protected $fillable = [
         'name',
         'department',
+        'department_id',
         'code',
         'status',
     ];
@@ -44,6 +45,14 @@ class Program extends Model implements AuditableContract
     public function courses(): BelongsToMany
     {
         return $this->belongsToMany(Course::class, 'program_course_mappings');
+    }
+
+    // No database foreign key (project-wide rule) — `department` still
+    // holds the department's name as a denormalized copy for listing/search,
+    // this relation is just for convenience when the live record is needed.
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(Department::class);
     }
 
     public function creator(): BelongsTo

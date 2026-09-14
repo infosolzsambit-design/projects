@@ -63,12 +63,28 @@ class DepartmentController extends Controller
             return $this->success($departments, 'Departments fetched successfully.');
         }
 
+        // Searches every column the list actually shows (see
+        // DepartmentsView.vue's table: Name, Code, Status) plus
+        // short_description (filterable but not itself a shown column,
+        // left as-is from before) — "Active"/"Inactive" match the boolean
+        // `status` column since that's how it's displayed.
         if ($request->filled('search')) {
             $search = $request->string('search')->toString();
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
                     ->orWhere('code', 'like', "%{$search}%")
                     ->orWhere('short_description', 'like', "%{$search}%");
+                // Prefix match, not "contains" — "active" is itself a
+                // substring of "inactive" ("in-active"), so a naive
+                // stripos() on either word would make searching "active"
+                // wrongly match inactive rows too.
+                $needle = strtolower($search);
+                if (str_starts_with('active', $needle)) {
+                    $q->orWhere('status', true);
+                }
+                if (str_starts_with('inactive', $needle)) {
+                    $q->orWhere('status', false);
+                }
             });
         }
 

@@ -30,5 +30,20 @@ class RoleSeeder extends Seeder
         // Gate::before already grants Super Admin every ability, but the
         // role's own permission list should still reflect that explicitly.
         $role->syncPermissions(Permission::withTrashed()->pluck('id')->all());
+
+        $teacherId = (int) config('roles.teacher_id');
+        $teacherRole = Role::withTrashed()->find($teacherId);
+
+        if (! $teacherRole) {
+            // No permissions synced yet — permission gating for the Teacher
+            // role is deferred until permissions are set up per module.
+            Role::forceCreate([
+                'id' => $teacherId,
+                'name' => 'Teacher',
+                'guard_name' => $guard,
+            ]);
+        } elseif ($teacherRole->trashed()) {
+            $teacherRole->restore();
+        }
     }
 }

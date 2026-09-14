@@ -62,6 +62,18 @@ class DepartmentManagementTest extends TestCase
         $response->assertStatus(422)->assertJsonValidationErrors('name');
     }
 
+    public function test_code_is_optional(): void
+    {
+        $this->actingAdmin();
+
+        $response = $this->withApiKey()->postJson('/api/v1/departments', [
+            'name' => 'No Code Department',
+        ]);
+
+        $response->assertStatus(201)->assertJsonPath('data.code', null);
+        $this->assertDatabaseHas('departments', ['name' => 'No Code Department', 'code' => null]);
+    }
+
     public function test_department_code_does_not_need_to_be_unique(): void
     {
         $this->actingAdmin();

@@ -1,10 +1,19 @@
 <!DOCTYPE html>
-<html lang="">
+<html lang="en">
   <head>
     <meta charset="UTF-8">
-    <link rel="icon" href="/favicon.ico">
+    <link rel="icon" type="image/png" href="/images/logo-image.png">
+    <link rel="apple-touch-icon" href="/images/logo-image.png">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vite App</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Static pre-mount fallback only — App.vue takes over document.title
+         the moment Vue boots, using the live site_title from General
+         Settings (see stores/branding.js), falling back to "Paper Check"
+         if that's not set either. This just needs to match that fallback
+         so there's no flash of a different title before then. -->
+    <title>Paper Check</title>
   </head>
   <body>
     <div id="app"></div>

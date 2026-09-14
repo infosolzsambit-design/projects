@@ -20,6 +20,7 @@ class ProgramResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'department' => $this->department,
+            'department_id' => $this->department_id,
             'code' => $this->code,
             'status' => (bool) $this->status,
             // Always eager-loaded as courses:id,name,code (see

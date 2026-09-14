@@ -21,7 +21,8 @@ class StoreDepartmentRequest extends FormRequest
             // Scoped to non-deleted rows — a soft-deleted department's name
             // is free to be reused (see courses.code for the same fix).
             'name' => ['required', 'string', 'max:255', Rule::unique('departments', 'name')->whereNull('deleted_at')],
-            'code' => ['required', 'string', 'max:50'],
+            // Not required and never unique (by design) — just an optional label.
+            'code' => ['nullable', 'string', 'max:50'],
             'short_description' => ['nullable', 'string', 'max:500'],
             'status' => ['sometimes', 'boolean'],
         ];

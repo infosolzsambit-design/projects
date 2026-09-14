@@ -6,12 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Program\StoreProgramRequest;
 use App\Http\Requests\Program\UpdateProgramRequest;
 use App\Http\Resources\ProgramResource;
+use App\Models\Department;
 use App\Models\Program;
 use App\Services\AuditLogService;
 use App\Traits\ApiResponse;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 // NOTE: no permission gating yet — every authenticated user (auth:sanctum,
@@ -69,12 +71,31 @@ class ProgramController extends Controller
             return $this->success($programs, 'Programs fetched successfully.');
         }
 
+        // Searches every column the list actually shows (see
+        // ProgramsView.vue's table: Name, Department, Code, Courses,
+        // Status) rather than just name/department/code — "Active"/
+        // "Inactive" match the boolean `status` column since that's how
+        // it's displayed, and a mapped course's name/code match too.
         if ($request->filled('search')) {
             $search = $request->string('search')->toString();
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
                     ->orWhere('department', 'like', "%{$search}%")
-                    ->orWhere('code', 'like', "%{$search}%");
+                    ->orWhere('code', 'like', "%{$search}%")
+                    ->orWhereHas('courses', function ($cq) use ($search) {
+                        $cq->where('name', 'like', "%{$search}%")->orWhere('code', 'like', "%{$search}%");
+                    });
+                // Prefix match, not "contains" — "active" is itself a
+                // substring of "inactive" ("in-active"), so a naive
+                // stripos() on either word would make searching "active"
+                // wrongly match inactive rows too.
+                $needle = strtolower($search);
+                if (str_starts_with('active', $needle)) {
+                    $q->orWhere('status', true);
+                }
+                if (str_starts_with('inactive', $needle)) {
+                    $q->orWhere('status', false);
+                }
             });
         }
 
@@ -160,20 +181,36 @@ class ProgramController extends Controller
     {
         $data = $request->validated();
         $data['status'] ??= true;
-        $courseIds = $data['course_ids'];
+        // Courses are optional at creation — no course_ids at all just
+        // means the program starts out with none mapped.
+        $courseIds = $data['course_ids'] ?? [];
         unset($data['course_ids']);
 
-        $program = Program::create($data);
-        $program->courses()->sync($courseIds);
+        // department_id is what's actually selected (a searchable dropdown
+        // sourced from the Department master list — see
+        // TeacherController::store() for the identical pattern); `department`
+        // is kept alongside as the name at the time it was picked, so
+        // listing/search/exports never need to join out to departments.
+        $data['department'] = Department::find($data['department_id'])->name;
 
-        $this->auditLog->log(
-            event: 'courses-synced',
-            module: 'Program Management',
-            description: 'Courses mapped to newly created program.',
-            auditable: $program,
-            newValues: ['course_ids' => $courseIds],
-            tags: ['course-mapping'],
-        );
+        // The program row and its course pivot rows must land together —
+        // a sync() failure after create() would otherwise leave an orphan
+        // program with no courses mapped and no audit trail of it either.
+        $program = DB::transaction(function () use ($data, $courseIds) {
+            $program = Program::create($data);
+            $program->courses()->sync($courseIds);
+
+            $this->auditLog->log(
+                event: 'courses-synced',
+                module: 'Program Management',
+                description: 'Courses mapped to newly created program.',
+                auditable: $program,
+                newValues: ['course_ids' => $courseIds],
+                tags: ['course-mapping'],
+            );
+
+            return $program;
+        });
 
         return $this->success(new ProgramResource($program->load('courses')), 'Program created successfully.', 201);
     }
@@ -187,25 +224,35 @@ class ProgramController extends Controller
     {
         $data = $request->validated();
 
-        if (array_key_exists('course_ids', $data)) {
-            $courseIds = $data['course_ids'];
-            unset($data['course_ids']);
+        // The pivot sync and the program's own column update must land
+        // together — same reasoning as store() above.
+        DB::transaction(function () use ($program, $data) {
+            if (array_key_exists('course_ids', $data)) {
+                $courseIds = $data['course_ids'];
+                unset($data['course_ids']);
 
-            $before = $program->courses()->pluck('courses.id')->all();
-            $program->courses()->sync($courseIds);
+                $before = $program->courses()->pluck('courses.id')->all();
+                $program->courses()->sync($courseIds);
 
-            $this->auditLog->log(
-                event: 'courses-synced',
-                module: 'Program Management',
-                description: 'Courses mapped to program updated.',
-                auditable: $program,
-                oldValues: ['course_ids' => $before],
-                newValues: ['course_ids' => $courseIds],
-                tags: ['course-mapping'],
-            );
-        }
+                $this->auditLog->log(
+                    event: 'courses-synced',
+                    module: 'Program Management',
+                    description: 'Courses mapped to program updated.',
+                    auditable: $program,
+                    oldValues: ['course_ids' => $before],
+                    newValues: ['course_ids' => $courseIds],
+                    tags: ['course-mapping'],
+                );
+            }
 
-        $program->update($data);
+            if (array_key_exists('department_id', $data)) {
+                // Re-derive the denormalized name from whatever department was
+                // actually (re-)selected, same as store().
+                $data['department'] = Department::find($data['department_id'])->name;
+            }
+
+            $program->update($data);
+        });
 
         return $this->success(new ProgramResource($program->fresh()->load('courses')), 'Program updated successfully.');
     }

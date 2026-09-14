@@ -2,17 +2,18 @@
 import { ref, shallowRef, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePapersStore } from '../stores/papers'
-import { useTeacherStore } from '../stores/teacher'
 import { loadPdf, renderPageToCanvas } from '../utils/pdf'
 import { questionScheme, maxTotalMarks } from '../data/questionScheme'
-import FaceScanModal from '../components/FaceScanModal.vue'
 
 // Teacher-facing marking screen. Must never read papersStore.studentMap —
-// the paper is identified only by its QR / Serial number (paper.id).
+// the paper is identified only by its QR / Serial number (paper.id). This
+// whole screen is a client-only demo (papersStore is in-memory, nothing
+// here is sent to a server) kept separate from the real question-paper/
+// answer-sheet features — no face-scan gate before starting/finishing a
+// check, unlike a real checking flow might want.
 const route = useRoute()
 const router = useRouter()
 const papersStore = usePapersStore()
-const teacherStore = useTeacherStore()
 
 const paper = computed(() => papersStore.paperById(route.params.id))
 const pageNumbers = computed(() => Array.from({ length: paper.value?.pageCount || 0 }, (_, i) => i + 1))
@@ -68,10 +69,6 @@ const elapsedSeconds = ref(0)
 let timerInterval = null
 let checkingStartTimestamp = null
 
-// --- face-scan gate: teacher must match their registered profile before
-// they can start checking, and again before they can finish. ---
-const faceScanPurpose = ref(null) // null | 'start' | 'finish'
-
 function startTimer() {
   checkingStartTimestamp = Date.now()
   elapsedSeconds.value = 0
@@ -95,18 +92,11 @@ const elapsedDisplay = computed(() => {
 })
 
 function requestStartChecking() {
-  faceScanPurpose.value = 'start'
+  startChecking()
 }
 
 function requestFinishChecking() {
-  faceScanPurpose.value = 'finish'
-}
-
-function onFaceMatched() {
-  const purpose = faceScanPurpose.value
-  faceScanPurpose.value = null
-  if (purpose === 'start') startChecking()
-  else if (purpose === 'finish') finishChecking()
+  finishChecking()
 }
 
 function startChecking() {
@@ -485,7 +475,6 @@ watch(
     scale.value = 1
     rotation.value = 0
     checkingStarted.value = false
-    faceScanPurpose.value = null
     stopTimer()
     elapsedSeconds.value = 0
     loadCurrentPaper()
@@ -628,26 +617,11 @@ watch(
     <div v-if="!checkingStarted" class="start-gate-overlay">
       <div class="start-gate-card">
         <h1>Paper {{ paper.id }}</h1>
-        <template v-if="teacherStore.isRegistered">
-          <p>Verify your face to start checking this paper. This starts the checking timer.</p>
-          <button class="cta" @click="requestStartChecking">Start Checking</button>
-        </template>
-        <template v-else>
-          <p class="warn-text">
-            You need to register your face before you can check papers.
-          </p>
-          <RouterLink to="/teacher/register" class="cta">Register Now</RouterLink>
-        </template>
+        <p>Start checking this paper. This starts the checking timer.</p>
+        <button class="cta" @click="requestStartChecking">Start Checking</button>
         <RouterLink to="/review" class="back-link">&larr; Back to list</RouterLink>
       </div>
     </div>
-
-    <FaceScanModal
-      v-if="faceScanPurpose"
-      :title="faceScanPurpose === 'start' ? 'Verify Your Face to Start Checking' : 'Verify Your Face to Finish Checking'"
-      @matched="onFaceMatched"
-      @cancel="faceScanPurpose = null"
-    />
 
     <p v-if="saved" class="saved-toast">✅ Saved (dummy &mdash; in-memory only, not sent to a server).</p>
   </section>

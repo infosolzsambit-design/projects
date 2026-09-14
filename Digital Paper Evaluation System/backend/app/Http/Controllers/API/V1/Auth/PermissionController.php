@@ -39,13 +39,25 @@ class PermissionController extends Controller implements HasMiddleware
             (int) config('pagination.max_per_page'),
         ));
 
-        $query = Permission::query();
+        $query = Permission::query()->with(['group:id,name,sort_order', 'subGroup:id,name,sort_order']);
 
         if ($search = $request->string('search')->toString()) {
             $query->where('name', 'like', "%{$search}%");
         }
 
-        $permissions = $query->orderBy('name')->paginate($perPage);
+        $query->orderBy('id', 'desc');
+
+        // ?status=all → every matching permission, unpaginated (same escape
+        // hatch as the Master-module controllers) — needed by pickers like
+        // RoleFormView's permission checklist, which need the *whole* list,
+        // not just what fits under max_per_page.
+        if ($request->string('status')->toString() === 'all') {
+            $permissions = $query->get();
+
+            return $this->success(PermissionResource::collection($permissions), 'Permissions retrieved successfully.');
+        }
+
+        $permissions = $query->paginate($perPage);
 
         return $this->paginated($permissions, 'Permissions retrieved successfully.', PermissionResource::collection($permissions));
     }
@@ -55,21 +67,23 @@ class PermissionController extends Controller implements HasMiddleware
         $permission = Permission::create([
             'name' => $request->validated('name'),
             'guard_name' => config('auth.defaults.guard'),
+            'permission_group_id' => $request->validated('permission_group_id'),
+            'permission_sub_group_id' => $request->validated('permission_sub_group_id'),
         ]);
 
-        return $this->success(new PermissionResource($permission), 'Permission created successfully.', 201);
+        return $this->success(new PermissionResource($permission->load(['group:id,name,sort_order', 'subGroup:id,name,sort_order'])), 'Permission created successfully.', 201);
     }
 
     public function show(Permission $permission): JsonResponse
     {
-        return $this->success(new PermissionResource($permission), 'Permission retrieved successfully.');
+        return $this->success(new PermissionResource($permission->load(['group:id,name,sort_order', 'subGroup:id,name,sort_order'])), 'Permission retrieved successfully.');
     }
 
     public function update(UpdatePermissionRequest $request, Permission $permission): JsonResponse
     {
-        $permission->update(['name' => $request->validated('name')]);
+        $permission->update($request->validated());
 
-        return $this->success(new PermissionResource($permission->fresh()), 'Permission updated successfully.');
+        return $this->success(new PermissionResource($permission->fresh()->load(['group:id,name,sort_order', 'subGroup:id,name,sort_order'])), 'Permission updated successfully.');
     }
 
     public function destroy(Permission $permission): JsonResponse

@@ -18,6 +18,12 @@ export const useAuthStore = defineStore('auth', {
 
   getters: {
     isAuthenticated: (state) => !!state.token,
+
+    // UI-only show/hide check (no route/middleware gating reads this) —
+    // e.g. v-if="authStore.can('admin-dashboard')". Backed by
+    // `permission_names`, the effective (direct + role-derived) set the
+    // backend computes in AuthController::withEffectivePermissions().
+    can: (state) => (permissionName) => (state.user?.permission_names || []).includes(permissionName),
   },
 
   actions: {

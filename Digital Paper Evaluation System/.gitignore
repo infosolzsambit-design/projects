@@ -1,5 +1,6 @@
 # Laravel
 backend/.env
+backend/.env_server
 backend/vendor/
 backend/storage/logs/*
 backend/storage/framework/cache/*
