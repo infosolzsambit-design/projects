@@ -101,16 +101,20 @@ function isDraft(paper) {
 // Evaluation" click, inside FaceScanModal itself once matched, is what
 // actually proceeds — see onFaceScanMatched()) — or "Continue Evaluate"
 // once a draft already exists, so it's clear there's work waiting rather
-// than a blank sheet. One that hasn't opened yet stays clickable but only
-// as far as the "coming soon" placeholder below (the real scoring screen
-// doesn't exist yet either way); one that's closed is disabled outright —
-// there's nothing left to do with it here.
+// than a blank sheet. Every other state is disabled outright, not just
+// 'closed': a window that hasn't opened yet ('upcoming') or was never
+// scheduled at all ('unscheduled' — no evaluation_start_date/end_date on
+// the sheet) has nothing real to evaluate against yet, so clicking
+// through would only ever reach EvaluatePaperView.vue's own gate anyway —
+// disabling it here instead is the honest state, not a dead end dressed
+// up as a live button.
 function paperAction(paper) {
   const { state } = paperTimeStatus(paper)
-  if (state === 'closed') return { label: 'Evaluation Closed', disabled: true }
-  if (checkingEvaluationId.value === paper.id) return { label: 'Checking…', disabled: true }
   if (state === 'active') return { label: isDraft(paper) ? 'Continue Evaluate' : 'Start Evaluate', disabled: false }
-  return { label: 'Evaluate', disabled: false }
+  if (checkingEvaluationId.value === paper.id) return { label: 'Checking…', disabled: true }
+  if (state === 'closed') return { label: 'Evaluation Closed', disabled: true }
+  if (state === 'upcoming') return { label: 'Not Yet Available', disabled: true }
+  return { label: 'Not Scheduled', disabled: true } // 'unscheduled'
 }
 
 const courses = ref([])
