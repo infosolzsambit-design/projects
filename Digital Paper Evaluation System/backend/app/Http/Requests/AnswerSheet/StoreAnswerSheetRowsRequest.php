@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\AnswerSheet;
 
+use App\Http\Controllers\API\V1\QuestionAnswerSheetMappingController;
 use App\Models\AnswerSheet;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Validator;
@@ -140,13 +141,33 @@ class StoreAnswerSheetRowsRequest extends FormRequest
 
             $rollNos = collect($rows)->pluck('roll_no')->filter()->all();
 
+            // Scoped to every mapping sharing this exact packet combination
+            // (program_name/packet_code/question_paper_id/course_id/
+            // exam_term_id/exam_type_id/semester), not just this one mapping
+            // id — the same combination can legitimately be uploaded as more
+            // than one packet (see QuestionAnswerSheetMappingController::
+            // store()), and a QR code must be unique across all of them
+            // together. The same barcode reused under a *different*
+            // combination is fine; see that controller's
+            // checkDuplicateBarcodes() for the client-side pre-check this
+            // mirrors.
+            $siblingMappingIds = QuestionAnswerSheetMappingController::siblingMappingIds([
+                'program_name' => $mapping->program_name,
+                'packet_code' => $mapping->packet_code,
+                'question_paper_id' => $mapping->question_paper_id,
+                'course_id' => $mapping->course_id,
+                'exam_term_id' => $mapping->exam_term_id,
+                'exam_type_id' => $mapping->exam_type_id,
+                'semester' => $mapping->semester,
+            ]);
+
             $existingBarcodes = AnswerSheet::withTrashed()
-                ->where('question_answer_sheet_mapping_id', $mapping->id)
+                ->whereIn('question_answer_sheet_mapping_id', $siblingMappingIds)
                 ->whereIn('subject_barcode', $rowBarcodes)
                 ->pluck('subject_barcode')
                 ->all();
             if ($existingBarcodes) {
-                $v->errors()->add('rows', 'Already used earlier in this same upload: '.implode(', ', $existingBarcodes).'.');
+                $v->errors()->add('rows', 'QR code already uploaded for this Program/Packet Code/Question Paper/Course/Exam Term/Semester combination: '.implode(', ', $existingBarcodes).'.');
             }
 
             $existingRollNos = AnswerSheet::withTrashed()

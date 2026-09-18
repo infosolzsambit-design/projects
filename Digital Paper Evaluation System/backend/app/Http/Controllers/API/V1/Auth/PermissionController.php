@@ -45,6 +45,13 @@ class PermissionController extends Controller implements HasMiddleware
             $query->where('name', 'like', "%{$search}%");
         }
 
+        if ($request->filled('permission_group_id')) {
+            $query->where('permission_group_id', $request->integer('permission_group_id'));
+        }
+        if ($request->filled('permission_sub_group_id')) {
+            $query->where('permission_sub_group_id', $request->integer('permission_sub_group_id'));
+        }
+
         $query->orderBy('id', 'desc');
 
         // ?status=all → every matching permission, unpaginated (same escape

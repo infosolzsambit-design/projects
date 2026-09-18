@@ -2,12 +2,18 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
+import { useExamYearStore } from '../../stores/examYear'
+import { useExamTypeStore } from '../../stores/examType'
 import { useSidebar } from '../../composables/useSidebar'
 import ChangePasswordModal from '../common/ChangePasswordModal.vue'
 
 const authStore = useAuthStore()
+const examYearStore = useExamYearStore()
+const examTypeStore = useExamTypeStore()
 const router = useRouter()
 const { isOpen, isPinned, toggle } = useSidebar()
+
+onMounted(() => examTypeStore.load())
 
 const userMenuOpen = ref(false)
 const userMenuRoot = ref(null)
@@ -50,25 +56,31 @@ async function logout() {
         </svg>
       </button>
 
-      <!-- Season / Exam filters — kept for visual fidelity with the design;
-           no backend concept of "season"/"exam" exists yet, so these are
-           inert single-option selects for now. -->
-      <!-- <div class="flex items-center gap-2 sm:gap-4 md:gap-6 ml-auto mr-2 sm:mr-4 min-w-0">
+      <!-- Examination (Exam Type — real now, see stores/examType.js; scopes
+           My Pending Course, My Completed Course, Assigned Teacher List,
+           and Admin Dashboard) / Exam Year (see stores/examYear.js; scopes
+           Question Papers, Assigned Teacher List, and My Pending Course).
+           Same "defaults for a non-super-admin, freely pickable for a
+           super admin" shape as Exam Year, enforced server-side by
+           HasExamTypeScope — this picker is a convenience, not the gate. -->
+      <div class="flex items-center gap-2 sm:gap-4 md:gap-6 ml-auto mr-2 sm:mr-4 min-w-0">
         <div class="flex items-center gap-1.5 sm:gap-2 min-w-0">
-          <label for="season-select" class="hidden sm:flex items-center gap-1.5 text-[13px] text-gray-500 whitespace-nowrap">
+          <label for="examination-select" class="hidden sm:flex items-center gap-1.5 text-[13px] text-gray-500 whitespace-nowrap">
             <svg class="w-4 h-4 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="10" />
               <polyline points="12 6 12 12 16 14" />
             </svg>
-            Season
+            Examination
           </label>
           <div class="relative">
             <select
-              id="season-select"
-              class="appearance-none bg-white border border-input-border rounded-md py-1.5 pl-2 sm:pl-3 pr-7 sm:pr-8 text-[12px] sm:text-[13px] cursor-pointer w-[78px] sm:min-w-[100px] sm:w-auto focus:outline-none focus:border-brand-blue"
-              aria-label="Season"
+              id="examination-select"
+              :value="examTypeStore.selectedId"
+              class="appearance-none bg-white border border-input-border rounded-md py-1.5 pl-2 sm:pl-3 pr-7 sm:pr-8 text-[12px] sm:text-[13px] cursor-pointer w-[110px] sm:min-w-[130px] sm:w-auto focus:outline-none focus:border-brand-blue"
+              aria-label="Examination"
+              @change="examTypeStore.setType($event.target.value)"
             >
-              <option selected>SO24</option>
+              <option v-for="type in examTypeStore.types" :key="type.id" :value="type.id">{{ type.name }}</option>
             </select>
             <svg
               class="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none"
@@ -87,15 +99,17 @@ async function logout() {
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
               <polyline points="14 2 14 8 20 8" />
             </svg>
-            Exam
+            Exam Year
           </label>
           <div class="relative">
             <select
               id="exam-select"
+              :value="examYearStore.selectedYear"
               class="appearance-none bg-white border border-input-border rounded-md py-1.5 pl-2 sm:pl-3 pr-7 sm:pr-8 text-[12px] sm:text-[13px] cursor-pointer w-[88px] sm:min-w-[100px] sm:w-auto focus:outline-none focus:border-brand-blue"
-              aria-label="Exam"
+              aria-label="Exam Year"
+              @change="examYearStore.setYear($event.target.value)"
             >
-              <option selected>Regular</option>
+              <option v-for="year in examYearStore.years" :key="year" :value="year">{{ year }}</option>
             </select>
             <svg
               class="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none"
@@ -108,7 +122,7 @@ async function logout() {
             </svg>
           </div>
         </div>
-      </div> -->
+      </div>
 
       <div ref="userMenuRoot" class="relative">
         <button

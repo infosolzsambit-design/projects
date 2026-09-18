@@ -21,8 +21,11 @@ const router = createRouter({
     // full viewport (no sidebar/header/footer chrome eating into it), same
     // as login/reset-password above. Still auth-gated (requiresAuth isn't
     // inherited here since there's no shared parent route to carry it).
-    // `token` is the sheet's id run through utils/obfuscateId.js, not the
-    // raw id itself — see that file's own docblock for what that is/isn't.
+    // `token` is a one-time evaluation_token minted fresh by
+    // MyPendingCourseController::startEvaluation() on every "Start
+    // Evaluate" click, not this sheet's own id — a copied/bookmarked link
+    // stops working once it expires or a later click supersedes it (see
+    // that controller's own docblock).
     {
       path: '/my-pending-courses/:token/evaluate',
       name: 'evaluate-paper',
@@ -120,6 +123,18 @@ const router = createRouter({
           meta: { title: 'Assigned Teacher List' },
         },
         {
+          path: 'reports/teacher-wise-evaluation',
+          name: 'reports-teacher-wise-evaluation',
+          component: () => import('../views/reports/TeacherWiseEvaluationReportView.vue'),
+          meta: { title: 'Teacher Wise Evaluation Report' },
+        },
+        {
+          path: 'reports/answer-book-top-sheet',
+          name: 'reports-answer-book-top-sheet',
+          component: () => import('../views/reports/AnswerBookTopSheetReportView.vue'),
+          meta: { title: 'Evaluation Answer Book / Top Sheet Report' },
+        },
+        {
           path: 'upload',
           name: 'upload',
           component: () => import('../views/UploadView.vue'),
@@ -150,10 +165,22 @@ const router = createRouter({
           meta: { title: 'Students' },
         },
         {
+          path: 'notifications',
+          name: 'notifications',
+          component: () => import('../views/NotificationsView.vue'),
+          meta: { title: 'Notifications' },
+        },
+        {
           path: 'my-pending-courses',
           name: 'my-pending-courses',
           component: () => import('../views/MyPendingCoursesView.vue'),
           meta: { title: 'My Pending Course' },
+        },
+        {
+          path: 'my-completed-courses',
+          name: 'my-completed-courses',
+          component: () => import('../views/MyCompletedCoursesView.vue'),
+          meta: { title: 'My Completed Course' },
         },
         {
           path: 'students/create',
@@ -270,6 +297,12 @@ const router = createRouter({
           meta: { title: 'Edit Permission' },
         },
         {
+          path: 'configurations/email-logs',
+          name: 'configurations-email-logs',
+          component: () => import('../views/configurations/EmailLogsView.vue'),
+          meta: { title: 'Email Logs' },
+        },
+        {
           path: 'master/courses',
           name: 'master-courses',
           component: () => import('../views/master/CoursesView.vue'),
@@ -358,6 +391,24 @@ const router = createRouter({
           name: 'master-exam-terms-edit',
           component: () => import('../views/master/ExamTermFormView.vue'),
           meta: { title: 'Edit Exam Term' },
+        },
+        {
+          path: 'master/exam-types',
+          name: 'master-exam-types',
+          component: () => import('../views/master/ExamTypesView.vue'),
+          meta: { title: 'Exam Types' },
+        },
+        {
+          path: 'master/exam-types/create',
+          name: 'master-exam-types-create',
+          component: () => import('../views/master/ExamTypeFormView.vue'),
+          meta: { title: 'Add Exam Type' },
+        },
+        {
+          path: 'master/exam-types/:id/edit',
+          name: 'master-exam-types-edit',
+          component: () => import('../views/master/ExamTypeFormView.vue'),
+          meta: { title: 'Edit Exam Type' },
         },
       ],
     },

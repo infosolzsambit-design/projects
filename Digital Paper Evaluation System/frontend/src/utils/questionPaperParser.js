@@ -18,8 +18,33 @@ import { extractDocumentLines, extractDocumentLinesViaOCR } from './pdf'
 
 const GROUP_HEADER_RE = /^group[\s\-–—:]*([a-z0-9]+)\b/i
 const OR_LINE_RE = /^or$/i
-const MAIN_NUM_RE = /^(\d{1,3})[.)]\s*(.*)$/
-const ROMAN_SUB_RE = /^([ivx]{1,6})[.)]\s*(.*)$/i
+// 1-2 digits, not 3 — a real exam paper is never 100+ questions long, and
+// allowing 3 let stray numeric residue from wrapped body text (e.g. an OCR
+// line break landing right after "...Sales Price 700)" mid-sentence) get
+// misread as a genuine bare question-number header, corrupting every
+// sub-part line that followed it (see parseGroupBody()'s own
+// usingCombinedSubScheme for the other half of that same class of bug).
+const MAIN_NUM_RE = /^(\d{1,2})[.)]\s*(.*)$/
+// A leading "(" is optional — some papers print "i)", others "(i)" (see
+// designed_files/question_paper_2.pdf's Group A) — both close on ")" or ".".
+const ROMAN_SUB_RE = /^\(?([ivx]{1,6})[.)]\s*(.*)$/i
+// A *second*, distinct sub-part convention some papers use instead of
+// roman numerals: "3. a)", "8.b)", "9.a)" — a lowercase letter glued
+// straight onto the main number, always on the same line (see
+// question_paper_2.pdf's Group B/C). Every lettered part sharing one main
+// number is a required part of that *one* question (e.g. "3.a)"+"3.b)"
+// are both required parts of question 3, wrapped together — see
+// parseGroupBody()'s own letterRunMain/finalizeLetterMain() below, which
+// is also where a *second* run under the same number — a whole
+// alternative *set* — gets handled). Checked only after ROMAN_SUB_RE
+// fails, so an unavoidably-ambiguous single letter like "i)" still
+// resolves as roman first — the far more common convention when either
+// reading is possible.
+// "¢" also accepted for the letter itself — Tesseract frequently misreads
+// a lowercase "c" right after a period as the cent sign (their shapes are
+// close: a vertical stroke through a "c"), e.g. "8.¢)" for "8.c)" — see
+// normalizeOcrLetter() below, applied only to this one captured character.
+const LETTER_SUB_RE = /^\(?([a-z¢])[.)]\s*(.*)$/i
 const FULL_MARKS_RE = /full\s*marks\s*[:\-]?\s*(\d{1,4})/i
 const TIME_ALLOTTED_RE = /time\s*allotted\s*[:\-]?\s*(\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?))/i
 // Covers common real-world phrasings: "10 out of 12", "any 5 out of 7
@@ -29,17 +54,67 @@ const TIME_ALLOTTED_RE = /time\s*allotted\s*[:\-]?\s*(\d+(?:\.\d+)?\s*(?:hours?|
 const CHOOSE_OUT_OF_RE = /(?:answer|attempt|choose|do|solve)?\s*(?:any\s+)?(\d+)\s*(?:questions?)?\s*(?:out\s*of|from\s*among|from|of)\s*(?:the\s+)?(?:following\s+)?(\d+)/i
 const CHOOSE_SIMPLE_RE = /(?:answer|attempt|choose|do|solve)\s+(?:any\s+)?(\d+)\b/i
 const MARKS_EACH_RE = /(\d+)\s*marks?\s*each|each\s*(?:question\s*)?carr(?:y|ies)\s*(\d+)\s*marks?/i
-const INLINE_MARKS_RE = /[[(]\s*(\d+)\s*(?:marks?)?\s*[\])]\s*$/i
+// A group's own opening instruction sentence ("Answer all the following
+// questions. Each question carries 2 marks.") is frequently printed with
+// a leading "1." of its own (see designed_files/question_paper_2.pdf's
+// Group A) — structurally identical to a real "1. <question text>" line,
+// but it isn't one: the real numbered content is the roman sub-parts that
+// follow. Checked against a mainMatch's own trailing text in
+// parseGroupBody()'s instruction-collection loop below, so this boilerplate
+// keeps being treated as more instruction text instead of prematurely
+// ending that loop and getting swallowed whole as a bogus "question 1".
+const GROUP_INSTRUCTION_BOILERPLATE_RE = /^answer\s+(all|any)\b/i
+// A per-question marks value that trails the whole line in plain brackets,
+// e.g. "...Rate of Depreciation. [5]" or "(5 marks)" — paper_1's own style.
+// Allows a "+"-summed value too ("(2+3)"), same as MARKS_AFTER_BLOOM_RE
+// below, for a paper that prints the split without a K-tag right before it.
+const INLINE_MARKS_RE = /[[(]\s*([\d+\s]+?)\s*(?:marks?)?\s*[\])]\s*$/i
 // Many papers print two extra columns per question: a Bloom's Taxonomy
 // level (K1, K2, ...) and a Course Outcome (CO1, CO2, ...) — see
-// designed_files/question_paper.pdf's right-hand columns. Both are
+// designed_files/question_paper_1.pdf's right-hand columns. Both are
 // optional per QuestionPaperNode; only ever filled in here when the text
-// actually has them, never guessed.
-const BLOOM_LEVEL_RE = /\bK\s*([1-6])\b/i
-const CO_RE = /\bCO\s*(\d{1,2})\b/i
+// actually has them, never guessed. The captured digit also accepts OCR's
+// most common digit/letter confusions (l/I for 1, O/o for 0 — e.g. "COl"
+// misread for "CO1") — see normalizeOcrDigit() below, applied to the
+// capture only, never to the surrounding real text.
+const BLOOM_LEVEL_RE = /\bK\s*([1-6lI])\b/i
+const CO_RE = /\bCO\s*([0-9lIOo]{1,2})\b/i
+// A marks value (or a "2+3"-style split of it — see designed_files/
+// question_paper_2.pdf's Group C, "K4 (3+3)" meaning one question worth
+// two parts of 3 marks each, summed here to 6) printed in parens right
+// after the Bloom tag — this paper's own convention for where per-question
+// marks actually live, distinct from paper_1's plain trailing-bracket
+// style (INLINE_MARKS_RE above), and checked first since it's the more
+// precisely-anchored of the two.
+const MARKS_AFTER_BLOOM_RE = /\bK\s*[1-6lI]\s*\(\s*([\d+\s]+?)\s*\)/i
 // Positional fallback labels for a choose-cluster's children — see
 // flushCluster() below.
 const ORDINAL_ROMANS = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x']
+
+// Tesseract's single most common failure mode on these short, all-caps
+// tags is confusing 1/l/I and 0/O/o — normalizes just a captured tag
+// value (never a whole line) before it's used as a real digit.
+function normalizeOcrDigit(token) {
+  return token.replace(/[lI]/g, '1').replace(/[Oo]/g, '0')
+}
+
+// See LETTER_SUB_RE's own docblock — "¢" is the one confusable this
+// covers so far, added only once actually seen misread this way.
+function normalizeOcrLetter(ch) {
+  return ch === '¢' ? 'c' : ch.toLowerCase()
+}
+
+// Sums a "3+3" (or plain "6") marks capture into one number — null if
+// nothing numeric survived (rather than 0, which would read as a real,
+// deliberately-zero-mark question).
+function sumMarksText(raw) {
+  const total = raw
+    .split('+')
+    .map((part) => Number(part.trim()))
+    .filter((n) => !Number.isNaN(n))
+    .reduce((a, b) => a + b, 0)
+  return total || null
+}
 
 /** Pulls Full Marks / Time Allotted off the paper's own header text, if present. */
 export function parseHeaderFields(lines) {
@@ -53,14 +128,23 @@ export function parseHeaderFields(lines) {
 }
 
 function leafFrom(localLabel, trailingText, defaultMarks) {
+  // Most-precisely-anchored first: a marks value sitting right after the
+  // Bloom tag (possibly a "3+3" split, summed) beats a bare trailing
+  // bracket, which in turn beats the group instruction's own default.
+  const afterBloomMatch = trailingText.match(MARKS_AFTER_BLOOM_RE)
   const inlineMatch = trailingText.match(INLINE_MARKS_RE)
   const bloomMatch = trailingText.match(BLOOM_LEVEL_RE)
   const coMatch = trailingText.match(CO_RE)
+  const marks = afterBloomMatch
+    ? sumMarksText(afterBloomMatch[1])
+    : inlineMatch
+      ? sumMarksText(inlineMatch[1])
+      : null
   return {
     localLabel,
-    marks: inlineMatch ? Number(inlineMatch[1]) : (defaultMarks || ''),
-    bloom_level: bloomMatch ? `K${bloomMatch[1]}` : '',
-    co: coMatch ? `CO${coMatch[1]}` : '',
+    marks: marks ?? (defaultMarks || ''),
+    bloom_level: bloomMatch ? `K${normalizeOcrDigit(bloomMatch[1])}` : '',
+    co: coMatch ? `CO${normalizeOcrDigit(coMatch[1])}` : '',
   }
 }
 
@@ -98,8 +182,36 @@ function wrapperChildLabel(mainLabel, item, idx) {
 function parseGroupBody(label, body) {
   let i = 0
   const instructionLines = []
-  while (i < body.length && !MAIN_NUM_RE.test(body[i]) && !ROMAN_SUB_RE.test(body[i]) && !OR_LINE_RE.test(body[i])) {
-    instructionLines.push(body[i])
+  // Once the instruction already reads as a complete "answer all/any ...
+  // N marks" sentence, stop collecting more lines into it even if the
+  // very next line doesn't look like a recognized question marker — a
+  // real question's own OCR sometimes loses its marker entirely (a whole
+  // digit misread away, not just a stray character normalizeOcrDigit/
+  // normalizeOcrLetter can fix), and without this cap that line would
+  // otherwise just keep getting silently absorbed as more "instruction"
+  // text forever, quietly merging an unrelated real question into the
+  // group's own instruction field instead of being left alone for the
+  // reviewer to notice and re-add by hand (see "+ Add Question").
+  const instructionLooksComplete = () => {
+    const text = instructionLines.join(' ')
+    return GROUP_INSTRUCTION_BOILERPLATE_RE.test(text) && /\d+\s*marks?\b/i.test(text)
+  }
+  while (i < body.length) {
+    const line = body[i]
+    // See GROUP_INSTRUCTION_BOILERPLATE_RE's own docblock — a mainMatch
+    // whose own trailing text is itself instruction boilerplate is more
+    // instruction text, not the real first question; strip the leading
+    // "1." noise off before keeping it, same as every other instruction
+    // line collected here.
+    const boilerplateMatch = line.match(MAIN_NUM_RE)
+    if (boilerplateMatch && GROUP_INSTRUCTION_BOILERPLATE_RE.test(boilerplateMatch[2].trim()) && !instructionLooksComplete()) {
+      instructionLines.push(boilerplateMatch[2].trim())
+      i++
+      continue
+    }
+    if (MAIN_NUM_RE.test(line) || ROMAN_SUB_RE.test(line) || OR_LINE_RE.test(line)) break
+    if (instructionLooksComplete()) break
+    instructionLines.push(line)
     i++
   }
   const instruction = instructionLines.join(' ').replace(/\s+/g, ' ').trim()
@@ -119,11 +231,69 @@ function parseGroupBody(label, body) {
   let currentMain = null // last bare leading number seen, e.g. the "1." a run of roman sub-parts hangs off of
   let pendingCluster = null // { mainLabel, items: [{localLabel, marks}], hadOr } — see buildLeafLabel above
   let orPending = false // an "OR" line was just seen — the next item joins the cluster flagged as a real alternative, not just another required part
+  // True whenever the most recently seen main-numbered line already
+  // carried real content of its own (i.e. wasn't a bare "1." header with
+  // sub-parts still to come) — reset fresh at every mainMatch, not latched
+  // for the whole group, since one question in a group being self-
+  // contained must never suppress a *different* question in that same
+  // group that genuinely is a bare header (see the mainMatch branch below
+  // for where this is set).
+  //
+  // Combined with a *parenthesized* bare roman line specifically (see the
+  // romanMatch branch below), this tells apart two things that look
+  // identical in isolation:
+  //  - designed_files/question_paper_1.pdf's own "5) 1) Journalise the
+  //    followings" going on to list four parenthesized "(i)"/"(ii)"/
+  //    "(iii)"/"(iv)" *examples* — part of that one already-self-contained
+  //    question's own text, not four more questions to score separately.
+  //  - that same paper's "9) 1) ... OR ... ii) Cash in Hand..." — a
+  //    genuine second alternative for question 9, arriving as its own
+  //    bare (not parenthesized) roman line with no leading number of its
+  //    own, exactly like the roman-numeral fallback below already expects.
+  // A parenthesized roman line when nothing self-contained precedes it at
+  // all (e.g. Group A's own "(i)"-"(x)", each a real separate question)
+  // is never suppressed by this — usingCombinedSubScheme stays false for
+  // a true bare "N." header the whole way through its own sub-parts.
+  let usingCombinedSubScheme = false
+  // mainLabel -> index into `children`, for every cluster already flushed —
+  // lets a key that reappears *after* its first cluster was already
+  // flushed (the next paragraph below) merge into that same child instead
+  // of becoming a bogus, wrongly-duplicate-labeled sibling.
+  const flushedIndexByKey = new Map()
 
+  // A cluster is normally only ever built once per key (see addItem below)
+  // — but OCR on a scanned paper frequently loses the literal "OR" row
+  // between a question and its alternative entirely (a thin, centered,
+  // low-text row is exactly the kind of table row line-detection most
+  // often drops), which would otherwise silently orphan that alternative
+  // as if it were an unrelated question sharing the same number. Since a
+  // real paper never reuses a question number for anything *but* an
+  // alternative (see this function's own long-standing assumption below),
+  // a key showing up again after its first cluster already flushed is
+  // itself enough evidence of a lost "OR" — no literal "OR" text required.
   function flushCluster() {
     if (!pendingCluster) return
     const { mainLabel, items, hadOr } = pendingCluster
-    if (items.length === 1) {
+    pendingCluster = null
+
+    if (flushedIndexByKey.has(mainLabel)) {
+      const idx = flushedIndexByKey.get(mainLabel)
+      const existing = children[idx]
+      const existingChildren = existing.mode === 'leaf'
+        ? [{ label: wrapperChildLabel(mainLabel, { localLabel: mainLabel }, 0), mode: 'leaf', marks: existing.marks, bloom_level: existing.bloom_level, co: existing.co }]
+        : existing.children
+      const newChildren = items.map((item, idx2) => ({
+        label: wrapperChildLabel(mainLabel, item, existingChildren.length + idx2),
+        mode: 'leaf',
+        marks: item.marks,
+        bloom_level: item.bloom_level,
+        co: item.co,
+      }))
+      children[idx] = { label: mainLabel, mode: 'choose', choose_count: 1, children: [...existingChildren, ...newChildren] }
+      return
+    }
+
+    if (items.length === 1 && !hadOr) {
       const item = items[0]
       children.push({ label: buildLeafLabel(mainLabel, item), mode: 'leaf', marks: item.marks, bloom_level: item.bloom_level, co: item.co })
     } else {
@@ -138,7 +308,7 @@ function parseGroupBody(label, body) {
         children: items.map((item, idx) => ({ label: wrapperChildLabel(mainLabel, item, idx), mode: 'leaf', marks: item.marks, bloom_level: item.bloom_level, co: item.co })),
       })
     }
-    pendingCluster = null
+    flushedIndexByKey.set(mainLabel, children.length - 1)
   }
 
   // Every item sharing the same leading number merges into one cluster,
@@ -162,6 +332,103 @@ function parseGroupBody(label, body) {
     orPending = false
   }
 
+  // Lettered items (LETTER_SUB_RE) get their own tracking, separate from
+  // addItem()/flushCluster() above — a *run* of ascending letters under one
+  // main number ("6.a)", "6.b)", "6.c)") is one coherent set, but the
+  // *whole run* can itself have an OR alternative — a second, later run
+  // under the *same* main number whose lettering restarts (e.g. "6.a)",
+  // "6.b)" again — see designed_files/question_paper_2.pdf's own Group B,
+  // where OCR dropped the literal "OR" row between the two sets the same
+  // way it drops other "OR" rows, same reasoning as flushCluster()'s own
+  // docblock above). That's a fundamentally different shape than the
+  // roman convention's own alternatives (one question with several
+  // one-letter alternatives) — here it's *two entire sets* of separate
+  // questions, one of which is answered instead of the other — so this
+  // deliberately does NOT go through the generic per-key merge above,
+  // which would instead (wrongly) pair up "6.a)" with the *other* run's
+  // "6.a)" one letter at a time, and likewise for "6.b)", producing two
+  // bogus single-letter "choose" questions instead of two real multi-part
+  // ones. A restart is detected purely from the letters going
+  // non-ascending (next letter <= the last one already in this run) —
+  // no literal "OR" needed, same "a repeat is itself the evidence" logic
+  // flushCluster() already relies on.
+  let letterRunMain = null // the main number the run in progress belongs to
+  let letterRunLastLetter = null
+  let letterRunItems = [] // [{ letter, item }] for the run currently being built
+  let pendingLetterRuns = null // completed runs for letterRunMain, not yet written to `children`
+
+  function finalizeLetterMain() {
+    if (letterRunItems.length) {
+      pendingLetterRuns = pendingLetterRuns || []
+      pendingLetterRuns.push(letterRunItems)
+      letterRunItems = []
+    }
+    if (pendingLetterRuns && pendingLetterRuns.length === 1) {
+      // Exactly one run ever seen for this main number — every lettered
+      // part shares that number and is required together as one combined
+      // question (e.g. "3.a)"+"3.b)" are both required parts of question
+      // 3, not two unrelated questions that happen to be numbered
+      // similarly) — wrapped in an "all required" parent labeled with the
+      // bare number, same shape as a multi-run main number's own each-run
+      // sub-group below. A run of exactly one part (no real "a)"/"b)"
+      // split ever happened — a plain "4." with nothing after the number
+      // but a lone lettered line) has nothing to group, so it just stays
+      // that one flat leaf.
+      const run = pendingLetterRuns[0]
+      if (run.length === 1) {
+        const { item } = run[0]
+        children.push({ label: item.localLabel, mode: 'leaf', marks: item.marks, bloom_level: item.bloom_level, co: item.co })
+      } else {
+        children.push({
+          label: letterRunMain,
+          mode: 'all',
+          children: run.map(({ letter, item }) => ({ label: letter, mode: 'leaf', marks: item.marks, bloom_level: item.bloom_level, co: item.co })),
+        })
+      }
+    } else if (pendingLetterRuns && pendingLetterRuns.length > 1) {
+      // 2+ runs for this main number — the whole *set* has an alternative
+      // (see this function's own docblock), not any one lettered item
+      // within it — expressed as a "choose 1" wrapper around each run's
+      // own sub-group (this data model already supports a choose node's
+      // children being sub-groups rather than bare leaves — see
+      // QuestionPaperStructureBuilder.vue's own nested pool support).
+      // Each run is itself unlabeled/anonymous (nothing in the paper names
+      // "the first alternative" vs "the second"), so it gets the same
+      // positional "i"/"ii"/... fallback wrapperChildLabel() already uses
+      // for any other anonymous alternative — composing to a display
+      // prefix like "6) i) a", "6) ii) a", not a confusing doubled "6) 6)".
+      //
+      // A run's own sub-group is 'choose' (of *all* its own parts, e.g.
+      // "3 of 3") rather than 'all' whenever it has 2+ parts — not because
+      // picking a subset ever makes sense here, but because slotCount()
+      // (see utils/questionPaperNode.js) treats a nested 'all' node as a
+      // *poolable* sub-group and sums its own children's slots into the
+      // outer choose's total (right for that pooled-cross-group feature,
+      // wrong here — these two runs are two whole, mutually-exclusive
+      // *alternatives*, not one shared pool to pick individual parts
+      // from, so the outer "6" must read "choose 1 of 2", not "of 5"). A
+      // 'choose' node, whatever it wraps, always counts as exactly one
+      // slot to slotCount() — which is also exactly what's wanted here.
+      // Only usable once the run has 2+ parts, though — 'choose' itself
+      // requires at least two options; a single-part run keeps 'all'
+      // (already contributes exactly 1 slot on its own, no fix needed).
+      children.push({
+        label: letterRunMain,
+        mode: 'choose',
+        choose_count: 1,
+        children: pendingLetterRuns.map((run, idx) => {
+          const runChildren = run.map(({ letter, item }) => ({ label: letter, mode: 'leaf', marks: item.marks, bloom_level: item.bloom_level, co: item.co }))
+          return run.length > 1
+            ? { label: ORDINAL_ROMANS[idx] || String(idx + 1), mode: 'choose', choose_count: run.length, children: runChildren }
+            : { label: ORDINAL_ROMANS[idx] || String(idx + 1), mode: 'all', children: runChildren }
+        }),
+      })
+    }
+    pendingLetterRuns = null
+    letterRunMain = null
+    letterRunLastLetter = null
+  }
+
   for (; i < body.length; i++) {
     const line = body[i]
     if (OR_LINE_RE.test(line)) {
@@ -172,19 +439,64 @@ function parseGroupBody(label, body) {
     const mainMatch = line.match(MAIN_NUM_RE)
     if (mainMatch) {
       currentMain = mainMatch[1]
+      // Re-evaluated per question, not latched for the rest of the group —
+      // see this variable's own docblock above.
+      usingCombinedSubScheme = false
       const rest = mainMatch[2].trim()
       if (!rest) continue // bare leading number ("1.") — sub-parts follow as separate roman-numeral lines below
+      usingCombinedSubScheme = true
       const restRoman = rest.match(ROMAN_SUB_RE)
+      const restLetter = !restRoman && rest.match(LETTER_SUB_RE)
       if (restRoman) {
+        finalizeLetterMain() // switching away from the letter scheme, if this group was even using it
         addItem(currentMain, leafFrom(restRoman[1], restRoman[2], defaultMarks))
+      } else if (restLetter) {
+        // See letterRunMain's own docblock above for why lettered items
+        // are tracked separately from addItem()/flushCluster() — but any
+        // *other* cluster still pending from before this group switched
+        // into the letter scheme must still be flushed now, in document
+        // order, or it would only get pushed to `children` later (whenever
+        // some *other* addItem() call happens to flush it), landing after
+        // items that actually appeared later in the paper.
+        flushCluster()
+        const letter = normalizeOcrLetter(restLetter[1])
+        const combinedKey = `${currentMain}.${letter}`
+        const item = leafFrom(combinedKey, restLetter[2], defaultMarks)
+
+        if (letterRunMain !== null && letterRunMain !== currentMain) finalizeLetterMain()
+        letterRunMain = currentMain
+
+        if (letterRunLastLetter !== null && letter <= letterRunLastLetter) {
+          // Non-ascending letter = a restart = a new alternative run for
+          // this same main number (see letterRunMain's own docblock).
+          pendingLetterRuns = pendingLetterRuns || []
+          pendingLetterRuns.push(letterRunItems)
+          letterRunItems = []
+        }
+        letterRunItems.push({ letter, item })
+        letterRunLastLetter = letter
+        // A restart is itself the OR evidence this scheme relies on (see
+        // letterRunMain's own docblock) — an actual "OR" line, if one did
+        // survive OCR, must not then also leak into whatever *unrelated*
+        // question comes after this whole letter-scheme run ends (addItem()
+        // already clears this same flag for the generic/roman path; this
+        // branch bypasses addItem() entirely, so it has to clear it too).
+        orPending = false
       } else {
+        finalizeLetterMain()
         addItem(currentMain, leafFrom(currentMain, rest, defaultMarks))
       }
       continue
     }
 
     const romanMatch = line.match(ROMAN_SUB_RE)
-    if (romanMatch) {
+    // A *parenthesized* bare roman line ("(i)") while the current question
+    // is already self-contained is an illustrative example, not a new
+    // question — a non-parenthesized one ("ii)") always still counts,
+    // since that's the shape a genuine unlabeled-number OR-alternative
+    // continuation actually takes (see usingCombinedSubScheme's own
+    // docblock for both real cases this tells apart).
+    if (romanMatch && !(usingCombinedSubScheme && line.trim().startsWith('('))) {
       // A roman-lettered sub-part with no leading number ever seen in this
       // group (OCR often drops or garbles a bare "1." header line even
       // though the printed paper has one) — every group of this style seen
@@ -196,17 +508,22 @@ function parseGroupBody(label, body) {
     }
 
     // Anything else (wrapped continuation text, a taxonomy/CO tag column,
-    // a nested "(i) ..." example list inside one question, page footers) is
-    // not a new question line — skip it rather than guess. But if an "OR"
-    // was just seen and this line reads like a real sentence (not short
-    // OCR noise, e.g. a stray "|"), the alternative itself was unlabeled —
-    // e.g. "viii) State reason for issue of Shares. Or What are the main
-    // type of shares...?" has no roman marker of its own. Clear orPending
-    // here so it doesn't wrongly carry forward and merge the next
-    // genuinely separate numbered question into this one's cluster.
+    // a nested "(i) ..." example list inside one question, page footers,
+    // or — once usingCombinedSubScheme is set — a bare roman-looking line
+    // that's really just an illustrative sub-list inside one already-
+    // numbered question's own body) is not a new question line — skip it
+    // rather than guess.
+    // But if an "OR" was just seen and this line reads like a real
+    // sentence (not short OCR noise, e.g. a stray "|"), the alternative
+    // itself was unlabeled — e.g. "viii) State reason for issue of Shares.
+    // Or What are the main type of shares...?" has no roman marker of its
+    // own. Clear orPending here so it doesn't wrongly carry forward and
+    // merge the next genuinely separate numbered question into this one's
+    // cluster.
     if (orPending && line.length > 15) orPending = false
   }
   flushCluster()
+  finalizeLetterMain()
 
   return { label, instruction, mode, choose_count, children }
 }

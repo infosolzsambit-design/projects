@@ -16,30 +16,43 @@
 // time (see saveDraft()) — "Complete" (icon rail) is the one action that
 // actually finalizes. Once the evaluation window's own time budget runs
 // out (isOvertime), every input locks — marks fields, annotation tools,
-// undo/redo — Complete is the only thing left to click, and at that point
-// it bypasses the completeness checks below entirely (there's nothing
-// left the teacher can do to fix a gap, so blocking would just strand
-// them). Before that point, Complete validates two things and highlights
-// whatever's missing in red rather than silently accepting a rushed
-// evaluation: every visible page needs at least one annotation, and every
-// question needs marks — for a `choose` group specifically, that means at
-// least choose_count of its alternatives, not necessarily all of them
-// (see collectMarksErrors()). A `choose` group's alternatives each get
-// their own input so the teacher can compare before settling, but only
-// the *best* one counts toward the total (see computeNodeAwarded()) —
-// never the sum of all of them.
+// undo/redo — Complete is the only thing left to click. Complete always
+// validates two things and highlights whatever's missing in red rather
+// than silently accepting a rushed evaluation: every visible page needs
+// at least one annotation, and every question needs marks — for a
+// `choose` group specifically, that means choose_count of its
+// alternatives fully finished, not necessarily every alternative it has
+// (see collectMarksErrors()): once the teacher puts anything at all into
+// one alternative, every part of that one becomes required to finish it,
+// while any alternative still fully untouched stays optional the moment
+// enough others already cover choose_count — deliberately with no visual
+// "locked"/"not required" treatment on the untouched one though (see
+// EvaluateQuestionNode.vue's own docblock): every alternative stays
+// editable the whole time, and only a field Complete actually flagged
+// (errorNodeIds) is ever styled differently.
+// A `choose` group's alternatives each get their own input so the teacher
+// can compare before settling, but only the *best* one counts toward the
+// total (see computeNodeAwarded()) — never the sum of all of them. The
+// difference overtime is only in what happens on a *failed* check: before
+// the time's up, Complete just blocks so the teacher can fix it; once
+// every input is locked there's nothing left they can do about a gap, so
+// instead of blocking (stranding them) or submitting an incomplete
+// evaluation as final, it's kept as a draft and they're sent back to
+// their pending list (see completeEvaluation()).
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import api, { resolveStorageUrl } from '../utils/api'
 import { useToast } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
 import { loadPdf, renderPageToCanvas } from '../utils/pdf'
-import { decodeId } from '../utils/obfuscateId'
+import { useNotificationsStore } from '../stores/notifications'
 import EvaluateQuestionNode from '../components/evaluation/EvaluateQuestionNode.vue'
+import RaiseIssueModal from '../components/evaluation/RaiseIssueModal.vue'
 
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const notificationsStore = useNotificationsStore()
 const { confirmDialog } = useConfirm()
 
 // Set the instant "Complete" actually succeeds — skips the unsaved-work
@@ -49,7 +62,12 @@ const { confirmDialog } = useConfirm()
 // an in-app link) up until then.
 let completed = false
 
-const sheetId = computed(() => decodeId(route.params.token))
+// The route's own :token — a one-time evaluation_token minted by
+// MyPendingCoursesView.vue's "Start Evaluate" click (see
+// MyPendingCourseController::startEvaluation()), not this sheet's own id.
+// It's already opaque and single-use/expiring on its own, so unlike the
+// old id-based link there's nothing to decode here.
+const evaluationToken = computed(() => route.params.token)
 
 // --- sheet + question-paper structure ---------------------------------
 const sheet = ref(null)
@@ -57,7 +75,7 @@ const sheetLoading = ref(true)
 const sheetLoadError = ref('')
 
 async function loadSheet() {
-  if (!sheetId.value) {
+  if (!evaluationToken.value) {
     sheetLoadError.value = 'Invalid link.'
     sheetLoading.value = false
     return
@@ -65,7 +83,7 @@ async function loadSheet() {
   sheetLoading.value = true
   sheetLoadError.value = ''
   try {
-    const res = await api.get(`/my-pending-courses/papers/${sheetId.value}`)
+    const res = await api.get(`/my-pending-courses/evaluate/${evaluationToken.value}`)
     sheet.value = res.data.data
   } catch (err) {
     sheetLoadError.value = err.response?.data?.message || 'Could not load this answer sheet.'
@@ -113,6 +131,21 @@ const tools = [
   { id: 'blank', label: 'Blank', icon: '▭' },
   { id: 'delete', label: 'Delete', icon: '🗑' },
 ]
+
+// Pencil-only colour choice (see the toolbar's own swatches, shown while
+// 'pencil' is the active tool) — 'wrong'/'correct' keep their own fixed
+// semantic colours (red cross, green tick) since choosing those wouldn't
+// mean anything, but a freehand pencil stroke is used for anything from
+// underlining a mistake to circling the right answer, so red vs green
+// actually says something there. Defaults to red per the teacher's own
+// request. Stored on each pencil annotation itself at draw time (see
+// onPointerUp() below) — never re-derived from this live ref — so
+// switching the picker afterwards never repaints strokes already drawn.
+const PENCIL_COLORS = { red: 'rgba(220,38,38,0.85)', green: 'rgba(22,163,74,0.85)' }
+const pencilColor = ref('red')
+function resolvePencilColor(key) {
+  return PENCIL_COLORS[key] || PENCIL_COLORS.red
+}
 
 const canvasViewportEl = ref(null)
 
@@ -211,15 +244,6 @@ watch(isOvertime, (over) => {
 // alternative inside a `choose` group — see EvaluateQuestionNode.vue).
 const marksByNode = reactive({})
 
-function collectLeafNodes(nodes, acc = []) {
-  for (const node of nodes || []) {
-    if (node.mode === 'leaf') acc.push(node)
-    else collectLeafNodes(node.children, acc)
-  }
-  return acc
-}
-const leafNodes = computed(() => collectLeafNodes(sheet.value?.question_paper?.groups))
-
 // A `choose` group's own contribution is the *best* of its alternatives
 // (only one was ever actually answered), never their sum; 'all' sums its
 // children; a leaf is just whatever's typed in. Recurses the same tree
@@ -241,6 +265,16 @@ function hasValue(nodeId) {
   const v = marksByNode[nodeId]
   return v !== undefined && v !== null && v !== ''
 }
+// A leaf's own value against its own bounds (0..node.marks) —
+// EvaluateQuestionNode.vue's input already clamps as the teacher types so
+// this shouldn't normally trip, but a restored draft (or anything else
+// that set marksByNode some other way) gets checked here too before
+// Complete goes through.
+function isInvalidValue(node) {
+  if (!hasValue(node.id)) return false
+  const v = Number(marksByNode[node.id])
+  return Number.isNaN(v) || v < 0 || v > (node.marks ?? 0)
+}
 // Whether *anything* under this node has a value — a `choose` alternative
 // counts as "attempted" the moment any leaf beneath it does, even if it's
 // itself a further-nested branch rather than a plain leaf.
@@ -248,32 +282,51 @@ function subtreeHasValue(node) {
   if (node.mode === 'leaf') return hasValue(node.id)
   return (node.children || []).some(subtreeHasValue)
 }
-function collectSubtreeLeafIds(node, acc = []) {
-  if (node.mode === 'leaf') acc.push(node.id)
-  else (node.children || []).forEach((child) => collectSubtreeLeafIds(child, acc))
+function collectSubtreeLeafNodes(node, acc = []) {
+  if (node.mode === 'leaf') acc.push(node)
+  else (node.children || []).forEach((child) => collectSubtreeLeafNodes(child, acc))
   return acc
 }
 
 // Walks the real question-paper tree and returns the set of leaf node ids
 // that need the teacher's attention before this can be completed: an
-// empty leaf outside any `choose` group, or — inside one — as many of its
-// still-empty alternatives as it takes to explain why that group doesn't
-// have its required choose_count filled in yet (e.g. "choose 1 of 2" with
-// neither filled flags both; with one already filled, flags neither).
+// empty or out-of-range leaf outside any `choose` group, or — inside one:
+//  - every leaf under an alternative the teacher has actually started
+//    (subtreeHasValue true) that's still empty — once picked, an
+//    alternative's own parts are all required, same as everywhere else
+//    'all' mode is used in this tree (see EvaluateQuestionNode.vue's own
+//    isOptionalAlternative(), which mirrors this so the panel never shows
+//    something as "Not required" that Complete would still block on);
+//  - PLUS, only while fewer alternatives have been started than
+//    choose_count actually needs, every leaf of every still-untouched
+//    alternative — nudging the teacher to pick (at least) one more (e.g.
+//    "choose 1 of 2" with neither started flags both; with one already
+//    started, flags only that one's own remaining gaps, not the other).
+// An out-of-range value is flagged regardless of any of the above.
 function collectMarksErrors() {
   const badIds = new Set()
 
   function walk(node) {
     if (node.mode === 'leaf') {
-      if (!hasValue(node.id)) badIds.add(node.id)
+      if (!hasValue(node.id) || isInvalidValue(node)) badIds.add(node.id)
       return
     }
     if (node.mode === 'choose') {
       const alternatives = node.children || []
-      const filledCount = alternatives.filter(subtreeHasValue).length
-      if (filledCount < (node.choose_count || 1)) {
+      alternatives.forEach((alt) => {
+        collectSubtreeLeafNodes(alt).forEach((leaf) => {
+          if (isInvalidValue(leaf)) badIds.add(leaf.id)
+        })
+      })
+      const attempted = alternatives.filter(subtreeHasValue)
+      attempted.forEach((alt) => {
+        collectSubtreeLeafNodes(alt).forEach((leaf) => {
+          if (!hasValue(leaf.id)) badIds.add(leaf.id)
+        })
+      })
+      if (attempted.length < (node.choose_count || 1)) {
         alternatives.forEach((alt) => {
-          if (!subtreeHasValue(alt)) collectSubtreeLeafIds(alt).forEach((id) => badIds.add(id))
+          if (!subtreeHasValue(alt)) collectSubtreeLeafNodes(alt).forEach((leaf) => badIds.add(leaf.id))
         })
       }
       return
@@ -342,14 +395,17 @@ function scheduleDraftSave() {
 }
 watch(marksByNode, scheduleDraftSave)
 watch(annotations, scheduleDraftSave)
-// Clears a field's/page's red highlight the moment it's actually fixed,
-// rather than making the teacher click Complete again just to see it go
-// away.
+// Clears a field's red highlight the moment it's actually fixed, rather
+// than making the teacher click Complete again just to see it go away —
+// re-runs the same walk collectMarksErrors() itself uses (not just "does
+// this one leaf now have a value") so a leaf that stops being red because
+// a *sibling* alternative now covers its choose group's choose_count
+// (see that function's own docblock) clears exactly the same way as one
+// the teacher typed a value into directly.
 watch(marksByNode, () => {
   if (!errorNodeIds.value.size) return
-  leafNodes.value.forEach((node) => {
-    if (hasValue(node.id)) errorNodeIds.value.delete(node.id)
-  })
+  const stillBad = collectMarksErrors()
+  errorNodeIds.value = new Set([...errorNodeIds.value].filter((id) => stillBad.has(id)))
 })
 watch(annotations, () => {
   if (!errorPages.value.size) return
@@ -429,7 +485,7 @@ async function renderAllPages() {
   }
 }
 
-function drawPencilPath(ctx, points, color = 'rgba(220,38,38,0.85)') {
+function drawPencilPath(ctx, points, color = PENCIL_COLORS.red) {
   if (points.length < 2) return
   ctx.strokeStyle = color
   ctx.lineWidth = 2.5
@@ -439,10 +495,13 @@ function drawPencilPath(ctx, points, color = 'rgba(220,38,38,0.85)') {
   points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)))
   ctx.stroke()
 }
+// Sized generously (previously s=10/lineWidth=3 — easy to miss next to
+// handwriting) so a ✓/✗ actually reads at a glance against a full page of
+// dense handwritten text, per the teacher's own "too small" feedback.
 function drawCheck(ctx, pos, viewport) {
-  const s = 10 * (viewport?.scale || 1)
+  const s = 18 * (viewport?.scale || 1)
   ctx.strokeStyle = '#16a34a'
-  ctx.lineWidth = 3 * (viewport?.scale || 1)
+  ctx.lineWidth = 4.5 * (viewport?.scale || 1)
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
   ctx.beginPath()
@@ -452,9 +511,9 @@ function drawCheck(ctx, pos, viewport) {
   ctx.stroke()
 }
 function drawCross(ctx, pos, viewport) {
-  const s = 9 * (viewport?.scale || 1)
+  const s = 16 * (viewport?.scale || 1)
   ctx.strokeStyle = '#dc2626'
-  ctx.lineWidth = 3 * (viewport?.scale || 1)
+  ctx.lineWidth = 4.5 * (viewport?.scale || 1)
   ctx.lineCap = 'round'
   ctx.beginPath()
   ctx.moveTo(pos.x - s, pos.y - s)
@@ -473,7 +532,11 @@ function drawBlankRect(ctx, start, end, color = 'rgba(234,88,12,0.9)') {
   ctx.setLineDash([])
 }
 function drawAnnotation(ctx, ann, viewport) {
-  if (ann.type === 'pencil') drawPencilPath(ctx, ann.points.map((pt) => pdfToPixel(viewport, pt)))
+  // ann.color is only ever set on 'pencil' strokes (see onPointerUp()
+  // below) — a draft saved before this colour picker existed simply has
+  // no field to read, and resolvePencilColor()'s own fallback keeps that
+  // old stroke rendering exactly as red as it always did.
+  if (ann.type === 'pencil') drawPencilPath(ctx, ann.points.map((pt) => pdfToPixel(viewport, pt)), resolvePencilColor(ann.color))
   else if (ann.type === 'correct') drawCheck(ctx, pdfToPixel(viewport, ann.point), viewport)
   else if (ann.type === 'wrong') drawCross(ctx, pdfToPixel(viewport, ann.point), viewport)
   else if (ann.type === 'blank') drawBlankRect(ctx, pdfToPixel(viewport, ann.start), pdfToPixel(viewport, ann.end))
@@ -485,7 +548,10 @@ function redrawOverlay(page, previewPencilPoints = null, previewBlank = null) {
   const ctx = canvas.getContext('2d')
   ctx.clearRect(0, 0, canvas.width, canvas.height)
   for (const ann of getAnnotations(page)) drawAnnotation(ctx, ann, viewport)
-  if (previewPencilPoints) drawPencilPath(ctx, previewPencilPoints)
+  // Live preview while the stroke's still being dragged — matches
+  // whatever colour is currently picked so it doesn't flash a different
+  // shade the instant the stroke actually commits on pointer-up.
+  if (previewPencilPoints) drawPencilPath(ctx, previewPencilPoints, resolvePencilColor(pencilColor.value))
   if (previewBlank) drawBlankRect(ctx, previewBlank.start, previewBlank.end)
 }
 
@@ -532,7 +598,7 @@ function deleteNearest(pos, page, viewport) {
       bestIdx = idx
     }
   })
-  if (bestIdx !== -1 && bestDist <= 16) {
+  if (bestIdx !== -1 && bestDist <= 22) {
     commitAnnotations(page, list.filter((_, i) => i !== bestIdx))
   }
 }
@@ -575,7 +641,7 @@ function onPointerUp(evt, page) {
   isDrawing = false
   const viewport = pageViewports[page]
   if (activeTool.value === 'pencil' && pencilPixelPoints.length > 1) {
-    addAnnotation(page, { type: 'pencil', points: pencilPixelPoints.map((p) => pixelToPdf(viewport, p)) })
+    addAnnotation(page, { type: 'pencil', points: pencilPixelPoints.map((p) => pixelToPdf(viewport, p)), color: pencilColor.value })
   } else if (activeTool.value === 'blank' && blankDragStart && lastPixelPos) {
     addAnnotation(page, {
       type: 'blank',
@@ -688,34 +754,40 @@ async function loadCurrentPdf() {
 // happened, is just a draft (see saveDraft() above).
 const completing = ref(false)
 async function completeEvaluation() {
-  // Every slot bounded by its own node's max is already enforced by each
-  // <input>'s own min/max — this just catches an empty/invalid field
-  // being silently treated as 0 without the teacher noticing.
-  const invalid = leafNodes.value.find((node) => {
-    const value = marksByNode[node.id]
-    return value !== undefined && value !== '' && Number(value) < 0
-  })
-  if (invalid) {
-    toast.error('Marks can\'t be negative.')
-    return
-  }
+  // Completeness (and validity — empty, negative, or over that question's
+  // own max) is checked every time Complete is clicked, overtime or not —
+  // only what happens *after* a failed check differs (see below), since
+  // every input's already locked once isOvertime is true (this file's own
+  // top docblock) and there's nothing left the teacher can do about it.
+  const badNodeIds = collectMarksErrors()
+  const badPages = collectEmptyPages()
+  if (badNodeIds.size || badPages.length) {
+    errorNodeIds.value = badNodeIds
+    errorPages.value = new Set(badPages)
 
-  // Completeness is only enforced while there's still time left to *do*
-  // anything about it — every input's already locked once isOvertime is
-  // true (see this file's own top docblock), so blocking here too would
-  // just strand the teacher with no way forward.
-  if (!isOvertime.value) {
-    const badNodeIds = collectMarksErrors()
-    const badPages = collectEmptyPages()
-    if (badNodeIds.size || badPages.length) {
-      errorNodeIds.value = badNodeIds
-      errorPages.value = new Set(badPages)
+    if (!isOvertime.value) {
       const parts = []
-      if (badNodeIds.size) parts.push('fill in marks for every question (highlighted in red)')
+      if (badNodeIds.size) parts.push('fix the marks highlighted in red — every question needs a value, and none can go over its own max')
       if (badPages.length) parts.push(`add at least one annotation on every page — missing on page ${badPages.map((p) => visiblePageIndex(p)).join(', ')}`)
       toast.error(`Before completing, ${parts.join(' and ')}.`)
       return
     }
+
+    // Time's up and this still isn't complete, but every input is locked
+    // so there's no way left to fix it — rather than accept an
+    // incomplete evaluation as final (or leave the teacher stuck on this
+    // screen with no way forward), keep whatever's there as a draft and
+    // send them back to their pending list instead of submitting marks.
+    completing.value = true
+    try {
+      await saveDraft()
+      toast.error("Time is up and this evaluation wasn't fully filled in, so it couldn't be marked complete — your work has been saved as a draft instead.")
+      completed = true
+      router.push({ name: 'my-pending-courses' })
+    } finally {
+      completing.value = false
+    }
+    return
   }
 
   completing.value = true
@@ -735,6 +807,18 @@ async function completeEvaluation() {
 }
 
 function closeViewer() {
+  router.push({ name: 'my-pending-courses' })
+}
+
+// --- report a problem ---
+// Unlike "Complete" above, raising an issue is allowed even once
+// isOvertime has locked every other input — a printing/timing problem is
+// about the physical sheet, not about how much marking time is left.
+const showIssueModal = ref(false)
+function onIssueRaised() {
+  showIssueModal.value = false
+  completed = true // see this file's own `completed` flag above
+  notificationsStore.loadUnresolvedCount()
   router.push({ name: 'my-pending-courses' })
 }
 
@@ -807,7 +891,9 @@ onBeforeUnmount(() => {
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
           </button>
           <div class="min-w-0">
-            <p class="text-[14px] font-semibold text-gray-900 truncate">{{ sheet.roll_no || sheet.name || `Sheet #${sheet.id}` }}</p>
+            <!-- Barcode/QR number only — never the roll number, so the
+                 evaluator can't identify whose sheet this is while marking. -->
+            <p class="text-[14px] font-semibold text-gray-900 truncate">{{ sheet.barcode || sheet.subject_barcode || `Sheet #${sheet.id}` }}</p>
             <p class="text-[12px] text-muted truncate">{{ sheet.subject_code }} — {{ sheet.subject_name }}</p>
           </div>
         </div>
@@ -846,7 +932,12 @@ onBeforeUnmount(() => {
             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
             Answer Key
           </button>
-          <button type="button" class="flex flex-col items-center gap-1 rounded-xl bg-white shadow-panel px-1.5 py-2.5 text-[10.5px] font-medium text-gray-400 cursor-not-allowed" disabled title="Coming soon">
+          <button
+            type="button"
+            class="flex flex-col items-center gap-1 rounded-xl bg-white shadow-panel px-1.5 py-2.5 text-[10.5px] font-medium text-gray-700 hover:text-brand-blue transition-colors"
+            title="Report a problem with this answer sheet"
+            @click="showIssueModal = true"
+          >
             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
             Problem
           </button>
@@ -900,6 +991,29 @@ onBeforeUnmount(() => {
             >
               <span class="text-[15px] leading-none">{{ tool.icon }}</span>{{ tool.label }}
             </button>
+
+            <!-- Pencil-only colour picker — see pencilColor's own docblock
+                 above for why 'wrong'/'correct' don't get one. -->
+            <template v-if="activeTool === 'pencil'">
+              <button
+                type="button"
+                class="w-6 h-6 rounded-full border-2 transition-transform shrink-0"
+                style="background:#dc2626"
+                :class="pencilColor === 'red' ? 'border-gray-700 scale-110' : 'border-gray-200'"
+                title="Red pencil"
+                aria-label="Red pencil"
+                @click="pencilColor = 'red'"
+              ></button>
+              <button
+                type="button"
+                class="w-6 h-6 rounded-full border-2 transition-transform shrink-0"
+                style="background:#16a34a"
+                :class="pencilColor === 'green' ? 'border-gray-700 scale-110' : 'border-gray-200'"
+                title="Green pencil"
+                aria-label="Green pencil"
+                @click="pencilColor = 'green'"
+              ></button>
+            </template>
 
             <span class="w-px self-stretch bg-input-border mx-1"></span>
 
@@ -986,5 +1100,12 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </template>
+
+    <RaiseIssueModal
+      v-if="showIssueModal"
+      :answer-sheet-id="sheet.id"
+      @close="showIssueModal = false"
+      @raised="onIssueRaised"
+    />
   </div>
 </template>

@@ -78,8 +78,11 @@ class RoleController extends Controller implements HasMiddleware
 
     public function destroy(Role $role): JsonResponse
     {
-        if ((int) $role->id === (int) config('roles.super_admin_id')) {
-            return $this->forbidden('The Super Admin role cannot be deleted.');
+        // (array) cast so this still works if a test overrides the config
+        // to a bare scalar id — config('roles.super_admin_id') is normally
+        // a list, every id in it protected from deletion the same way.
+        if (in_array((int) $role->id, (array) config('roles.super_admin_id'), true)) {
+            return $this->forbidden('This role cannot be deleted.');
         }
 
         $role->delete();

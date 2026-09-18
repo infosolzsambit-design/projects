@@ -138,6 +138,31 @@ async function proceedToStructure() {
 
   preparingPdf.value = true
   try {
+    // A faster-feedback mirror of StoreQuestionPaperRequest's own
+    // authoritative duplicate check — catches the mistake right here,
+    // before building out an entire structure in Step 2 only to have it
+    // rejected at the very end. Non-fatal if the check itself fails
+    // (network hiccup) — the authoritative backend check on final submit
+    // still guards against a real duplicate either way.
+    try {
+      const dupeCheck = await api.get('/question-papers', {
+        params: {
+          exam_year: form.exam_year,
+          course_id: form.course_id,
+          exam_term_id: form.exam_term_id,
+          semester: form.semester,
+          per_page: 1,
+        },
+      })
+      if (dupeCheck.data.data.items.length) {
+        fieldErrors.exam_year = 'A question paper already exists for this Exam Year, Course, Exam Term and Semester combination.'
+        focusFirstError()
+        return
+      }
+    } catch {
+      // Fall through — see comment above.
+    }
+
     pdfSourceForBuilder.value = { data: await pdfFile.value.arrayBuffer() }
     structureInitialForm.value = {
       exam_year: form.exam_year,

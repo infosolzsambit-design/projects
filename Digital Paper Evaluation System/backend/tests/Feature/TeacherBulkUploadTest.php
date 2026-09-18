@@ -165,7 +165,7 @@ class TeacherBulkUploadTest extends TestCase
         $this->assertDatabaseHas('teacher_details', ['emp_code' => 'BULK-B', 'department' => 'Mathematics']);
 
         $user = User::where('email', 'one@example.com')->first();
-        $this->assertTrue($user->hasRole((int) config('roles.teacher_id')));
+        $this->assertTrue($user->hasRole('Teacher'));
         $this->assertNull($user->password);
     }
 

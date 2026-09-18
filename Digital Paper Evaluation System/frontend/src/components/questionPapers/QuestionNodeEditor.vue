@@ -45,11 +45,15 @@ const props = defineProps({
 const emit = defineEmits(['remove'])
 const { confirmDialog } = useConfirm()
 
-// How many actual selectable questions are below this node right now — not
-// just node.children.length, since a child can itself be an "all" sub-group
-// standing in for several questions (e.g. three labeled sub-groups pooled
-// under one "choose 11 of 15" node). See slotCount()'s own docblock.
-const availableSlots = computed(() => props.node.children.reduce((sum, child) => sum + slotCount(child), 0))
+// The plain auto-computed total of actual selectable questions below this
+// node right now — not just node.children.length, since a child can itself
+// be an "all" sub-group standing in for several questions (e.g. three
+// labeled sub-groups pooled under one "choose 11 of 15" node). Shown as the
+// "of N" field's own placeholder (see availableSlotCount()'s own docblock
+// for why that field can be manually overridden) — deliberately ignores
+// any slots_override already set, so clearing an override back to blank
+// visibly reveals what it'll fall back to auto-computing again.
+const autoComputedSlots = computed(() => props.node.children.reduce((sum, child) => sum + slotCount(child), 0))
 
 // Sortable's nested-list handling can otherwise get confused about which
 // list a drag started in (each level needs its own non-interacting drop
@@ -193,7 +197,16 @@ async function mergeBack() {
             class="w-16 h-9 px-2 rounded-lg bg-white text-sm text-gray-800 text-center outline-none border focus:ring-2 focus:ring-brand-blue/15 transition"
             :class="node.chooseCountError ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
           />
-          <span class="text-[13px] text-gray-600">of {{ availableSlots }} question(s) below</span>
+          <span class="text-[13px] text-gray-600">of</span>
+          <input
+            v-model="node.slots_override"
+            type="number"
+            min="1"
+            :placeholder="String(autoComputedSlots)"
+            title="Auto-computed from the questions below — type a number to override it if it's wrong"
+            class="w-14 h-9 px-2 rounded-lg bg-white text-sm text-gray-800 text-center outline-none border border-input-border focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 transition"
+          />
+          <span class="text-[13px] text-gray-600">question(s) below</span>
         </template>
       </div>
       <p v-if="node.chooseCountError" class="mt-2 text-[12px] text-brand">{{ node.chooseCountError }}</p>
@@ -275,7 +288,15 @@ async function mergeBack() {
           class="w-14 h-8 px-2 rounded-lg bg-white text-sm text-gray-800 text-center outline-none border focus:ring-2 focus:ring-brand-blue/15 transition"
           :class="node.chooseCountError ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
         />
-        <span class="text-[12px] text-gray-600">of {{ availableSlots }}</span>
+        <span class="text-[12px] text-gray-600">of</span>
+        <input
+          v-model="node.slots_override"
+          type="number"
+          min="1"
+          :placeholder="String(autoComputedSlots)"
+          title="Auto-computed from the questions below — type a number to override it if it's wrong"
+          class="w-12 h-8 px-2 rounded-lg bg-white text-sm text-gray-800 text-center outline-none border border-input-border focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 transition"
+        />
       </template>
       <button type="button" class="text-[11px] text-muted hover:text-brand-blue hover:underline" @click="mergeBack">
         ↩ Merge back to one question

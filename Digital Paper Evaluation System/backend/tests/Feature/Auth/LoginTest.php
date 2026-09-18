@@ -2,8 +2,10 @@
 
 namespace Tests\Feature\Auth;
 
+use App\Models\Department;
 use App\Models\Permission;
 use App\Models\Role;
+use App\Models\TeacherDetail;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -70,7 +72,7 @@ class LoginTest extends TestCase
 
     public function test_login_requires_profile_completion_for_a_teacher_with_no_esign_yet(): void
     {
-        $detail = \App\Models\TeacherDetail::factory()->create();
+        $detail = TeacherDetail::factory()->create();
         $detail->user->update(['password' => bcrypt('Password!23')]);
 
         $response = $this->withApiKey()->postJson('/api/v1/login', [
@@ -85,7 +87,7 @@ class LoginTest extends TestCase
 
     public function test_login_does_not_require_profile_completion_once_esign_is_set(): void
     {
-        $detail = \App\Models\TeacherDetail::factory()->create(['esign' => 'data:image/png;base64,AAAA']);
+        $detail = TeacherDetail::factory()->create(['esign' => 'data:image/png;base64,AAAA']);
         $detail->user->update(['password' => bcrypt('Password!23')]);
 
         $response = $this->withApiKey()->postJson('/api/v1/login', [
@@ -108,6 +110,31 @@ class LoginTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('data.user.is_super_admin', false)
             ->assertJsonPath('data.user.profile_completion_required', false);
+    }
+
+    /**
+     * Drives AssignTeacherView.vue's/AssignedTeachersView.vue's own
+     * department filter for a non-super-admin (see HasDepartmentScope) —
+     * the login response has to carry the logged-in user's own department
+     * for the frontend to even know what to scope by.
+     */
+    public function test_login_response_includes_the_users_own_department(): void
+    {
+        $department = Department::factory()->create(['name' => 'Computer Science']);
+        $detail = TeacherDetail::factory()->create([
+            'department_id' => $department->id,
+            'department' => $department->name,
+        ]);
+        $detail->user->update(['password' => 'Password!23']);
+
+        $response = $this->withApiKey()->postJson('/api/v1/login', [
+            'login' => $detail->user->email,
+            'password' => 'Password!23',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.user.department_id', $department->id)
+            ->assertJsonPath('data.user.department', 'Computer Science');
     }
 
     public function test_user_can_login_with_username_instead_of_email(): void

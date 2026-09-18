@@ -219,8 +219,9 @@ class AuthController extends Controller
 
         // Checked by role ID, never by name (see config/roles.php) — the
         // same rule UserController::forceDestroy()/RoleController::destroy()
-        // already follow.
-        $isSuperAdmin = $user->hasRole((int) config('roles.super_admin_id'));
+        // already follow. hasRole() accepts a list of ids and matches on
+        // any of them — config('roles.super_admin_id') is itself a list.
+        $isSuperAdmin = $user->hasRole(config('roles.super_admin_id'));
         $data['is_super_admin'] = $isSuperAdmin;
 
         // Gates ProfileView.vue behind a "finish your profile" redirect

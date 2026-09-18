@@ -4,10 +4,12 @@ import { RouterLink, useRoute } from 'vue-router'
 import { useSidebar } from '../../composables/useSidebar'
 import { useBrandingStore } from '../../stores/branding'
 import { useAuthStore } from '../../stores/auth'
+import { useNotificationsStore } from '../../stores/notifications'
 
 const authStore = useAuthStore()
 const route = useRoute()
 const branding = useBrandingStore()
+const notificationsStore = useNotificationsStore()
 const { isOpen, isDesktop, hoverOpen, hoverClose } = useSidebar()
 
 // True once the sidebar's initial (collapsed) state has painted once, so the
@@ -21,6 +23,7 @@ onMounted(() => {
   // one just needs authStore.user.permission_names populated for the
   // v-if="authStore.can(...)" checks below.
   authStore.fetchMe().catch(() => {})
+  notificationsStore.loadUnresolvedCount()
 })
 
 function isActive(to, exact) {
@@ -32,8 +35,9 @@ const masterItems = [
   { to: '/master/programs', label: 'Programs', permission: 'program-list' },
   { to: '/master/departments', label: 'Departments', permission: 'department-list' },
   { to: '/master/exam-terms', label: 'Exam Term', permission: 'exam-term-list' },
+  { to: '/master/exam-types', label: 'Exam Type', permission: 'exam-type-list' },
 ]
-const visibleMasterItems = computed(() => masterItems.filter((item) => authStore.can(item.permission)))
+const visibleMasterItems = computed(() => masterItems.filter((item) => !item.permission || authStore.can(item.permission)))
 
 const masterActive = computed(() => route.path.startsWith('/master'))
 const masterOpen = ref(masterActive.value)
@@ -62,6 +66,37 @@ function updateMasterMaxHeight() {
 
 watch([isOpen, masterOpen], updateMasterMaxHeight, { flush: 'post' })
 onMounted(() => nextTick(updateMasterMaxHeight))
+
+// Same collapsible-submenu pattern as Master above, for the "Evaluate
+// Course" group — a teacher's own pending vs already-completed
+// evaluations (see MyPendingCoursesView.vue / MyCompletedCoursesView.vue),
+// previously two separate top-level links, now one parent menu with both
+// as sub-items.
+const evaluateCourseItems = [
+  { to: '/my-pending-courses', label: 'Pending Course', permission: 'my-pending-course-list' },
+  { to: '/my-completed-courses', label: 'Completed Course', permission: 'my-completed-course-list' },
+]
+const visibleEvaluateCourseItems = computed(() => evaluateCourseItems.filter((item) => authStore.can(item.permission)))
+
+const evaluateCourseActive = computed(
+  () => route.path.startsWith('/my-pending-courses') || route.path.startsWith('/my-completed-courses'),
+)
+const evaluateCourseOpen = ref(evaluateCourseActive.value)
+watchEffect(() => {
+  if (evaluateCourseActive.value) evaluateCourseOpen.value = true
+})
+
+const evaluateCourseSubmenuContent = ref(null)
+const evaluateCourseMaxHeight = ref('0px')
+
+function updateEvaluateCourseMaxHeight() {
+  evaluateCourseMaxHeight.value = !isOpen.value || !evaluateCourseOpen.value
+    ? '0px'
+    : `${evaluateCourseSubmenuContent.value?.scrollHeight ?? 200}px`
+}
+
+watch([isOpen, evaluateCourseOpen], updateEvaluateCourseMaxHeight, { flush: 'post' })
+onMounted(() => nextTick(updateEvaluateCourseMaxHeight))
 
 // Same collapsible-submenu pattern as Master above, just for the
 // "Assign Teacher" group (the assign-and-distribute page itself, plus its
@@ -93,6 +128,33 @@ watch([isOpen, assignTeacherOpen], updateAssignTeacherMaxHeight, { flush: 'post'
 onMounted(() => nextTick(updateAssignTeacherMaxHeight))
 
 // Same collapsible-submenu pattern as Master/Assign Teacher above, for the
+// "Report" group — right after Assign Teacher (see TeacherWise
+// EvaluationReportView.vue / AnswerBookTopSheetReportView.vue).
+const reportItems = [
+  { to: '/reports/teacher-wise-evaluation', label: 'Teacher Wise Report', permission: 'teacher-wise-evaluation-report' },
+  { to: '/reports/answer-book-top-sheet', label: 'Answer Book Report', permission: 'answer-book-report' },
+]
+const visibleReportItems = computed(() => reportItems.filter((item) => !item.permission || authStore.can(item.permission)))
+
+const reportActive = computed(() => route.path.startsWith('/reports'))
+const reportOpen = ref(reportActive.value)
+watchEffect(() => {
+  if (reportActive.value) reportOpen.value = true
+})
+
+const reportSubmenuContent = ref(null)
+const reportMaxHeight = ref('0px')
+
+function updateReportMaxHeight() {
+  reportMaxHeight.value = !isOpen.value || !reportOpen.value
+    ? '0px'
+    : `${reportSubmenuContent.value?.scrollHeight ?? 200}px`
+}
+
+watch([isOpen, reportOpen], updateReportMaxHeight, { flush: 'post' })
+onMounted(() => nextTick(updateReportMaxHeight))
+
+// Same collapsible-submenu pattern as Master/Assign Teacher above, for the
 // "Configurations" group — General Settings plus the Permission Group /
 // Permission Sub Group master data.
 const configurationsItems = [
@@ -101,9 +163,12 @@ const configurationsItems = [
   { to: '/configurations/permission-groups', label: 'Permission Group', permission: 'permission-group-list' },
   { to: '/configurations/permission-sub-groups', label: 'Permission Sub Group', permission: 'permission-sub-group-list' },
   { to: '/configurations/permissions', label: 'Permission', permission: 'permission-list' },
+  // No `permission` key — deliberately open to any signed-in user (see
+  // EmailLogsView.vue's own top docblock), unlike every other item here.
+  { to: '/configurations/email-logs', label: 'Email Logs', permission: 'email-log-list' },
   { to: '/general-settings', label: 'General Settings', permission: 'general-settings' },
 ]
-const visibleConfigurationsItems = computed(() => configurationsItems.filter((item) => authStore.can(item.permission)))
+const visibleConfigurationsItems = computed(() => configurationsItems.filter((item) => !item.permission || authStore.can(item.permission)))
 
 const configurationsActive = computed(
   () => route.path.startsWith('/general-settings') || route.path.startsWith('/configurations'),
@@ -154,7 +219,11 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
         </svg>
         <span class="sidebar-label">Dashboard</span>
       </RouterLink>
-      <button v-if="authStore.can('course-list') || authStore.can('program-list') || authStore.can('department-list') || authStore.can('exam-term-list')" type="button" :aria-expanded="masterOpen" aria-controls="master-submenu"
+      <!-- Tied to visibleMasterItems itself (not each permission repeated
+           here) so a permission-less item like Exam Type — always visible —
+           keeps this button showing even when every *other* Master item's
+           own permission is missing. -->
+      <button v-if="visibleMasterItems.length" type="button" :aria-expanded="masterOpen" aria-controls="master-submenu"
         class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
         :class="masterActive ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'"
         @click="masterOpen = !masterOpen">
@@ -203,20 +272,55 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
         <span class="sidebar-label">Students</span>
       </RouterLink>
 
-      <!-- No permission gate — every logged-in user just sees their own
-           pending work (or an empty list if they have none). See
-           MyPendingCourseController's own docblock. -->
-      <RouterLink v-if="authStore.can('my-pending-course-list')" to="/my-pending-courses"
+      <RouterLink v-if="authStore.can('notification-list')" to="/notifications"
         class="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
-        :class="isActive('/my-pending-courses', false) ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'">
+        :class="isActive('/notifications', false) ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'">
+        <span class="relative shrink-0">
+          <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+          <!-- Still visible when the sidebar's collapsed to icons only
+               (no room for the pill badge below there) — a plain dot is
+               enough to say "something needs attention". -->
+          <span v-if="notificationsStore.unresolvedCount > 0" class="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-brand ring-2 ring-white/20"></span>
+        </span>
+        <span class="sidebar-label flex-1">Notifications</span>
+        <span
+          v-if="notificationsStore.unresolvedCount > 0"
+          class="sidebar-label inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-brand text-white text-[10px] font-semibold leading-none"
+        >
+          {{ notificationsStore.unresolvedCount > 99 ? '99+' : notificationsStore.unresolvedCount }}
+        </span>
+      </RouterLink>
+
+      <button v-if="authStore.can('my-pending-course-list') || authStore.can('my-completed-course-list')" type="button" :aria-expanded="evaluateCourseOpen" aria-controls="evaluate-course-submenu"
+        class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
+        :class="evaluateCourseActive ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'"
+        @click="evaluateCourseOpen = !evaluateCourseOpen">
         <svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
           <polyline points="14 2 14 8 20 8" />
           <circle cx="11" cy="14" r="2.5" />
           <path d="M13 16l1.5 1.5" />
         </svg>
-        <span class="sidebar-label">My Pending Course</span>
-      </RouterLink>
+        <span class="sidebar-label flex-1 text-left">Evaluate Course</span>
+        <svg class="sidebar-chevron w-3.5 h-3.5 shrink-0 transition-transform duration-300 ease-in-out"
+          :class="{ 'rotate-180': evaluateCourseOpen }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      <div id="evaluate-course-submenu" class="sidebar-submenu overflow-hidden transition-[max-height] duration-300 ease-in-out"
+        :style="{ maxHeight: evaluateCourseMaxHeight }">
+        <div ref="evaluateCourseSubmenuContent" class="mt-1 ml-4 space-y-1 pb-1">
+          <RouterLink v-for="item in visibleEvaluateCourseItems" :key="item.to" :to="item.to"
+            class="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors text-[12px] font-medium"
+            :class="route.path === item.to ? 'bg-white/15 text-white' : 'text-white/85 hover:bg-white/10'">
+            <span class="w-1.5 h-1.5 rounded-full bg-white/80 shrink-0"></span>
+            {{ item.label }}
+          </RouterLink>
+        </div>
+      </div>
 
       <RouterLink v-if="authStore.can('question-paper-list')" to="/question-papers"
         class="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
@@ -267,6 +371,34 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
         </div>
       </div>
 
+      <button v-if="authStore.can('teacher-wise-evaluation-report') || authStore.can('answer-book-report')" type="button" :aria-expanded="reportOpen" aria-controls="report-submenu"
+        class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
+        :class="reportActive ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'"
+        @click="reportOpen = !reportOpen">
+        <svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 3v18h18" />
+          <path d="M18 17V9" />
+          <path d="M13 17V5" />
+          <path d="M8 17v-3" />
+        </svg>
+        <span class="sidebar-label flex-1 text-left">Report</span>
+        <svg class="sidebar-chevron w-3.5 h-3.5 shrink-0 transition-transform duration-300 ease-in-out"
+          :class="{ 'rotate-180': reportOpen }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      <div id="report-submenu" class="sidebar-submenu overflow-hidden transition-[max-height] duration-300 ease-in-out"
+        :style="{ maxHeight: reportMaxHeight }">
+        <div ref="reportSubmenuContent" class="mt-1 ml-4 space-y-1 pb-1">
+          <RouterLink v-for="item in visibleReportItems" :key="item.to" :to="item.to"
+            class="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors text-[12px] font-medium"
+            :class="route.path === item.to ? 'bg-white/15 text-white' : 'text-white/85 hover:bg-white/10'">
+            <span class="w-1.5 h-1.5 rounded-full bg-white/80 shrink-0"></span>
+            {{ item.label }}
+          </RouterLink>
+        </div>
+      </div>
+
       <button v-if="authStore.can('user-list') || authStore.can('role-list') || authStore.can('permission-group-list') || authStore.can('permission-sub-group-list') || authStore.can('permission-list') || authStore.can('general-settings')" type="button" :aria-expanded="configurationsOpen" aria-controls="configurations-submenu"
         class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
         :class="configurationsActive ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'"
@@ -281,6 +413,7 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
           <polyline points="6 9 12 15 18 9" />
         </svg>
       </button>
+      
       <div id="configurations-submenu" class="sidebar-submenu overflow-hidden transition-[max-height] duration-300 ease-in-out"
         :style="{ maxHeight: configurationsMaxHeight }">
         <div ref="configurationsSubmenuContent" class="mt-1 ml-4 space-y-1 pb-1">

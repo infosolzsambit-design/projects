@@ -32,6 +32,7 @@ class StoreQuestionAnswerSheetMappingRequest extends FormRequest
             'course_id' => ['required', 'integer', Rule::exists('courses', 'id')->whereNull('deleted_at')],
             'semester' => ['required', 'integer', 'min:1', 'max:12'],
             'exam_term_id' => ['required', 'integer', Rule::exists('exam_terms', 'id')->whereNull('deleted_at')],
+            'exam_type_id' => ['required', 'integer', Rule::exists('exam_types', 'id')->whereNull('deleted_at')],
             'program_name' => ['required', 'string', 'max:255', Rule::exists('programs', 'name')->whereNull('deleted_at')],
             'packet_code' => ['required', 'string', 'max:255'],
         ];

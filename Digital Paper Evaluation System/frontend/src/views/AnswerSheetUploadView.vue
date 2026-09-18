@@ -87,21 +87,23 @@ const form = reactive({
   question_paper_id: '',
   course_id: '',
   exam_term_id: '',
+  exam_type_id: '',
   semester: '',
   program_name: '',
   packet_code: '',
 })
-const fieldErrors = reactive({ question_paper_id: '', course_id: '', exam_term_id: '', semester: '', program_name: '', packet_code: '' })
+const fieldErrors = reactive({ question_paper_id: '', course_id: '', exam_term_id: '', exam_type_id: '', semester: '', program_name: '', packet_code: '' })
 // Order matters — matches the form's own top-to-bottom field order, so the
 // first of these (in this order) that has an error is the one that gets
 // focused after a failed check.
-const FIELD_ORDER = ['program_name', 'packet_code', 'question_paper_id', 'course_id', 'exam_term_id', 'semester']
+const FIELD_ORDER = ['program_name', 'packet_code', 'question_paper_id', 'exam_type_id', 'course_id', 'exam_term_id', 'semester']
 const fieldRefs = {
   program_name: ref(null),
   packet_code: ref(null),
   question_paper_id: ref(null),
   course_id: ref(null),
   exam_term_id: ref(null),
+  exam_type_id: ref(null),
   semester: ref(null),
 }
 function clearFieldError(field) {
@@ -186,11 +188,28 @@ async function loadExamTerms() {
   }
 }
 
+const availableExamTypes = ref([])
+const examTypesLoading = ref(true)
+const examTypesError = ref('')
+async function loadExamTypes() {
+  examTypesLoading.value = true
+  examTypesError.value = ''
+  try {
+    const res = await api.get('/exam-types', { params: { status: 'all', is_active: 'yes', table_fields: ['name'] } })
+    availableExamTypes.value = res.data.data
+  } catch (err) {
+    examTypesError.value = err.response?.data?.message || 'Could not load exam types.'
+  } finally {
+    examTypesLoading.value = false
+  }
+}
+
 onMounted(() => {
   loadQuestionPapers()
   loadCourses()
   loadPrograms()
   loadExamTerms()
+  loadExamTypes()
 })
 
 // --- CSV upload (one file — student roll / answer-sheet-code mapping).
@@ -424,6 +443,7 @@ async function submitToServer() {
       question_paper_id: form.question_paper_id,
       course_id: form.course_id,
       exam_term_id: form.exam_term_id,
+      exam_type_id: form.exam_type_id,
       semester: form.semester,
       program_name: form.program_name,
       packet_code: form.packet_code,
@@ -649,6 +669,50 @@ async function runValidation() {
       ],
     })
 
+    // --- QR code not already uploaded for this exact packet combination
+    // (Program/Packet Code/Question Paper/Course/Exam Term/Semester) — the
+    // same combination can legitimately be uploaded as a separate packet
+    // (see QuestionAnswerSheetMappingController::store()), but a QR code
+    // already used within it can't be reused; a different combination is
+    // fine (see checkDuplicateBarcodes()'s own docblock). This is the only
+    // check in this whole run that hits the backend — everything else
+    // above is purely local — since only the server knows what's already
+    // been uploaded.
+    validationProgress.value = 'Checking for already-uploaded QR codes…'
+    if (!csvBarcodes.size) {
+      // Already reported by "Subject Barcode values are unique" above —
+      // nothing real to check against the backend here.
+      checks.push({ label: 'QR code not already uploaded for this combination', status: 'pass', details: [] })
+    } else {
+      try {
+        const dupeRes = await api.post('/answer-sheet-mappings/check-duplicate-barcodes', {
+          program_name: form.program_name,
+          packet_code: form.packet_code,
+          question_paper_id: form.question_paper_id,
+          course_id: form.course_id,
+          exam_term_id: form.exam_term_id,
+          exam_type_id: form.exam_type_id,
+          semester: form.semester,
+          barcodes: [...csvBarcodes],
+        })
+        const duplicateBarcodes = dupeRes.data.data.duplicate_barcodes || []
+        checks.push({
+          label: 'QR code not already uploaded for this combination',
+          status: duplicateBarcodes.length ? 'fail' : 'pass',
+          details: duplicateBarcodes.length
+            ? [`Already uploaded for this Program/Packet Code/Question Paper/Course/Exam Term/Semester combination: ${capList(duplicateBarcodes).join(', ')}.`]
+            : [],
+        })
+      } catch (err) {
+        checks.push({
+          label: 'QR code not already uploaded for this combination',
+          status: 'fail',
+          details: [err.response?.data?.message || 'Could not check for already-uploaded QR codes — try again.'],
+        })
+      }
+    }
+    validationProgress.value = ''
+
     validationChecks.value = checks
     const allPassed = checks.every((c) => c.status === 'pass')
     validationPassed.value = allPassed
@@ -752,21 +816,40 @@ function cancel() {
                 <p v-if="fieldErrors.packet_code" class="text-[12px] text-brand">{{ fieldErrors.packet_code }}</p>
               </div>
             </div>
-            <div class="flex flex-col gap-1.5 mb-3">
-              <label for="question_paper" class="text-[13px] text-label">Question Paper <span class="text-brand">*</span></label>
-              <SearchableSelect
-                id="question_paper"
-                :ref="(el) => (fieldRefs.question_paper_id.value = el)"
-                v-model="form.question_paper_id"
-                :options="questionPapers"
-                :loading="questionPapersLoading"
-                :error="!!fieldErrors.question_paper_id"
-                placeholder="Select question paper"
-                search-placeholder="Search question papers…"
-                @change="onQuestionPaperChange"
-              />
-              <p v-if="questionPapersError" class="text-[12px] text-brand">{{ questionPapersError }}</p>
-              <p v-else-if="fieldErrors.question_paper_id" class="text-[12px] text-brand">{{ fieldErrors.question_paper_id }}</p>
+            <div class="grid grid-cols-1 sm:grid-cols-[1.6fr_1fr] gap-3 mb-3">
+              <div class="flex flex-col gap-1.5">
+                <label for="question_paper" class="text-[13px] text-label">Question Paper <span class="text-brand">*</span></label>
+                <SearchableSelect
+                  id="question_paper"
+                  :ref="(el) => (fieldRefs.question_paper_id.value = el)"
+                  v-model="form.question_paper_id"
+                  :options="questionPapers"
+                  :loading="questionPapersLoading"
+                  :error="!!fieldErrors.question_paper_id"
+                  placeholder="Select question paper"
+                  search-placeholder="Search question papers…"
+                  @change="onQuestionPaperChange"
+                />
+                <p v-if="questionPapersError" class="text-[12px] text-brand">{{ questionPapersError }}</p>
+                <p v-else-if="fieldErrors.question_paper_id" class="text-[12px] text-brand">{{ fieldErrors.question_paper_id }}</p>
+              </div>
+
+              <div class="flex flex-col gap-1.5">
+                <label for="exam_type" class="text-[13px] text-label">Exam Type <span class="text-brand">*</span></label>
+                <SearchableSelect
+                  id="exam_type"
+                  :ref="(el) => (fieldRefs.exam_type_id.value = el)"
+                  v-model="form.exam_type_id"
+                  :options="availableExamTypes"
+                  :loading="examTypesLoading"
+                  :error="!!fieldErrors.exam_type_id"
+                  placeholder="Select exam type"
+                  search-placeholder="Search exam types…"
+                  @change="clearFieldError('exam_type_id')"
+                />
+                <p v-if="examTypesError" class="text-[12px] text-brand">{{ examTypesError }}</p>
+                <p v-else-if="fieldErrors.exam_type_id" class="text-[12px] text-brand">{{ fieldErrors.exam_type_id }}</p>
+              </div>
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-[1.4fr_1.2fr_0.7fr] gap-3 mb-3">

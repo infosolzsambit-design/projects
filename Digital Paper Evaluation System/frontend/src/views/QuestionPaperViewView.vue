@@ -102,15 +102,27 @@ function goToConfigure() {
               >
                 {{ paper.status === 'ready' ? 'Ready' : 'Draft' }}
               </span>
+              <span
+                v-if="paper?.evaluation_started"
+                class="inline-flex items-center gap-1 rounded-full bg-gray-100 text-gray-600 px-2.5 py-1 text-[10px] font-semibold align-middle"
+                title="A teacher has already started evaluating a sheet mapped to this paper — the structure is locked."
+              >
+                <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+                Locked
+              </span>
             </h1>
-            <p class="mt-1 text-[13px] sm:text-sm text-muted">Read-only — use Edit Setup to make changes.</p>
+            <p class="mt-1 text-[13px] sm:text-sm text-muted">
+              {{ paper?.evaluation_started ? 'Read-only — locked because a teacher has already started evaluating a mapped sheet.' : 'Read-only — use Edit Setup to make changes.' }}
+            </p>
           </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <button
             v-if="authStore.can('question-paper-edit')"
             type="button"
-            class="mt-0.5 h-8 inline-flex items-center gap-1.5 rounded-xl border border-input-border bg-white text-[13px] font-semibold text-gray-700 px-4 hover:border-brand-blue hover:text-brand-blue transition-colors"
+            class="mt-0.5 h-8 inline-flex items-center gap-1.5 rounded-xl border border-input-border bg-white text-[13px] font-semibold text-gray-700 px-4 hover:border-brand-blue hover:text-brand-blue transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-input-border disabled:hover:text-gray-700"
+            :disabled="paper?.evaluation_started"
+            :title="paper?.evaluation_started ? 'Locked — a teacher has already started evaluating a sheet mapped to this paper.' : ''"
             @click="goToConfigure"
           >
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" /></svg>

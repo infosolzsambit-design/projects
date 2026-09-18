@@ -34,6 +34,11 @@ class AnswerSheetResource extends JsonResource
             'id' => $this->id,
             'teacher_id' => $this->teacher_id,
             'teacher_name' => $this->whenLoaded('teacher', fn () => $this->teacher?->name),
+            // Only ever non-null when the caller also eager-loaded
+            // teacher.teacherDetail (see QuestionAnswerSheetMappingController
+            // ::rows()) — everyone else gets null here, same as every other
+            // whenLoaded field in this resource.
+            'teacher_emp_code' => $this->whenLoaded('teacher', fn () => $this->teacher?->teacherDetail?->emp_code),
             // Set together with teacher_id on assign — see
             // AssignTeacherService::assign()'s own docblock. A future
             // "change timings" screen will let these be edited after the
@@ -55,6 +60,33 @@ class AnswerSheetResource extends JsonResource
             'draft_marks' => $this->draft_marks,
             'draft_marks_breakdown' => $this->draft_marks_breakdown,
             'draft_annotations' => $this->draft_annotations,
+            // Set via MyPendingCourseController::raiseIssue() (the
+            // "Problem" action on EvaluatePaperView.vue) — null unless a
+            // teacher has raised one against this physical sheet.
+            // issue_master_name only renders when the caller eager-loaded
+            // 'issueMaster' (see papers() above); everyone else gets null,
+            // same as every other whenLoaded field in this resource.
+            'issue_master_id' => $this->issue_master_id,
+            'issue_master_name' => $this->whenLoaded('issueMaster', fn () => $this->issueMaster?->name),
+            'issue_status' => $this->issue_status,
+            'issue_remarks' => $this->issue_remarks,
+            'issue_raised_at' => $this->issue_raised_at?->format('Y-m-d H:i'),
+            // Only meaningful once issue_status is 'resolved' — the admin's
+            // own note from NotificationController's resolve*Issue() methods,
+            // shown as the "Resolved" flag's tooltip on MyPendingCoursesView.vue.
+            'issue_admin_remarks' => $this->issue_admin_remarks,
+            'issue_fixed_at' => $this->issue_fixed_at?->format('Y-m-d H:i'),
+            // MyPendingCoursesView.vue's own "Evaluate"/"Continue Evaluate"
+            // button reads this to decide whether to disable itself — an
+            // *open* Printing Issue means the physical sheet itself needs
+            // fixing before anyone can evaluate it, but an open Timing
+            // Issue doesn't block anything (the teacher can keep working
+            // against the existing schedule while an admin sorts the new
+            // one out). Resolved by id (config('issues.printing_issue_id')),
+            // never by matching a name string, and computed here so the
+            // frontend never needs to know either id itself.
+            'blocks_evaluation' => $this->issue_status === 'open'
+                && (int) $this->issue_master_id === (int) config('issues.printing_issue_id'),
             'branch_code' => $this->branch_code,
             'branch_name' => $this->branch_name,
             'subject_code' => $this->subject_code,

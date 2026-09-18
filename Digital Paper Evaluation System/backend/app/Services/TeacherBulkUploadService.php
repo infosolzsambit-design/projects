@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Department;
+use App\Models\Role;
 use App\Models\TeacherDetail;
 use App\Models\User;
 use Illuminate\Support\Collection;
@@ -111,7 +112,10 @@ class TeacherBulkUploadService
      */
     public function createRows(array $rows): array
     {
-        $teacherRoleId = (int) config('roles.teacher_id');
+        // Resolved by name, not a fixed id — see TeacherController::store()'s
+        // own comment on why. Looked up once, not per row — same "fast
+        // query" reasoning as everywhere else in this bulk flow.
+        $teacherRole = Role::where('name', 'Teacher')->first();
         $created = [];
 
         foreach (array_values($rows) as $row) {
@@ -131,7 +135,9 @@ class TeacherBulkUploadService
                 'is_active' => true,
             ]);
 
-            $user->assignRole($teacherRoleId);
+            if ($teacherRole) {
+                $user->assignRole($teacherRole);
+            }
 
             TeacherDetail::create([
                 'user_id' => $user->id,

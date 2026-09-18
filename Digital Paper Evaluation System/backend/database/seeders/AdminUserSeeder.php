@@ -39,6 +39,10 @@ class AdminUserSeeder extends Seeder
             $user->restore();
         }
 
-        $user->syncRoles([(int) config('roles.super_admin_id')]);
+        // Only the *first* configured super-admin id — see RoleSeeder.php's
+        // own comment on config('roles.super_admin_id') being a list; this
+        // seeded account only ever gets the one "Super Admin" role it
+        // actually creates, not any other role also listed there.
+        $user->syncRoles([(int) ((array) config('roles.super_admin_id'))[0]]);
     }
 }

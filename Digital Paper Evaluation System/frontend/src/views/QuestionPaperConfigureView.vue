@@ -19,6 +19,12 @@ const paperId = computed(() => route.params.id)
 const loading = ref(true)
 const loadError = ref('')
 const paperStatus = ref('draft')
+// Backend re-checks this too (PUT rejects with a 422 once true — see
+// QuestionPaperController::hasStartedEvaluation()); this is the same
+// check surfaced before the editable builder ever mounts, so a direct
+// visit to this URL (bookmark, back button) can't get past the "locked"
+// notice the list/view pages already show for this same paper.
+const evaluationStarted = ref(false)
 const pdfSource = ref('')
 const initialForm = ref(null)
 const initialGroups = ref([])
@@ -30,6 +36,7 @@ async function loadPaper() {
     const res = await api.get(`/question-papers/${paperId.value}`)
     const data = res.data.data
     paperStatus.value = data.status
+    evaluationStarted.value = !!data.evaluation_started
     pdfSource.value = resolveStorageUrl(data.pdf_url)
     initialForm.value = {
       exam_year: data.exam_year,
@@ -104,6 +111,13 @@ function onSaved() {
 
       <div v-if="loading" class="text-center text-sm text-muted py-10">Loading&hellip;</div>
       <p v-else-if="loadError" class="text-center text-sm text-brand py-10">{{ loadError }}</p>
+      <div v-else-if="evaluationStarted" class="bg-white rounded-2xl shadow-panel p-10 text-center">
+        <p class="text-[15px] font-semibold text-gray-900">This question paper's structure is locked.</p>
+        <p class="mt-1 text-[13px] text-muted">A teacher has already started evaluating an answer sheet mapped to it, so it can no longer be edited.</p>
+        <button type="button" class="mt-4 h-9 inline-flex items-center gap-1.5 rounded-xl border border-input-border bg-white text-[13px] font-semibold text-gray-700 px-4 hover:border-brand-blue hover:text-brand-blue transition-colors" @click="goToList">
+          Back to Question Papers
+        </button>
+      </div>
       <QuestionPaperStructureBuilder
         v-else
         :pdf-source="pdfSource"

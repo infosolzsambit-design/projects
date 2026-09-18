@@ -29,6 +29,7 @@ class QuestionPaperNode extends Model
         'instruction',
         'mode',
         'choose_count',
+        'slots_override',
         'marks',
         'bloom_level',
         'co',
@@ -42,6 +43,7 @@ class QuestionPaperNode extends Model
     {
         return [
             'choose_count' => 'integer',
+            'slots_override' => 'integer',
             'marks' => 'integer',
             'sort_order' => 'integer',
         ];

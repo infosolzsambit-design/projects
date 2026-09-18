@@ -31,6 +31,15 @@ class QuestionPaperResource extends JsonResource
             'full_marks' => $this->full_marks,
             'time_allotted' => $this->time_allotted,
             'status' => $this->status,
+            // Set by QuestionPaperController — a subquery in index(), a
+            // direct check in show() (see hasStartedEvaluation()). True
+            // once any mapped answer sheet has any real evaluation work on
+            // it (see that method for exactly what counts) — the
+            // structure is locked at that point since editing it would
+            // silently orphan draft_marks_breakdown's node-id references.
+            // The PDF file itself stays swappable even then — see
+            // QuestionPaperController::updatePdf().
+            'evaluation_started' => (bool) $this->evaluation_started,
             // whenLoaded('groups') just gates whether the structure tree is
             // included at all (index() doesn't load it, show()/update() do)
             // — the tree itself is built here from one flat query across
@@ -64,6 +73,7 @@ class QuestionPaperResource extends JsonResource
                 'instruction' => $node->instruction,
                 'mode' => $node->mode,
                 'choose_count' => $node->choose_count,
+                'slots_override' => $node->slots_override,
                 'marks' => $node->marks,
                 'bloom_level' => $node->bloom_level,
                 'co' => $node->co,

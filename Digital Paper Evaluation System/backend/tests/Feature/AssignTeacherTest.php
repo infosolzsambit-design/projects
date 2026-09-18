@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AnswerSheet;
 use App\Models\Course;
 use App\Models\ExamTerm;
+use App\Models\ExamType;
 use App\Models\QuestionAnswerSheetMapping;
 use App\Models\QuestionPaper;
 use App\Models\TeacherDetail;
@@ -34,6 +35,8 @@ class AssignTeacherTest extends TestCase
             'evaluation_start_date' => '2026-01-10',
             'evaluation_end_date' => '2026-01-20',
             'evaluation_time_per_sheet' => '60',
+            'email_subject' => 'Answer Sheets Assigned',
+            'email_body' => 'You have been assigned answer sheets to evaluate.',
         ];
     }
 
@@ -63,6 +66,7 @@ class AssignTeacherTest extends TestCase
             'filters' => [
                 'program_name' => $mapping->program_name,
                 'exam_term_id' => $mapping->exam_term_id,
+                'exam_type_id' => $mapping->exam_type_id,
                 'course_id' => $mapping->course_id,
                 'semester' => $mapping->semester,
                 'exam_year' => 2026,
@@ -113,6 +117,8 @@ class AssignTeacherTest extends TestCase
             'evaluation_start_date' => '2026-02-01',
             'evaluation_end_date' => '2026-02-15',
             'evaluation_time_per_sheet' => '90',
+            'email_subject' => 'Answer Sheets Assigned',
+            'email_body' => 'You have been assigned answer sheets to evaluate.',
             'assignments' => [['teacher_id' => $teacher, 'quantity' => 4]],
         ]);
 
@@ -136,6 +142,8 @@ class AssignTeacherTest extends TestCase
             'evaluation_start_date' => '2026-02-01 09:30',
             'evaluation_end_date' => '2026-02-15 17:45',
             'evaluation_time_per_sheet' => '75',
+            'email_subject' => 'Answer Sheets Assigned',
+            'email_body' => 'You have been assigned answer sheets to evaluate.',
             'assignments' => [['teacher_id' => $teacher, 'quantity' => 2]],
         ]);
 
@@ -165,7 +173,12 @@ class AssignTeacherTest extends TestCase
         $response->assertJsonValidationErrors(['evaluation_end_date']);
     }
 
-    public function test_assign_requires_evaluation_time_per_sheet(): void
+    /**
+     * evaluation_time_per_sheet is optional — a blank value means no
+     * per-sheet time limit for the evaluator (see EvaluatePaperView.vue's
+     * totalMinutes, which already treats a null value as "no limit").
+     */
+    public function test_assign_succeeds_with_no_evaluation_time_per_sheet(): void
     {
         $this->actingAdmin();
         ['filters' => $filters] = $this->mappingWithPendingSheets(2);
@@ -175,11 +188,16 @@ class AssignTeacherTest extends TestCase
             ...$filters,
             'evaluation_start_date' => '2026-02-10 09:00',
             'evaluation_end_date' => '2026-02-10 15:00',
+            'email_subject' => 'Answer Sheets Assigned',
+            'email_body' => 'You have been assigned answer sheets to evaluate.',
             'assignments' => [['teacher_id' => $teacher, 'quantity' => 1]],
         ]);
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['evaluation_time_per_sheet']);
+        $response->assertOk();
+        $this->assertDatabaseHas('answer_sheets', [
+            'teacher_id' => $teacher,
+            'evaluation_time_per_sheet' => null,
+        ]);
     }
 
     public function test_assign_rejects_a_decimal_evaluation_time_per_sheet(): void
@@ -257,6 +275,7 @@ class AssignTeacherTest extends TestCase
         $response = $this->withApiKey()->postJson('/api/v1/assign-teacher', [
             'program_name' => 'Nonexistent Program',
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'exam_type_id' => ExamType::factory()->create()->id,
             'course_id' => Course::factory()->create()->id,
             'semester' => 1,
             'exam_year' => 2026,
@@ -298,5 +317,65 @@ class AssignTeacherTest extends TestCase
         $response->assertOk();
         $this->assertSame(2, AnswerSheet::where('teacher_id', $teacher)->count());
         $this->assertSame(3, AnswerSheet::whereNull('teacher_id')->count());
+    }
+
+    public function test_assign_requires_email_subject_and_body(): void
+    {
+        $this->actingAdmin();
+        ['filters' => $filters] = $this->mappingWithPendingSheets(2);
+        $teacher = TeacherDetail::factory()->create()->user_id;
+
+        $response = $this->withApiKey()->postJson('/api/v1/assign-teacher', [
+            ...$filters,
+            'evaluation_start_date' => '2026-02-10 09:00',
+            'evaluation_end_date' => '2026-02-10 15:00',
+            'assignments' => [['teacher_id' => $teacher, 'quantity' => 1]],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['email_subject', 'email_body']);
+    }
+
+    /**
+     * dispatch(...)->afterResponse() still runs within a test (the test
+     * kernel's terminate() is called — see MakesHttpRequests::call()), and
+     * MAIL_MAILER=array/QUEUE_CONNECTION=sync in phpunit.xml means this
+     * runs synchronously with no real network call — so this can assert
+     * the real end-to-end effect (an EmailLog row per assigned teacher)
+     * instead of just faking the send.
+     */
+    public function test_assign_logs_and_sends_an_email_to_every_assigned_teacher(): void
+    {
+        $admin = $this->actingAdmin();
+        ['filters' => $filters] = $this->mappingWithPendingSheets(6);
+        $teacherA = TeacherDetail::factory()->create()->user_id;
+        $teacherB = TeacherDetail::factory()->create()->user_id;
+
+        $response = $this->withApiKey()->postJson('/api/v1/assign-teacher', [
+            ...$filters,
+            ...$this->evaluationWindow(),
+            'assignments' => [
+                ['teacher_id' => $teacherA, 'quantity' => 4],
+                ['teacher_id' => $teacherB, 'quantity' => 2],
+            ],
+        ]);
+
+        $response->assertOk();
+
+        $this->assertDatabaseCount('email_logs', 2);
+        $this->assertDatabaseHas('email_logs', [
+            'sender_id' => $admin->id,
+            'receiver_id' => $teacherA,
+            'type' => 'answer_sheet_assigned',
+            'subject' => 'Answer Sheets Assigned',
+            'is_sent' => true,
+        ]);
+        $this->assertDatabaseHas('email_logs', [
+            'sender_id' => $admin->id,
+            'receiver_id' => $teacherB,
+            'type' => 'answer_sheet_assigned',
+            'subject' => 'Answer Sheets Assigned',
+            'is_sent' => true,
+        ]);
     }
 }

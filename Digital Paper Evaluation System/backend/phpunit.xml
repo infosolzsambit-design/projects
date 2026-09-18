@@ -34,7 +34,6 @@
         <env name="DB_PASSWORD" value="12345"/>
         <env name="DB_URL" value=""/>
         <env name="API_KEY" value="test-api-key-0123456789abcdef"/>
-        <env name="SUPER_ADMIN_ROLE_ID" value="1"/>
         <!-- Lets feature tests verify automatic model auditing despite
              App::runningInConsole() being true for the whole test run. -->
         <env name="AUDIT_CONSOLE" value="true"/>

@@ -26,6 +26,8 @@ class QuestionAnswerSheetMappingResource extends JsonResource
             'semester' => $this->semester,
             'exam_term_id' => $this->exam_term_id,
             'exam_term_name' => $this->whenLoaded('examTerm', fn () => $this->examTerm?->name),
+            'exam_type_id' => $this->exam_type_id,
+            'exam_type_name' => $this->whenLoaded('examType', fn () => $this->examType?->name),
             'program_name' => $this->program_name,
             'packet_code' => $this->packet_code,
             // Set via ->withCount('answerSheets') on the query (index()/

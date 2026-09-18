@@ -44,11 +44,6 @@ function runSearch() {
   fetchExamTerms(1)
 }
 
-const statusOptions = [
-  { value: '', label: 'All Status' },
-  { value: 'yes', label: 'Active' },
-  { value: 'no', label: 'Inactive' },
-]
 const showFilter = ref(false)
 function toggleFilter() {
   showFilter.value = !showFilter.value
@@ -56,13 +51,18 @@ function toggleFilter() {
 function closeFilter() {
   showFilter.value = false
 }
-function selectStatus(value) {
-  statusFilter.value = value
+onMounted(() => document.addEventListener('click', closeFilter))
+onBeforeUnmount(() => document.removeEventListener('click', closeFilter))
+
+function applyFilters() {
   showFilter.value = false
   fetchExamTerms(1)
 }
-onMounted(() => document.addEventListener('click', closeFilter))
-onBeforeUnmount(() => document.removeEventListener('click', closeFilter))
+function resetFilters() {
+  statusFilter.value = ''
+  showFilter.value = false
+  fetchExamTerms(1)
+}
 
 function goToPage(page) {
   if (page < 1 || page > pagination.last_page || page === pagination.current_page) return
@@ -188,29 +188,43 @@ onMounted(async () => {
         >
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
         </button>
-        <button
-          type="button"
-          class="h-10 shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[13px] font-medium px-3.5 transition-colors"
-          :aria-expanded="showFilter"
-          @click="toggleFilter"
-        >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
-          Filter
-        </button>
-        <div
-          v-show="showFilter"
-          class="absolute right-4 sm:right-5 top-full mt-2 w-40 bg-white rounded-xl shadow-panel border border-soft py-1.5 z-30 text-left"
-        >
+        <div class="relative">
           <button
-            v-for="option in statusOptions"
-            :key="option.value"
             type="button"
-            class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] transition-colors"
-            :class="statusFilter === option.value ? 'text-brand-blue font-semibold bg-soft' : 'text-gray-700 hover:bg-soft hover:text-brand-blue'"
-            @click="selectStatus(option.value)"
+            class="h-10 shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[13px] font-medium px-3.5 transition-colors"
+            :aria-expanded="showFilter"
+            @click="toggleFilter"
           >
-            {{ option.label }}
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+            Filter
           </button>
+          <div
+            v-show="showFilter"
+            class="absolute right-0 top-full mt-2 z-40 w-[min(260px,calc(100vw-2rem))] bg-white rounded-2xl shadow-panel border border-soft p-4 text-left"
+            role="dialog"
+            aria-label="Filter exam terms"
+          >
+            <div class="flex flex-col gap-3">
+              <div class="flex flex-col gap-1">
+                <label class="text-[13px] text-label">Status</label>
+                <div class="relative">
+                  <select
+                    v-model="statusFilter"
+                    class="appearance-none w-full h-8 pl-3 pr-9 rounded-xl bg-input-bg text-[13px] text-gray-800 outline-none border border-input-border focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 transition cursor-pointer"
+                  >
+                    <option value="">All Status</option>
+                    <option value="yes">Active</option>
+                    <option value="no">Inactive</option>
+                  </select>
+                  <svg class="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9" /></svg>
+                </div>
+              </div>
+              <div class="flex items-center justify-end gap-2 pt-1">
+                <button type="button" class="min-w-[88px] h-9 px-5 rounded-full border border-input-border bg-white text-[13px] font-semibold text-gray-700 hover:border-brand-blue hover:text-brand-blue transition-colors" @click="resetFilters">Reset</button>
+                <button type="button" class="min-w-[88px] h-9 px-5 rounded-full bg-btn-gradient text-white text-[13px] font-semibold hover:opacity-90 transition-all" @click="applyFilters">Search</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -220,11 +234,11 @@ onMounted(async () => {
       <div class="overflow-x-auto">
         <table class="w-full min-w-[560px] text-left">
           <thead>
-            <tr class="bg-subject-header text-white text-[13px] font-medium">
-              <th class="px-4 py-3.5 font-medium rounded-tl-2xl">#</th>
-              <th class="px-4 py-3.5 font-medium">Name</th>
-              <th class="px-4 py-3.5 font-medium" v-if="authStore.can('exam-term-status-change')">Status</th>
-              <th class="px-4 py-3.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('exam-term-edit') || authStore.can('exam-term-delete')">Action</th>
+            <tr class="bg-subject-header text-white text-[12px] font-medium">
+              <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
+              <th class="px-4 py-1.5 font-medium">Name</th>
+              <th class="px-4 py-1.5 font-medium" v-if="authStore.can('exam-term-status-change')">Status</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('exam-term-edit') || authStore.can('exam-term-delete')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
@@ -238,33 +252,33 @@ onMounted(async () => {
               v-for="(examTerm, index) in examTerms"
               v-else
               :key="examTerm.id"
-              class="text-[13px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0"
+              class="text-[12px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0"
             >
-              <td class="px-4 py-3.5">
-                <span class="inline-flex items-center justify-center min-w-[46px] rounded-md status-gradient-border px-2 py-1.5 text-[12px] font-medium">
+              <td class="px-4 py-1">
+                <span class="inline-flex items-center justify-center min-w-[40px] rounded-md status-gradient-border px-2 py-0.5 text-[11px] font-medium">
                   # {{ (pagination.current_page - 1) * pagination.per_page + index + 1 }}
                 </span>
               </td>
-              <td class="px-4 py-3.5 font-semibold">{{ examTerm.name }}</td>
-              <td v-if="authStore.can('exam-term-status-change')" class="px-4 py-3.5" @click.stop>
+              <td class="px-4 py-1 font-semibold">{{ examTerm.name }}</td>
+              <td v-if="authStore.can('exam-term-status-change')" class="px-4 py-1" @click.stop>
                 <button
                   type="button"
                   role="switch"
                   :aria-checked="examTerm.status"
                   :disabled="togglingId === examTerm.id"
                   :title="examTerm.status ? 'Click to deactivate' : 'Click to activate'"
-                  class="relative inline-flex items-center w-24 h-8 rounded-full text-[12px] font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                  :class="examTerm.status ? 'bg-btn-gradient text-white justify-start pl-3 pr-7' : 'bg-gray-300 text-gray-600 justify-end pl-7 pr-3'"
+                  class="relative inline-flex items-center w-20 h-6 rounded-full text-[10px] font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  :class="examTerm.status ? 'bg-btn-gradient text-white justify-start pl-2.5 pr-6' : 'bg-gray-300 text-gray-600 justify-end pl-6 pr-2.5'"
                   @click="toggleStatus(examTerm)"
                 >
                   <span>{{ examTerm.status ? 'Active' : 'Inactive' }}</span>
                   <span
-                    class="absolute top-[7px] left-[7px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform duration-200"
-                    :class="examTerm.status ? 'translate-x-16' : 'translate-x-0'"
+                    class="absolute top-[5px] left-[5px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform duration-200"
+                    :class="examTerm.status ? 'translate-x-[56px]' : 'translate-x-0'"
                   ></span>
                 </button>
               </td>
-              <td v-if="authStore.can('exam-term-edit') || authStore.can('exam-term-delete')" class="px-4 py-3.5 text-center relative" @click.stop>
+              <td v-if="authStore.can('exam-term-edit') || authStore.can('exam-term-delete')" class="px-4 py-1 text-center relative" @click.stop>
                 <RowActionMenu>
                   <button v-if="authStore.can('exam-term-edit')" type="button" class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors" @click="goToEdit(examTerm)">
                     Edit

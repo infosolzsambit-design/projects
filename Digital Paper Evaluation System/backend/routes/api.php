@@ -6,19 +6,27 @@ use App\Http\Controllers\API\V1\Auth\AuthController;
 use App\Http\Controllers\API\V1\Auth\PermissionController;
 use App\Http\Controllers\API\V1\Auth\ProfileController;
 use App\Http\Controllers\API\V1\Auth\RoleController;
+use App\Http\Controllers\API\V1\DashboardController;
+use App\Http\Controllers\API\V1\EmailLogController;
 use App\Http\Controllers\API\V1\GeneralSettingController;
+use App\Http\Controllers\API\V1\IssueMasterController;
 use App\Http\Controllers\API\V1\Master\CourseBulkUploadController;
 use App\Http\Controllers\API\V1\Master\CourseController;
 use App\Http\Controllers\API\V1\Master\DepartmentBulkUploadController;
 use App\Http\Controllers\API\V1\Master\DepartmentController;
 use App\Http\Controllers\API\V1\Master\ExamTermController;
+use App\Http\Controllers\API\V1\Master\ExamTypeController;
 use App\Http\Controllers\API\V1\Master\PermissionGroupController;
 use App\Http\Controllers\API\V1\Master\PermissionSubGroupController;
 use App\Http\Controllers\API\V1\Master\ProgramBulkUploadController;
 use App\Http\Controllers\API\V1\Master\ProgramController;
+use App\Http\Controllers\API\V1\MyCompletedCourseController;
 use App\Http\Controllers\API\V1\MyPendingCourseController;
+use App\Http\Controllers\API\V1\NotificationController;
 use App\Http\Controllers\API\V1\QuestionAnswerSheetMappingController;
 use App\Http\Controllers\API\V1\QuestionPaperController;
+use App\Http\Controllers\API\V1\Report\AnswerBookTopSheetReportController;
+use App\Http\Controllers\API\V1\Report\TeacherWiseEvaluationReportController;
 use App\Http\Controllers\API\V1\StudentBulkUploadController;
 use App\Http\Controllers\API\V1\StudentController;
 use App\Http\Controllers\API\V1\TeacherBulkUploadController;
@@ -69,9 +77,35 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     Route::get('my-pending-courses', [MyPendingCourseController::class, 'subjects']);
     Route::get('my-pending-courses/papers', [MyPendingCourseController::class, 'papers']);
     Route::post('my-pending-courses/papers/{answer_sheet}/start-evaluation', [MyPendingCourseController::class, 'startEvaluation']);
-    Route::get('my-pending-courses/papers/{answer_sheet}', [MyPendingCourseController::class, 'show']);
+    // Looked up by the one-time token start-evaluation just minted, not a
+    // route-bound {answer_sheet} id — see showByToken()'s own docblock.
+    Route::get('my-pending-courses/evaluate/{token}', [MyPendingCourseController::class, 'showByToken']);
     Route::post('my-pending-courses/papers/{answer_sheet}/submit-marks', [MyPendingCourseController::class, 'submitMarks']);
     Route::post('my-pending-courses/papers/{answer_sheet}/save-draft', [MyPendingCourseController::class, 'saveDraft']);
+    Route::post('my-pending-courses/papers/{answer_sheet}/raise-issue', [MyPendingCourseController::class, 'raiseIssue']);
+
+    // Mirror of the above, read-only — see MyCompletedCourseController's
+    // own docblock.
+    Route::get('my-completed-courses', [MyCompletedCourseController::class, 'subjects']);
+    Route::get('my-completed-courses/papers', [MyCompletedCourseController::class, 'papers']);
+
+    // Dropdown source for the "Problem" modal above — see
+    // IssueMasterController's own docblock.
+    Route::get('issue-masters', [IssueMasterController::class, 'index']);
+
+    // Admin dashboard's own summary — see DashboardController's own docblock.
+    Route::get('dashboard/admin-summary', [DashboardController::class, 'adminSummary']);
+    // Each "See All" modal behind admin-summary's own capped lists.
+    Route::get('dashboard/department-progress', [DashboardController::class, 'departments']);
+    Route::get('dashboard/teacher-workload', [DashboardController::class, 'teacherWorkloadFull']);
+    Route::get('dashboard/course-pending', [DashboardController::class, 'coursePendingFull']);
+
+    // Sidebar's "Notifications" page — see NotificationController's own
+    // docblock.
+    Route::get('notifications', [NotificationController::class, 'index']);
+    Route::get('notifications/unresolved-count', [NotificationController::class, 'unresolvedCount']);
+    Route::post('notifications/{answer_sheet}/resolve-timing-issue', [NotificationController::class, 'resolveTimingIssue']);
+    Route::post('notifications/{answer_sheet}/resolve-printing-issue', [NotificationController::class, 'resolvePrintingIssue']);
 
     Route::post('users/{user}/restore', [UserController::class, 'restore'])->withTrashed();
     Route::delete('users/{user}/force', [UserController::class, 'forceDestroy'])->withTrashed();
@@ -107,6 +141,9 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     Route::post('exam-terms/{exam_term}/restore', [ExamTermController::class, 'restore'])->withTrashed();
     Route::apiResource('exam-terms', ExamTermController::class);
 
+    Route::post('exam-types/{exam_type}/restore', [ExamTypeController::class, 'restore'])->withTrashed();
+    Route::apiResource('exam-types', ExamTypeController::class);
+
     Route::post('permission-groups/{permission_group}/restore', [PermissionGroupController::class, 'restore'])->withTrashed();
     Route::apiResource('permission-groups', PermissionGroupController::class);
 
@@ -125,6 +162,7 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     Route::get('teachers/{teacher}/esign', [TeacherEsignController::class, 'show']);
     Route::post('teachers/{teacher}/esign', [TeacherEsignController::class, 'update']);
     Route::get('teachers/{teacher}/assignments', [TeacherController::class, 'assignments']);
+    Route::get('teachers/{teacher}/courses', [TeacherController::class, 'courses']);
     Route::post('teachers/{teacher}/assignments/reassign', [TeacherController::class, 'reassignAssignment']);
     Route::post('teachers/{teacher}/restore', [TeacherController::class, 'restore'])->withTrashed();
     Route::apiResource('teachers', TeacherController::class);
@@ -133,13 +171,34 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     // AssignTeacherService's own docblock for what this actually stores.
     Route::post('assign-teacher', [AssignTeacherController::class, 'store']);
 
+    // Sidebar's Report → Teacher Wise Report — see that controller's own
+    // docblock for why index()/export() share one query.
+    Route::get('reports/teacher-wise-evaluation', [TeacherWiseEvaluationReportController::class, 'index']);
+    Route::get('reports/teacher-wise-evaluation/export', [TeacherWiseEvaluationReportController::class, 'export']);
+
+    // Sidebar's Report → Answer Book / Top Sheet — see that controller's
+    // own docblock for what each of the three endpoints renders.
+    Route::get('reports/answer-book-top-sheet', [AnswerBookTopSheetReportController::class, 'index']);
+    Route::get('reports/answer-book-top-sheet/export', [AnswerBookTopSheetReportController::class, 'export']);
+    Route::get('reports/answer-book-top-sheet/{answerSheet}/view', [AnswerBookTopSheetReportController::class, 'view']);
+
     Route::get('audits', [AuditController::class, 'index']);
     Route::get('audits/{audit}', [AuditController::class, 'show']);
 
     Route::get('general-settings', [GeneralSettingController::class, 'index']);
     Route::post('general-settings', [GeneralSettingController::class, 'update']);
 
+    // Configuration → Email Logs — deliberately no permission gating, see
+    // EmailLogController's own docblock.
+    Route::get('email-logs', [EmailLogController::class, 'index']);
+    Route::get('email-logs/types', [EmailLogController::class, 'types']);
+    Route::post('email-logs/{email_log}/resend', [EmailLogController::class, 'resend']);
+
     Route::post('question-papers/{question_paper}/restore', [QuestionPaperController::class, 'restore'])->withTrashed();
+    // File-only swap, left open even once the resource's own update()/
+    // destroy() are locked by evaluation_started — see
+    // QuestionPaperController::updatePdf()'s own docblock for why.
+    Route::post('question-papers/{question_paper}/pdf', [QuestionPaperController::class, 'updatePdf']);
     Route::apiResource('question-papers', QuestionPaperController::class);
 
     // No update() — a packet's rows are always replaced wholesale by a
@@ -148,6 +207,12 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     // Explicit parameter name — the resource name's own default
     // ("answer_sheet_mapping") wouldn't match the model's actual name
     // (QuestionAnswerSheetMapping) that the controller type-hints.
+    // AnswerSheetUploadView.vue's Check step's own pre-flight "is this QR
+    // code already used for this exact packet combination" call — see that
+    // controller method's own docblock. A literal path segment, so it must
+    // be registered ahead of the apiResource's own GET {mapping} (show) to
+    // never risk being swallowed by that wildcard.
+    Route::post('answer-sheet-mappings/check-duplicate-barcodes', [QuestionAnswerSheetMappingController::class, 'checkDuplicateBarcodes']);
     Route::apiResource('answer-sheet-mappings', QuestionAnswerSheetMappingController::class)
         ->parameters(['answer-sheet-mappings' => 'question_answer_sheet_mapping'])
         ->only(['index', 'store', 'show', 'destroy']);
@@ -158,4 +223,7 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     // AnswerSheetsView.vue's "View Answer Sheets" modal). Same URI as the
     // POST above, different verb — GET lists, POST appends a batch.
     Route::get('answer-sheet-mappings/{question_answer_sheet_mapping}/rows', [QuestionAnswerSheetMappingController::class, 'rows']);
+    // Removes one row from a packet without touching the rest of it — see
+    // AnswerSheetRowsModal.vue's own row action.
+    Route::delete('answer-sheet-mappings/{question_answer_sheet_mapping}/rows/{answer_sheet}', [QuestionAnswerSheetMappingController::class, 'deleteRow']);
 });

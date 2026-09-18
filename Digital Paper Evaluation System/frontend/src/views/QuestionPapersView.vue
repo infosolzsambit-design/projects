@@ -1,17 +1,20 @@
 <script setup>
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../utils/api'
 import { useAuthStore } from '../stores/auth'
+import { useExamYearStore } from '../stores/examYear'
 import { useConfirm } from '../composables/useConfirm'
 import { useToast } from '../composables/useToast'
 import Pagination from '../components/common/Pagination.vue'
 import RowActionMenu from '../components/common/RowActionMenu.vue'
+import ReplaceQuestionPaperPdfModal from '../components/questionPapers/ReplaceQuestionPaperPdfModal.vue'
 
 const router = useRouter()
 const { confirmDialog } = useConfirm()
 const toast = useToast()
 const authStore = useAuthStore()
+const examYearStore = useExamYearStore()
 
 const papers = ref([])
 const loading = ref(true)
@@ -29,6 +32,13 @@ async function fetchPapers(page = 1) {
     const params = { page, per_page: pagination.per_page }
     if (search.value) params.search = search.value
     if (statusFilter.value !== '') params.status = statusFilter.value
+    // Only this page forces exam_year — the endpoint itself stays
+    // optional-only server-side (it's shared with AssignTeacherView.vue's
+    // own cross-year bulk load, which must never be scoped down — see
+    // QuestionPaperController::index()'s own comment) so this list is the
+    // one actually enforcing "one year at a time" for anyone but a super
+    // admin, per stores/examYear.js's own docblock.
+    if (!authStore.user?.is_super_admin) params.exam_year = examYearStore.selectedYear
 
     const res = await api.get('/question-papers', { params })
     papers.value = res.data.data.items
@@ -83,6 +93,22 @@ function goToView(paper) {
   router.push({ name: 'question-papers-view', params: { id: paper.id } })
 }
 
+// "Replace PDF" — deliberately available even when paper.evaluation_started
+// has locked "Edit Setup"/"Delete" below (see
+// QuestionPaperController::updatePdf()'s own docblock): swapping the file
+// alone can't orphan a teacher's in-progress evaluation the way a
+// structure edit could, and a bad scan is exactly the kind of thing a
+// teacher already mid-evaluation most needs corrected.
+const replacingPdfPaper = ref(null)
+function openReplacePdf(paper) {
+  replacingPdfPaper.value = paper
+}
+function onPdfReplaced() {
+  replacingPdfPaper.value = null
+  toast.success('Question paper PDF replaced successfully.')
+  fetchPapers(pagination.current_page)
+}
+
 async function removePaper(paper) {
   const confirmed = await confirmDialog({
     title: 'Delete Question Paper',
@@ -114,6 +140,15 @@ onMounted(async () => {
   permissionChecked.value = true
   if (authStore.can('question-paper-list')) fetchPapers(1)
 })
+
+// Switching the header's Exam Year picker while already on this page
+// re-runs the list against the new year, same as changing search/status.
+watch(
+  () => examYearStore.selectedYear,
+  () => {
+    if (permissionChecked.value && authStore.can('question-paper-list')) fetchPapers(1)
+  },
+)
 </script>
 
 <template>
@@ -215,15 +250,15 @@ onMounted(async () => {
       <div class="overflow-x-auto">
         <table class="w-full min-w-[860px] text-left">
           <thead>
-            <tr class="bg-subject-header text-white text-[13px] font-medium">
-              <th class="px-4 py-3.5 font-medium rounded-tl-2xl">#</th>
-              <th class="px-4 py-3.5 font-medium">Exam Year</th>
-              <th class="px-4 py-3.5 font-medium">Course</th>
-              <th class="px-4 py-3.5 font-medium">Exam Term</th>
-              <th class="px-4 py-3.5 font-medium">Semester</th>
-              <th class="px-4 py-3.5 font-medium">Full Marks</th>
-              <th class="px-4 py-3.5 font-medium">Status</th>
-              <th class="px-4 py-3.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('question-paper-edit') || authStore.can('question-paper-delete') || authStore.can('question-paper-view')">Action</th>
+            <tr class="bg-subject-header text-white text-[12px] font-medium">
+              <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
+              <th class="px-4 py-1.5 font-medium">Exam Year</th>
+              <th class="px-4 py-1.5 font-medium">Course</th>
+              <th class="px-4 py-1.5 font-medium">Exam Term</th>
+              <th class="px-4 py-1.5 font-medium">Semester</th>
+              <th class="px-4 py-1.5 font-medium">Full Marks</th>
+              <th class="px-4 py-1.5 font-medium">Status</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('question-paper-edit') || authStore.can('question-paper-delete') || authStore.can('question-paper-view')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
@@ -237,30 +272,40 @@ onMounted(async () => {
               v-for="(paper, index) in papers"
               v-else
               :key="paper.id"
-              class="text-[13px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0"
+              class="text-[12px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0"
             >
-              <td class="px-4 py-3.5">
-                <span class="inline-flex items-center justify-center min-w-[46px] rounded-md status-gradient-border px-2 py-1.5 text-[12px] font-medium">
+              <td class="px-4 py-1">
+                <span class="inline-flex items-center justify-center min-w-[40px] rounded-md status-gradient-border px-2 py-0.5 text-[11px] font-medium">
                   # {{ (pagination.current_page - 1) * pagination.per_page + index + 1 }}
                 </span>
               </td>
-              <td class="px-4 py-3.5 font-semibold">{{ paper.exam_year }}</td>
-              <td class="px-4 py-3.5">
+              <td class="px-4 py-1 font-semibold">{{ paper.exam_year }}</td>
+              <td class="px-4 py-1">
                 {{ paper.course_name || '—' }}
                 <span v-if="paper.course_code" class="text-muted">({{ paper.course_code }})</span>
               </td>
-              <td class="px-4 py-3.5">{{ paper.exam_term_name || '—' }}</td>
-              <td class="px-4 py-3.5">{{ paper.semester }}</td>
-              <td class="px-4 py-3.5">{{ paper.full_marks ?? '—' }}</td>
-              <td class="px-4 py-3.5">
-                <span
-                  class="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold"
-                  :class="paper.status === 'ready' ? 'bg-success/10 text-success' : 'bg-badge/15 text-badge'"
-                >
-                  {{ paper.status === 'ready' ? 'Ready' : 'Draft' }}
-                </span>
+              <td class="px-4 py-1">{{ paper.exam_term_name || '—' }}</td>
+              <td class="px-4 py-1">{{ paper.semester }}</td>
+              <td class="px-4 py-1">{{ paper.full_marks ?? '—' }}</td>
+              <td class="px-4 py-1">
+                <div class="flex items-center gap-1.5">
+                  <span
+                    class="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold"
+                    :class="paper.status === 'ready' ? 'bg-success/10 text-success' : 'bg-badge/15 text-badge'"
+                  >
+                    {{ paper.status === 'ready' ? 'Ready' : 'Draft' }}
+                  </span>
+                  <span
+                    v-if="paper.evaluation_started"
+                    class="inline-flex items-center gap-1 rounded-full bg-gray-100 text-gray-600 px-2 py-1 text-[10px] font-semibold"
+                    title="A teacher has already started evaluating a sheet mapped to this paper — the structure is locked."
+                  >
+                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+                    Locked
+                  </span>
+                </div>
               </td>
-              <td v-if="authStore.can('question-paper-edit') || authStore.can('question-paper-delete') || authStore.can('question-paper-view')" class="px-4 py-3.5 text-center relative" @click.stop>
+              <td v-if="authStore.can('question-paper-edit') || authStore.can('question-paper-delete') || authStore.can('question-paper-view')" class="px-4 py-1 text-center relative" @click.stop>
                 <RowActionMenu width="w-44">
                   <button
                     v-if="paper.status === 'ready' || authStore.can('question-paper-view')"
@@ -270,14 +315,31 @@ onMounted(async () => {
                   >
                     View
                   </button>
-                  <button v-if="authStore.can('question-paper-edit')" type="button" class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors" @click="goToConfigure(paper)">
+                  <button
+                    v-if="authStore.can('question-paper-edit')"
+                    type="button"
+                    class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-700"
+                    :disabled="paper.evaluation_started"
+                    :title="paper.evaluation_started ? 'Locked — a teacher has already started evaluating a sheet mapped to this paper.' : ''"
+                    @click="goToConfigure(paper)"
+                  >
                     {{ paper.status === 'ready' ? 'Edit Setup' : 'Continue Setup' }}
+                  </button>
+                  <button
+                    v-if="authStore.can('question-paper-edit') && paper.status === 'ready'"
+                    type="button"
+                    class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors"
+                    title="Swap in a new scan without changing marks or the question structure."
+                    @click="openReplacePdf(paper)"
+                  >
+                    Replace PDF
                   </button>
                   <button
                     v-if="authStore.can('question-paper-delete')"
                     type="button"
-                    class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand transition-colors disabled:opacity-50"
-                    :disabled="deletingId === paper.id"
+                    class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-700"
+                    :disabled="deletingId === paper.id || paper.evaluation_started"
+                    :title="paper.evaluation_started ? 'Locked — a teacher has already started evaluating a sheet mapped to this paper.' : ''"
                     @click="removePaper(paper)"
                   >
                     {{ deletingId === paper.id ? 'Deleting…' : 'Delete' }}
@@ -296,6 +358,13 @@ onMounted(async () => {
       :last-page="pagination.last_page"
       :total="pagination.total"
       @change="goToPage"
+    />
+
+    <ReplaceQuestionPaperPdfModal
+      v-if="replacingPdfPaper"
+      :paper="replacingPdfPaper"
+      @close="replacingPdfPaper = null"
+      @updated="onPdfReplaced"
     />
   </div>
 </template>

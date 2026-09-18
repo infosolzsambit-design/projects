@@ -50,6 +50,18 @@ class TeacherResource extends JsonResource
             // to 0 (not null) when the count wasn't requested, so callers
             // never need a null-check.
             'allocated_answer_sheet_count' => $this->assigned_answer_sheets_count ?? 0,
+            // Set via ->withCount()'s second alias on the same query — the
+            // subset of the count above that already has marks recorded.
+            // Only meaningful alongside allocated_answer_sheet_count (same
+            // has_assignments=yes listing); falls back to 0 like it does.
+            'completed_answer_sheet_count' => $this->assigned_answer_sheets_completed_count ?? 0,
+            // Set via ->addSelect()'s correlated subquery on the same
+            // query — the number of *distinct* courses those allocated
+            // sheets span. AssignedTeachersView.vue's own "Courses" column;
+            // clicking it opens TeacherCoursesModal.vue (GET
+            // /teachers/{id}/courses), the plain course-only counterpart to
+            // TeacherAllocationModal.vue's packet-level breakdown.
+            'allocated_course_count' => $this->assigned_courses_count ?? 0,
             'created_by' => $this->created_by,
             'updated_by' => $this->updated_by,
             'deleted_by' => $this->when($this->trashed(), $this->deleted_by),

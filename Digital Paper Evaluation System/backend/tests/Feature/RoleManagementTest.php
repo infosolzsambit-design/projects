@@ -15,7 +15,7 @@ class RoleManagementTest extends TestCase
     private function actingAdmin(): User
     {
         $superAdminRole = Role::forceCreate([
-            'id' => config('roles.super_admin_id'),
+            'id' => ((array) config('roles.super_admin_id'))[0],
             'name' => 'Super Admin',
             'guard_name' => config('auth.defaults.guard'),
         ]);

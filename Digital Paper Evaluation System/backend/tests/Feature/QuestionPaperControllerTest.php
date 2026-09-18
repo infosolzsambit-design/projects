@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\AnswerSheet;
 use App\Models\Course;
 use App\Models\ExamTerm;
+use App\Models\QuestionAnswerSheetMapping;
 use App\Models\QuestionPaper;
 use App\Models\QuestionPaperNode;
 use App\Models\User;
@@ -89,6 +91,63 @@ class QuestionPaperControllerTest extends TestCase
         $this->assertSame(0, QuestionPaper::count());
         $this->assertSame(0, QuestionPaperNode::count());
         Storage::disk('public')->assertDirectoryEmpty('question-papers');
+    }
+
+    public function test_create_rejects_a_duplicate_exam_year_course_exam_term_semester_combination(): void
+    {
+        Storage::fake('public');
+        $this->actingAdmin();
+        $course = Course::factory()->create();
+        $examTerm = ExamTerm::factory()->create();
+        QuestionPaper::factory()->create([
+            'exam_year' => 2025,
+            'course_id' => $course->id,
+            'semester' => 5,
+            'exam_term_id' => $examTerm->id,
+        ]);
+
+        $response = $this->withApiKey()->post('/api/v1/question-papers', [
+            'exam_year' => 2025,
+            'course_id' => $course->id,
+            'semester' => 5,
+            'exam_term_id' => $examTerm->id,
+            'pdf' => UploadedFile::fake()->create('question-paper.pdf', 500, 'application/pdf'),
+            'groups' => $this->validGroupsJson(),
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('exam_year');
+        $this->assertSame(1, QuestionPaper::count());
+    }
+
+    /**
+     * A soft-deleted paper for the same combination must never block a
+     * fresh upload — it's gone as far as anyone using the app can tell.
+     */
+    public function test_create_allows_the_same_combination_once_the_earlier_paper_is_soft_deleted(): void
+    {
+        Storage::fake('public');
+        $this->actingAdmin();
+        $course = Course::factory()->create();
+        $examTerm = ExamTerm::factory()->create();
+        QuestionPaper::factory()->create([
+            'exam_year' => 2025,
+            'course_id' => $course->id,
+            'semester' => 5,
+            'exam_term_id' => $examTerm->id,
+            'deleted_at' => now(),
+        ]);
+
+        $response = $this->withApiKey()->post('/api/v1/question-papers', [
+            'exam_year' => 2025,
+            'course_id' => $course->id,
+            'semester' => 5,
+            'exam_term_id' => $examTerm->id,
+            'pdf' => UploadedFile::fake()->create('question-paper.pdf', 500, 'application/pdf'),
+            'groups' => $this->validGroupsJson(),
+        ]);
+
+        $response->assertCreated();
+        $this->assertSame(2, QuestionPaper::withTrashed()->count());
     }
 
     public function test_create_requires_a_pdf_file(): void
@@ -182,6 +241,21 @@ class QuestionPaperControllerTest extends TestCase
         $response->assertOk();
         $years = collect($response->json('data.items'))->pluck('exam_year');
         $this->assertSame([2025], $years->unique()->values()->toArray());
+    }
+
+    public function test_index_filters_by_course_id_and_exam_term_id(): void
+    {
+        $this->actingAdmin();
+        $course = Course::factory()->create();
+        $examTerm = ExamTerm::factory()->create();
+        $match = QuestionPaper::factory()->create(['course_id' => $course->id, 'exam_term_id' => $examTerm->id]);
+        QuestionPaper::factory()->create(); // different course/exam term entirely
+
+        $response = $this->withApiKey()->getJson("/api/v1/question-papers?course_id={$course->id}&exam_term_id={$examTerm->id}");
+
+        $response->assertOk();
+        $ids = collect($response->json('data.items'))->pluck('id');
+        $this->assertSame([$match->id], $ids->toArray());
     }
 
     public function test_show_returns_a_nested_structure_tree_at_any_depth(): void
@@ -534,6 +608,50 @@ class QuestionPaperControllerTest extends TestCase
         $this->assertSame(2, QuestionPaperNode::where('question_paper_id', $paper->id)->count()); // 1 group + 1 leaf, old tree gone
     }
 
+    public function test_update_rejects_changing_to_a_duplicate_exam_year_course_exam_term_semester_combination(): void
+    {
+        $this->actingAdmin();
+        $course = Course::factory()->create();
+        $examTerm = ExamTerm::factory()->create();
+        QuestionPaper::factory()->create([
+            'exam_year' => 2025,
+            'course_id' => $course->id,
+            'semester' => 5,
+            'exam_term_id' => $examTerm->id,
+        ]);
+        $paper = QuestionPaper::factory()->create();
+
+        $response = $this->withApiKey()->putJson("/api/v1/question-papers/{$paper->id}", [
+            'exam_year' => 2025,
+            'course_id' => $course->id,
+            'semester' => 5,
+            'exam_term_id' => $examTerm->id,
+            'groups' => json_decode($this->validGroupsJson(), true),
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('exam_year');
+    }
+
+    /**
+     * Saving a paper's structure again with its own unchanged exam
+     * metadata must never trip the duplicate check against itself.
+     */
+    public function test_update_allows_keeping_the_same_papers_own_combination(): void
+    {
+        $this->actingAdmin();
+        $paper = QuestionPaper::factory()->create(['exam_year' => 2025, 'semester' => 5]);
+
+        $response = $this->withApiKey()->putJson("/api/v1/question-papers/{$paper->id}", [
+            'exam_year' => 2025,
+            'course_id' => $paper->course_id,
+            'semester' => 5,
+            'exam_term_id' => $paper->exam_term_id,
+            'groups' => json_decode($this->validGroupsJson(), true),
+        ]);
+
+        $response->assertOk();
+    }
+
     public function test_update_requires_choose_count_for_a_choose_node(): void
     {
         $this->actingAdmin();
@@ -647,6 +765,104 @@ class QuestionPaperControllerTest extends TestCase
         $response->assertStatus(422)->assertJsonValidationErrors('groups.0.children.0.children.0.marks');
     }
 
+    /**
+     * @return QuestionAnswerSheetMapping
+     */
+    private function mappingWithStartedSheet(QuestionPaper $paper, array $sheetOverrides)
+    {
+        $mapping = QuestionAnswerSheetMapping::factory()->create(['question_paper_id' => $paper->id]);
+        AnswerSheet::factory()->create(array_merge(
+            ['question_answer_sheet_mapping_id' => $mapping->id],
+            $sheetOverrides,
+        ));
+
+        return $mapping;
+    }
+
+    public function test_update_is_rejected_once_a_mapped_sheets_timer_has_started(): void
+    {
+        $this->actingAdmin();
+        $paper = QuestionPaper::factory()->create();
+        $course = Course::factory()->create();
+        $this->mappingWithStartedSheet($paper, ['consumed_time' => 30]);
+
+        $response = $this->withApiKey()->putJson("/api/v1/question-papers/{$paper->id}", [
+            'exam_year' => 2025,
+            'course_id' => $course->id,
+            'semester' => 5,
+            'exam_term_id' => ExamTerm::factory()->create()->id,
+            'groups' => json_decode($this->validGroupsJson(), true),
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_update_is_rejected_once_a_mapped_sheet_has_draft_marks(): void
+    {
+        $this->actingAdmin();
+        $paper = QuestionPaper::factory()->create();
+        $course = Course::factory()->create();
+        $this->mappingWithStartedSheet($paper, ['draft_marks' => 5]);
+
+        $response = $this->withApiKey()->putJson("/api/v1/question-papers/{$paper->id}", [
+            'exam_year' => 2025,
+            'course_id' => $course->id,
+            'semester' => 5,
+            'exam_term_id' => ExamTerm::factory()->create()->id,
+            'groups' => json_decode($this->validGroupsJson(), true),
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_update_still_succeeds_when_no_mapped_sheet_has_started(): void
+    {
+        $this->actingAdmin();
+        $paper = QuestionPaper::factory()->create();
+        $course = Course::factory()->create();
+        // A mapped sheet exists but is still untouched — consumed_time/
+        // marks/draft_marks all null — so this must not count as started.
+        $this->mappingWithStartedSheet($paper, []);
+
+        $response = $this->withApiKey()->putJson("/api/v1/question-papers/{$paper->id}", [
+            'exam_year' => 2025,
+            'course_id' => $course->id,
+            'semester' => 5,
+            'exam_term_id' => ExamTerm::factory()->create()->id,
+            'groups' => json_decode($this->validGroupsJson(), true),
+        ]);
+
+        $response->assertOk();
+    }
+
+    public function test_delete_is_rejected_once_a_mapped_sheet_has_been_evaluated(): void
+    {
+        $this->actingAdmin();
+        $paper = QuestionPaper::factory()->create();
+        $this->mappingWithStartedSheet($paper, ['marks' => 8]);
+
+        $response = $this->withApiKey()->deleteJson("/api/v1/question-papers/{$paper->id}");
+
+        $response->assertStatus(422);
+        $this->assertDatabaseHas('question_papers', ['id' => $paper->id, 'deleted_at' => null]);
+    }
+
+    public function test_index_reports_evaluation_started_per_paper(): void
+    {
+        $this->actingAdmin();
+        $started = QuestionPaper::factory()->create();
+        $this->mappingWithStartedSheet($started, ['consumed_time' => 15]);
+        $untouched = QuestionPaper::factory()->create();
+        $this->mappingWithStartedSheet($untouched, []);
+
+        $response = $this->withApiKey()->getJson('/api/v1/question-papers?per_page=50');
+
+        $response->assertOk();
+        $byId = collect($response->json('data.items'))->keyBy('id');
+        $this->assertTrue($byId[$started->id]['evaluation_started']);
+        $this->assertFalse($byId[$untouched->id]['evaluation_started']);
+    }
+
     public function test_admin_can_soft_delete_a_question_paper(): void
     {
         $this->actingAdmin();
@@ -698,4 +914,78 @@ class QuestionPaperControllerTest extends TestCase
         Storage::disk('public')->assertMissing('question-papers/existing.pdf');
         $this->assertDatabaseCount('question_paper_nodes', 0); // every depth gone, not just the top-level group
     }
+
+    public function test_admin_can_replace_a_question_papers_pdf_file(): void
+    {
+        Storage::fake('public');
+        $this->actingAdmin();
+        Storage::disk('public')->put('question-papers/old.pdf', 'old-content');
+        $paper = QuestionPaper::factory()->create(['pdf_path' => '/storage/question-papers/old.pdf']);
+
+        $response = $this->withApiKey()->postJson("/api/v1/question-papers/{$paper->id}/pdf", [
+            'pdf' => UploadedFile::fake()->create('new-scan.pdf', 500, 'application/pdf'),
+        ]);
+
+        $response->assertOk();
+        $newPath = $response->json('data.pdf_url');
+        $this->assertNotSame('/storage/question-papers/old.pdf', $newPath);
+        $this->assertDatabaseHas('question_papers', ['id' => $paper->id, 'pdf_path' => $newPath]);
+        Storage::disk('public')->assertMissing('question-papers/old.pdf');
+        Storage::disk('public')->assertExists(substr($newPath, strlen('/storage/')));
+    }
+
+    public function test_replace_pdf_requires_a_pdf_file(): void
+    {
+        Storage::fake('public');
+        $this->actingAdmin();
+        $paper = QuestionPaper::factory()->create();
+
+        $response = $this->withApiKey()->postJson("/api/v1/question-papers/{$paper->id}/pdf", []);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('pdf');
+    }
+
+    public function test_replace_pdf_rejects_a_non_pdf_file(): void
+    {
+        Storage::fake('public');
+        $this->actingAdmin();
+        $paper = QuestionPaper::factory()->create();
+
+        $response = $this->withApiKey()->postJson("/api/v1/question-papers/{$paper->id}/pdf", [
+            'pdf' => UploadedFile::fake()->image('not-a-pdf.jpg'),
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('pdf');
+    }
+
+    public function test_replace_pdf_leaves_the_structure_untouched_and_stays_allowed_once_evaluation_has_started(): void
+    {
+        Storage::fake('public');
+        $this->actingAdmin();
+        Storage::disk('public')->put('question-papers/old.pdf', 'old-content');
+        $paper = QuestionPaper::factory()->create(['pdf_path' => '/storage/question-papers/old.pdf']);
+        $group = QuestionPaperNode::create(['question_paper_id' => $paper->id, 'parent_id' => null, 'label' => 'Group A', 'mode' => 'all', 'sort_order' => 0]);
+        QuestionPaperNode::create(['question_paper_id' => $paper->id, 'parent_id' => $group->id, 'label' => '1', 'mode' => 'leaf', 'marks' => 5, 'sort_order' => 0]);
+        // update()/destroy() would both be rejected against this paper —
+        // see test_update_is_rejected_once_a_mapped_sheets_timer_has_started
+        // above — but a plain file swap must stay allowed regardless.
+        $this->mappingWithStartedSheet($paper, ['consumed_time' => 30]);
+
+        $response = $this->withApiKey()->postJson("/api/v1/question-papers/{$paper->id}/pdf", [
+            'pdf' => UploadedFile::fake()->create('new-scan.pdf', 500, 'application/pdf'),
+        ]);
+
+        $response->assertOk();
+        $this->assertDatabaseCount('question_paper_nodes', 2);
+        $this->assertDatabaseHas('question_paper_nodes', ['id' => $group->id, 'label' => 'Group A']);
+    }
+
+    // Deliberately no "defaults a non-super-admin to the current exam
+    // year" test here — unlike the Assigned Teacher List / My Pending
+    // Course, this endpoint is also shared with AssignTeacherView.vue's
+    // own bulk cross-year load, so it's never forced to one year by
+    // default regardless of role; see index()'s own comment for exactly
+    // why. QuestionPapersView.vue's own exam-year scoping is instead
+    // exercised end-to-end via the explicit ?exam_year= behavior already
+    // covered by test_index_filters_by_exam_year() above.
 }

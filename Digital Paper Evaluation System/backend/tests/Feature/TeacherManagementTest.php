@@ -2,7 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Models\AnswerSheet;
+use App\Models\Course;
 use App\Models\Department;
+use App\Models\ExamType;
+use App\Models\QuestionAnswerSheetMapping;
+use App\Models\QuestionPaper;
 use App\Models\TeacherDetail;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
@@ -16,12 +21,17 @@ class TeacherManagementTest extends TestCase
 
     private function actingAdmin(): User
     {
-        // TeacherController::store() always assigns the Teacher role (see
-        // config('roles.teacher_id')), so that role has to actually exist —
-        // RefreshDatabase only migrates the schema, it doesn't seed it.
+        // TeacherController::store() always assigns the Teacher role (looked
+        // up by name), so that role has to actually exist — RefreshDatabase
+        // only migrates the schema, it doesn't seed it.
         $this->seed(RoleSeeder::class);
 
         $admin = User::factory()->create();
+        // Super Admin (already seeded above, at its well-known id) so the
+        // ?has_assignments=yes tests below aren't exam-year-scoped (see
+        // HasExamYearScope) regardless of what year their fixtures happen
+        // to land on.
+        $admin->assignRole((int) ((array) config('roles.super_admin_id'))[0]);
         Sanctum::actingAs($admin);
 
         return $admin;
@@ -80,7 +90,7 @@ class TeacherManagementTest extends TestCase
         $response->assertStatus(201);
 
         $user = User::where('email', 'priya.singh@example.com')->first();
-        $this->assertTrue($user->hasRole((int) config('roles.teacher_id')));
+        $this->assertTrue($user->hasRole('Teacher'));
     }
 
     public function test_creating_a_teacher_generates_a_unique_username_from_the_name(): void
@@ -546,11 +556,72 @@ class TeacherManagementTest extends TestCase
         $this->assertEquals([$csTeacher->user_id], $ids);
     }
 
+    /**
+     * Backs AssignTeacherView.vue's teacher picker / AssignedTeachersView
+     * .vue — a non-super-admin caller only ever sees teachers in their
+     * OWN department (resolved from their own teacher_details row) when
+     * ?department_scope=self is sent, regardless of ?department_id=.
+     */
+    public function test_index_department_scope_self_restricts_a_non_super_admin_to_their_own_department(): void
+    {
+        $cs = Department::factory()->create();
+        $math = Department::factory()->create();
+
+        $callerDetail = TeacherDetail::factory()->create(['department_id' => $cs->id]);
+        Sanctum::actingAs($callerDetail->user);
+
+        $sameDeptTeacher = TeacherDetail::factory()->create(['department_id' => $cs->id]);
+        TeacherDetail::factory()->create(['department_id' => $math->id]); // must not appear
+
+        $response = $this->withApiKey()->getJson('/api/v1/teachers?department_scope=self');
+
+        $response->assertOk();
+        $ids = collect($response->json('data.items'))->pluck('id')->all();
+        $this->assertEqualsCanonicalizing([$callerDetail->user_id, $sameDeptTeacher->user_id], $ids);
+    }
+
+    public function test_index_department_scope_self_is_a_no_op_for_a_super_admin(): void
+    {
+        $this->actingAdmin();
+        Department::factory()->create();
+        TeacherDetail::factory()->count(2)->create();
+
+        $response = $this->withApiKey()->getJson('/api/v1/teachers?department_scope=self');
+
+        $response->assertOk();
+        $this->assertCount(2, $response->json('data.items'));
+    }
+
+    public function test_index_department_scope_self_shows_nothing_for_a_non_super_admin_with_no_department(): void
+    {
+        // No teacher_details row at all for the acting user — nothing to
+        // scope by, so this must match nothing, never silently everyone.
+        Sanctum::actingAs(User::factory()->create());
+        TeacherDetail::factory()->count(2)->create();
+
+        $response = $this->withApiKey()->getJson('/api/v1/teachers?department_scope=self');
+
+        $response->assertOk()->assertJsonCount(0, 'data.items');
+    }
+
+    public function test_index_ignores_department_scope_when_not_sent(): void
+    {
+        Department::factory()->create();
+        $callerDetail = TeacherDetail::factory()->create();
+        Sanctum::actingAs($callerDetail->user);
+
+        TeacherDetail::factory()->count(2)->create(); // a different department each
+
+        $response = $this->withApiKey()->getJson('/api/v1/teachers');
+
+        $response->assertOk()->assertJsonCount(3, 'data.items');
+    }
+
     public function test_index_filters_by_has_assignments(): void
     {
         $this->actingAdmin();
         $assigned = TeacherDetail::factory()->create();
-        \App\Models\AnswerSheet::factory()->create(['teacher_id' => $assigned->user_id]);
+        AnswerSheet::factory()->create(['teacher_id' => $assigned->user_id]);
         TeacherDetail::factory()->create(); // no assignments
 
         $response = $this->withApiKey()->getJson('/api/v1/teachers?has_assignments=yes');
@@ -558,6 +629,81 @@ class TeacherManagementTest extends TestCase
         $response->assertOk();
         $ids = collect($response->json('data.items'))->pluck('id')->all();
         $this->assertEquals([$assigned->user_id], $ids);
+    }
+
+    public function test_index_scopes_has_assignments_to_the_current_exam_year_for_a_non_super_admin(): void
+    {
+        $this->seed(RoleSeeder::class);
+        $plainUser = User::factory()->create();
+        Sanctum::actingAs($plainUser);
+
+        // Shared across both mappings — this test only exercises the
+        // exam-year scope, so both need to land inside whichever exam type
+        // a non-super-admin's own default HasExamTypeScope resolves to
+        // (the only/most-recently-created one here), or that scope would
+        // silently filter one of them out for an unrelated reason.
+        $examType = ExamType::factory()->create();
+        $thisYearPaper = QuestionPaper::factory()->create(['exam_year' => now()->year]);
+        $lastYearPaper = QuestionPaper::factory()->create(['exam_year' => now()->year - 1]);
+        $thisYearMapping = QuestionAnswerSheetMapping::factory()->create(['question_paper_id' => $thisYearPaper->id, 'exam_type_id' => $examType->id]);
+        $lastYearMapping = QuestionAnswerSheetMapping::factory()->create(['question_paper_id' => $lastYearPaper->id, 'exam_type_id' => $examType->id]);
+
+        $thisYearTeacher = TeacherDetail::factory()->create();
+        AnswerSheet::factory()->create(['teacher_id' => $thisYearTeacher->user_id, 'question_answer_sheet_mapping_id' => $thisYearMapping->id]);
+
+        $lastYearOnlyTeacher = TeacherDetail::factory()->create();
+        AnswerSheet::factory()->create(['teacher_id' => $lastYearOnlyTeacher->user_id, 'question_answer_sheet_mapping_id' => $lastYearMapping->id]);
+
+        $response = $this->withApiKey()->getJson('/api/v1/teachers?has_assignments=yes');
+
+        $response->assertOk();
+        $ids = collect($response->json('data.items'))->pluck('id')->all();
+        $this->assertEquals([$thisYearTeacher->user_id], $ids);
+    }
+
+    public function test_index_allocated_answer_sheet_count_is_scoped_to_the_current_exam_year_for_a_non_super_admin(): void
+    {
+        $this->seed(RoleSeeder::class);
+        $plainUser = User::factory()->create();
+        Sanctum::actingAs($plainUser);
+
+        // Same reasoning as the test above — both mappings share one exam
+        // type so only the exam-year scope is actually being exercised here.
+        $examType = ExamType::factory()->create();
+        $thisYearPaper = QuestionPaper::factory()->create(['exam_year' => now()->year]);
+        $lastYearPaper = QuestionPaper::factory()->create(['exam_year' => now()->year - 1]);
+        $thisYearMapping = QuestionAnswerSheetMapping::factory()->create(['question_paper_id' => $thisYearPaper->id, 'exam_type_id' => $examType->id]);
+        $lastYearMapping = QuestionAnswerSheetMapping::factory()->create(['question_paper_id' => $lastYearPaper->id, 'exam_type_id' => $examType->id]);
+
+        $teacher = TeacherDetail::factory()->create();
+        AnswerSheet::factory()->count(2)->create(['teacher_id' => $teacher->user_id, 'question_answer_sheet_mapping_id' => $thisYearMapping->id]);
+        AnswerSheet::factory()->count(5)->create(['teacher_id' => $teacher->user_id, 'question_answer_sheet_mapping_id' => $lastYearMapping->id]);
+
+        $response = $this->withApiKey()->getJson('/api/v1/teachers?has_assignments=yes');
+
+        $response->assertOk();
+        $row = collect($response->json('data.items'))->firstWhere('id', $teacher->user_id);
+        $this->assertSame(2, $row['allocated_answer_sheet_count']);
+    }
+
+    /**
+     * "Allocated Answer Sheets" is every sheet ever handed to this
+     * teacher, completed or not; "completed_answer_sheet_count" is just
+     * the subset of those with marks already recorded — shown as its own
+     * column on the Assigned Teacher List.
+     */
+    public function test_index_includes_each_teachers_completed_answer_sheet_count_alongside_the_total(): void
+    {
+        $this->actingAdmin();
+        $detail = TeacherDetail::factory()->create();
+        AnswerSheet::factory()->count(2)->create(['teacher_id' => $detail->user_id, 'marks' => null]);
+        AnswerSheet::factory()->count(3)->create(['teacher_id' => $detail->user_id, 'marks' => 12]);
+
+        $response = $this->withApiKey()->getJson("/api/v1/teachers?id={$detail->user_id}");
+
+        $response->assertOk();
+        $response->assertJsonPath('data.allocated_answer_sheet_count', 5);
+        $response->assertJsonPath('data.completed_answer_sheet_count', 3);
     }
 
     public function test_admin_can_restore_a_soft_deleted_teacher(): void
@@ -588,7 +734,7 @@ class TeacherManagementTest extends TestCase
     {
         $this->actingAdmin();
         $detail = TeacherDetail::factory()->create();
-        \App\Models\AnswerSheet::factory()->count(3)->create(['teacher_id' => $detail->user_id]);
+        AnswerSheet::factory()->count(3)->create(['teacher_id' => $detail->user_id]);
 
         $response = $this->withApiKey()->getJson("/api/v1/teachers?id={$detail->user_id}");
 
@@ -601,18 +747,18 @@ class TeacherManagementTest extends TestCase
         $this->actingAdmin();
         $detail = TeacherDetail::factory()->create();
 
-        $mappingA = \App\Models\QuestionAnswerSheetMapping::factory()->create();
-        $mappingB = \App\Models\QuestionAnswerSheetMapping::factory()->create();
-        \App\Models\AnswerSheet::factory()->count(2)->create([
+        $mappingA = QuestionAnswerSheetMapping::factory()->create();
+        $mappingB = QuestionAnswerSheetMapping::factory()->create();
+        AnswerSheet::factory()->count(2)->create([
             'teacher_id' => $detail->user_id,
             'question_answer_sheet_mapping_id' => $mappingA->id,
         ]);
-        \App\Models\AnswerSheet::factory()->count(5)->create([
+        AnswerSheet::factory()->count(5)->create([
             'teacher_id' => $detail->user_id,
             'question_answer_sheet_mapping_id' => $mappingB->id,
         ]);
         // Belongs to a different teacher — must not leak into this one's total.
-        \App\Models\AnswerSheet::factory()->create([
+        AnswerSheet::factory()->create([
             'teacher_id' => TeacherDetail::factory()->create()->user_id,
             'question_answer_sheet_mapping_id' => $mappingA->id,
         ]);
@@ -628,6 +774,25 @@ class TeacherManagementTest extends TestCase
         );
     }
 
+    public function test_assignments_breaks_each_packets_count_down_by_completed_draft_and_untouched(): void
+    {
+        $this->actingAdmin();
+        $detail = TeacherDetail::factory()->create();
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+
+        AnswerSheet::factory()->create(['teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $mapping->id, 'marks' => 15]);
+        AnswerSheet::factory()->create(['teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $mapping->id, 'marks' => null, 'draft_marks' => 0]);
+        AnswerSheet::factory()->count(3)->create(['teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $mapping->id, 'marks' => null, 'draft_marks' => null]);
+
+        $response = $this->withApiKey()->getJson("/api/v1/teachers/{$detail->user_id}/assignments");
+
+        $response->assertOk();
+        $row = $response->json('data.breakdown.0');
+        $this->assertSame(5, $row['sheet_count']);
+        $this->assertSame(1, $row['completed_count']);
+        $this->assertSame(1, $row['draft_count']);
+    }
+
     public function test_assignments_returns_not_found_for_a_non_teacher(): void
     {
         $this->actingAdmin();
@@ -638,27 +803,173 @@ class TeacherManagementTest extends TestCase
         $response->assertStatus(404);
     }
 
+    public function test_index_includes_each_teachers_allocated_course_count(): void
+    {
+        $this->actingAdmin();
+        $detail = TeacherDetail::factory()->create();
+        $courseA = Course::factory()->create();
+        $courseB = Course::factory()->create();
+        // Two packets for the same course must still count as one course.
+        AnswerSheet::factory()->count(2)->create([
+            'teacher_id' => $detail->user_id,
+            'question_answer_sheet_mapping_id' => QuestionAnswerSheetMapping::factory()->create(['course_id' => $courseA->id])->id,
+        ]);
+        AnswerSheet::factory()->create([
+            'teacher_id' => $detail->user_id,
+            'question_answer_sheet_mapping_id' => QuestionAnswerSheetMapping::factory()->create(['course_id' => $courseA->id])->id,
+        ]);
+        AnswerSheet::factory()->create([
+            'teacher_id' => $detail->user_id,
+            'question_answer_sheet_mapping_id' => QuestionAnswerSheetMapping::factory()->create(['course_id' => $courseB->id])->id,
+        ]);
+
+        $response = $this->withApiKey()->getJson("/api/v1/teachers?id={$detail->user_id}");
+
+        $response->assertOk();
+        $response->assertJsonPath('data.allocated_course_count', 2);
+    }
+
+    public function test_courses_lists_the_distinct_courses_a_teacher_has_sheets_in(): void
+    {
+        $this->actingAdmin();
+        $detail = TeacherDetail::factory()->create();
+        $courseA = Course::factory()->create(['name' => 'Data Structures']);
+        $courseB = Course::factory()->create(['name' => 'Operating Systems']);
+        $regular = ExamType::factory()->create(['name' => 'Regular']);
+        $backlog = ExamType::factory()->create(['name' => 'Backlog']);
+        // Course A spans two packets with two different exam types — the
+        // "Courses" list still shows it as one row, so exam_type_names
+        // needs to combine both rather than only reflecting whichever
+        // packet happened to be grouped first.
+        $mappingA1 = QuestionAnswerSheetMapping::factory()->create(['course_id' => $courseA->id, 'exam_type_id' => $regular->id]);
+        $mappingA2 = QuestionAnswerSheetMapping::factory()->create(['course_id' => $courseA->id, 'exam_type_id' => $backlog->id]);
+        $mappingB = QuestionAnswerSheetMapping::factory()->create(['course_id' => $courseB->id, 'exam_type_id' => $regular->id]);
+
+        AnswerSheet::factory()->create(['teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $mappingA1->id, 'marks' => 10]);
+        AnswerSheet::factory()->create(['teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $mappingA2->id, 'marks' => null]);
+        AnswerSheet::factory()->create(['teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $mappingB->id, 'marks' => null]);
+        // A different teacher's sheet for course B must not leak in.
+        AnswerSheet::factory()->create([
+            'teacher_id' => TeacherDetail::factory()->create()->user_id,
+            'question_answer_sheet_mapping_id' => $mappingB->id,
+        ]);
+
+        $response = $this->withApiKey()->getJson("/api/v1/teachers/{$detail->user_id}/courses");
+
+        $response->assertOk();
+        $courses = collect($response->json('data.courses'))->keyBy('course_id');
+        $this->assertCount(2, $courses);
+        $this->assertSame(2, $courses[$courseA->id]['sheet_count']);
+        $this->assertSame(1, $courses[$courseA->id]['completed_count']);
+        $this->assertSame('Backlog, Regular', $courses[$courseA->id]['exam_type_names']);
+        $this->assertSame(1, $courses[$courseB->id]['sheet_count']);
+        $this->assertSame(0, $courses[$courseB->id]['completed_count']);
+        $this->assertSame('Regular', $courses[$courseB->id]['exam_type_names']);
+    }
+
+    public function test_courses_returns_not_found_for_a_non_teacher(): void
+    {
+        $this->actingAdmin();
+        $plainUser = User::factory()->create();
+
+        $response = $this->withApiKey()->getJson("/api/v1/teachers/{$plainUser->id}/courses");
+
+        $response->assertStatus(404);
+    }
+
     public function test_reassign_moves_sheets_from_one_teacher_to_another(): void
     {
         $this->actingAdmin();
         $from = TeacherDetail::factory()->create();
         $to = TeacherDetail::factory()->create();
-        $mapping = \App\Models\QuestionAnswerSheetMapping::factory()->create();
-        \App\Models\AnswerSheet::factory()->count(5)->create([
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        AnswerSheet::factory()->count(5)->create([
             'teacher_id' => $from->user_id,
             'question_answer_sheet_mapping_id' => $mapping->id,
         ]);
 
         $response = $this->withApiKey()->postJson("/api/v1/teachers/{$from->user_id}/assignments/reassign", [
             'mapping_id' => $mapping->id,
+            'email_subject' => 'Answer Sheets Reassigned',
+            'email_body' => 'You have been reassigned answer sheets to evaluate.',
             'reassignments' => [['teacher_id' => $to->user_id, 'quantity' => 3]],
         ]);
 
         $response->assertOk();
         $response->assertJsonPath('data.from_remaining', 2);
         $response->assertJsonPath('data.summary.0.reassigned_count', 3);
-        $this->assertSame(2, \App\Models\AnswerSheet::where('teacher_id', $from->user_id)->count());
-        $this->assertSame(3, \App\Models\AnswerSheet::where('teacher_id', $to->user_id)->count());
+        $this->assertSame(2, AnswerSheet::where('teacher_id', $from->user_id)->count());
+        $this->assertSame(3, AnswerSheet::where('teacher_id', $to->user_id)->count());
+    }
+
+    /**
+     * Regression test: a completed evaluation (marks already set) is
+     * final and must never be handed to another teacher — only the
+     * not-yet-completed sheets in a packet are eligible to move.
+     */
+    public function test_reassign_never_moves_an_already_completed_sheet(): void
+    {
+        $this->actingAdmin();
+        $from = TeacherDetail::factory()->create();
+        $to = TeacherDetail::factory()->create();
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        $completed = AnswerSheet::factory()->create([
+            'teacher_id' => $from->user_id,
+            'question_answer_sheet_mapping_id' => $mapping->id,
+            'marks' => 18,
+        ]);
+        AnswerSheet::factory()->count(2)->create([
+            'teacher_id' => $from->user_id,
+            'question_answer_sheet_mapping_id' => $mapping->id,
+            'marks' => null,
+        ]);
+
+        $response = $this->withApiKey()->postJson("/api/v1/teachers/{$from->user_id}/assignments/reassign", [
+            'mapping_id' => $mapping->id,
+            'email_subject' => 'Answer Sheets Reassigned',
+            'email_body' => 'You have been reassigned answer sheets to evaluate.',
+            'reassignments' => [['teacher_id' => $to->user_id, 'quantity' => 3]],
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['reassignments']);
+        $this->assertSame($from->user_id, $completed->fresh()->teacher_id);
+    }
+
+    /**
+     * Regression test: a reassigned sheet must start clean for its new
+     * teacher — the previous teacher's autosaved draft marks/annotations/
+     * consumed time must not carry over.
+     */
+    public function test_reassign_clears_draft_state_so_the_new_teacher_starts_fresh(): void
+    {
+        $this->actingAdmin();
+        $from = TeacherDetail::factory()->create();
+        $to = TeacherDetail::factory()->create();
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        $sheet = AnswerSheet::factory()->create([
+            'teacher_id' => $from->user_id,
+            'question_answer_sheet_mapping_id' => $mapping->id,
+            'marks' => null,
+            'draft_marks' => 7,
+            'draft_marks_breakdown' => ['1' => 4, '2' => 3],
+            'draft_annotations' => ['some' => 'annotation'],
+            'consumed_time' => 245,
+        ]);
+
+        $response = $this->withApiKey()->postJson("/api/v1/teachers/{$from->user_id}/assignments/reassign", [
+            'mapping_id' => $mapping->id,
+            'email_subject' => 'Answer Sheets Reassigned',
+            'email_body' => 'You have been reassigned answer sheets to evaluate.',
+            'reassignments' => [['teacher_id' => $to->user_id, 'quantity' => 1]],
+        ]);
+
+        $response->assertOk();
+        $sheet->refresh();
+        $this->assertSame($to->user_id, $sheet->teacher_id);
+        $this->assertNull($sheet->draft_marks);
+        $this->assertNull($sheet->draft_marks_breakdown);
+        $this->assertNull($sheet->draft_annotations);
+        $this->assertNull($sheet->consumed_time);
     }
 
     public function test_reassign_can_move_every_sheet_at_once(): void
@@ -666,20 +977,22 @@ class TeacherManagementTest extends TestCase
         $this->actingAdmin();
         $from = TeacherDetail::factory()->create();
         $to = TeacherDetail::factory()->create();
-        $mapping = \App\Models\QuestionAnswerSheetMapping::factory()->create();
-        \App\Models\AnswerSheet::factory()->count(4)->create([
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        AnswerSheet::factory()->count(4)->create([
             'teacher_id' => $from->user_id,
             'question_answer_sheet_mapping_id' => $mapping->id,
         ]);
 
         $response = $this->withApiKey()->postJson("/api/v1/teachers/{$from->user_id}/assignments/reassign", [
             'mapping_id' => $mapping->id,
+            'email_subject' => 'Answer Sheets Reassigned',
+            'email_body' => 'You have been reassigned answer sheets to evaluate.',
             'reassignments' => [['teacher_id' => $to->user_id, 'quantity' => 4]],
         ]);
 
         $response->assertOk();
-        $this->assertSame(0, \App\Models\AnswerSheet::where('teacher_id', $from->user_id)->count());
-        $this->assertSame(4, \App\Models\AnswerSheet::where('teacher_id', $to->user_id)->count());
+        $this->assertSame(0, AnswerSheet::where('teacher_id', $from->user_id)->count());
+        $this->assertSame(4, AnswerSheet::where('teacher_id', $to->user_id)->count());
     }
 
     public function test_reassign_can_split_across_multiple_teachers_at_once(): void
@@ -688,14 +1001,16 @@ class TeacherManagementTest extends TestCase
         $from = TeacherDetail::factory()->create();
         $toA = TeacherDetail::factory()->create();
         $toB = TeacherDetail::factory()->create();
-        $mapping = \App\Models\QuestionAnswerSheetMapping::factory()->create();
-        \App\Models\AnswerSheet::factory()->count(7)->create([
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        AnswerSheet::factory()->count(7)->create([
             'teacher_id' => $from->user_id,
             'question_answer_sheet_mapping_id' => $mapping->id,
         ]);
 
         $response = $this->withApiKey()->postJson("/api/v1/teachers/{$from->user_id}/assignments/reassign", [
             'mapping_id' => $mapping->id,
+            'email_subject' => 'Answer Sheets Reassigned',
+            'email_body' => 'You have been reassigned answer sheets to evaluate.',
             'reassignments' => [
                 ['teacher_id' => $toA->user_id, 'quantity' => 4],
                 ['teacher_id' => $toB->user_id, 'quantity' => 3],
@@ -704,9 +1019,9 @@ class TeacherManagementTest extends TestCase
 
         $response->assertOk();
         $response->assertJsonPath('data.from_remaining', 0);
-        $this->assertSame(0, \App\Models\AnswerSheet::where('teacher_id', $from->user_id)->count());
-        $this->assertSame(4, \App\Models\AnswerSheet::where('teacher_id', $toA->user_id)->count());
-        $this->assertSame(3, \App\Models\AnswerSheet::where('teacher_id', $toB->user_id)->count());
+        $this->assertSame(0, AnswerSheet::where('teacher_id', $from->user_id)->count());
+        $this->assertSame(4, AnswerSheet::where('teacher_id', $toA->user_id)->count());
+        $this->assertSame(3, AnswerSheet::where('teacher_id', $toB->user_id)->count());
     }
 
     public function test_reassign_rejects_more_than_the_teacher_actually_has_in_that_packet(): void
@@ -714,33 +1029,37 @@ class TeacherManagementTest extends TestCase
         $this->actingAdmin();
         $from = TeacherDetail::factory()->create();
         $to = TeacherDetail::factory()->create();
-        $mapping = \App\Models\QuestionAnswerSheetMapping::factory()->create();
-        \App\Models\AnswerSheet::factory()->count(2)->create([
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        AnswerSheet::factory()->count(2)->create([
             'teacher_id' => $from->user_id,
             'question_answer_sheet_mapping_id' => $mapping->id,
         ]);
 
         $response = $this->withApiKey()->postJson("/api/v1/teachers/{$from->user_id}/assignments/reassign", [
             'mapping_id' => $mapping->id,
+            'email_subject' => 'Answer Sheets Reassigned',
+            'email_body' => 'You have been reassigned answer sheets to evaluate.',
             'reassignments' => [['teacher_id' => $to->user_id, 'quantity' => 5]],
         ]);
 
         $response->assertStatus(422);
-        $this->assertSame(2, \App\Models\AnswerSheet::where('teacher_id', $from->user_id)->count());
+        $this->assertSame(2, AnswerSheet::where('teacher_id', $from->user_id)->count());
     }
 
     public function test_reassign_rejects_reassigning_to_the_same_teacher(): void
     {
         $this->actingAdmin();
         $from = TeacherDetail::factory()->create();
-        $mapping = \App\Models\QuestionAnswerSheetMapping::factory()->create();
-        \App\Models\AnswerSheet::factory()->create([
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        AnswerSheet::factory()->create([
             'teacher_id' => $from->user_id,
             'question_answer_sheet_mapping_id' => $mapping->id,
         ]);
 
         $response = $this->withApiKey()->postJson("/api/v1/teachers/{$from->user_id}/assignments/reassign", [
             'mapping_id' => $mapping->id,
+            'email_subject' => 'Answer Sheets Reassigned',
+            'email_body' => 'You have been reassigned answer sheets to evaluate.',
             'reassignments' => [['teacher_id' => $from->user_id, 'quantity' => 1]],
         ]);
 
@@ -753,18 +1072,91 @@ class TeacherManagementTest extends TestCase
         $this->actingAdmin();
         $from = TeacherDetail::factory()->create();
         $notATeacher = User::factory()->create();
-        $mapping = \App\Models\QuestionAnswerSheetMapping::factory()->create();
-        \App\Models\AnswerSheet::factory()->create([
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        AnswerSheet::factory()->create([
             'teacher_id' => $from->user_id,
             'question_answer_sheet_mapping_id' => $mapping->id,
         ]);
 
         $response = $this->withApiKey()->postJson("/api/v1/teachers/{$from->user_id}/assignments/reassign", [
             'mapping_id' => $mapping->id,
+            'email_subject' => 'Answer Sheets Reassigned',
+            'email_body' => 'You have been reassigned answer sheets to evaluate.',
             'reassignments' => [['teacher_id' => $notATeacher->id, 'quantity' => 1]],
         ]);
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['reassignments.0.teacher_id']);
+    }
+
+    public function test_reassign_requires_email_subject_and_body(): void
+    {
+        $this->actingAdmin();
+        $from = TeacherDetail::factory()->create();
+        $to = TeacherDetail::factory()->create();
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        AnswerSheet::factory()->create([
+            'teacher_id' => $from->user_id,
+            'question_answer_sheet_mapping_id' => $mapping->id,
+        ]);
+
+        $response = $this->withApiKey()->postJson("/api/v1/teachers/{$from->user_id}/assignments/reassign", [
+            'mapping_id' => $mapping->id,
+            'reassignments' => [['teacher_id' => $to->user_id, 'quantity' => 1]],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['email_subject', 'email_body']);
+    }
+
+    /**
+     * dispatch(...)->afterResponse() still runs within a test (the test
+     * kernel's terminate() is called), and MAIL_MAILER=array/
+     * QUEUE_CONNECTION=sync in phpunit.xml means this runs synchronously
+     * with no real network call — so this can assert the real end-to-end
+     * effect (an EmailLog row per newly-reassigned teacher) instead of
+     * faking it, same as AssignTeacherTest's own reassign-adjacent test.
+     */
+    public function test_reassign_logs_and_sends_an_email_to_every_newly_assigned_teacher(): void
+    {
+        $admin = $this->actingAdmin();
+        $from = TeacherDetail::factory()->create();
+        $toA = TeacherDetail::factory()->create();
+        $toB = TeacherDetail::factory()->create();
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        AnswerSheet::factory()->count(7)->create([
+            'teacher_id' => $from->user_id,
+            'question_answer_sheet_mapping_id' => $mapping->id,
+            'evaluation_start_date' => '2026-03-01 09:00:00',
+            'evaluation_end_date' => '2026-03-10 18:00:00',
+        ]);
+
+        $response = $this->withApiKey()->postJson("/api/v1/teachers/{$from->user_id}/assignments/reassign", [
+            'mapping_id' => $mapping->id,
+            'email_subject' => 'Answer Sheets Reassigned',
+            'email_body' => 'You have been reassigned answer sheets to evaluate.',
+            'reassignments' => [
+                ['teacher_id' => $toA->user_id, 'quantity' => 4],
+                ['teacher_id' => $toB->user_id, 'quantity' => 3],
+            ],
+        ]);
+
+        $response->assertOk();
+
+        $this->assertDatabaseCount('email_logs', 2);
+        $this->assertDatabaseHas('email_logs', [
+            'sender_id' => $admin->id,
+            'receiver_id' => $toA->user_id,
+            'type' => 'answer_sheet_reassigned',
+            'subject' => 'Answer Sheets Reassigned',
+            'is_sent' => true,
+        ]);
+        $this->assertDatabaseHas('email_logs', [
+            'sender_id' => $admin->id,
+            'receiver_id' => $toB->user_id,
+            'type' => 'answer_sheet_reassigned',
+            'subject' => 'Answer Sheets Reassigned',
+            'is_sent' => true,
+        ]);
     }
 }

@@ -36,6 +36,7 @@ class QuestionAnswerSheetMapping extends Model implements AuditableContract
         'course_id',
         'semester',
         'exam_term_id',
+        'exam_type_id',
         'program_name',
         'packet_code',
     ];
@@ -108,6 +109,11 @@ class QuestionAnswerSheetMapping extends Model implements AuditableContract
     public function examTerm(): BelongsTo
     {
         return $this->belongsTo(ExamTerm::class);
+    }
+
+    public function examType(): BelongsTo
+    {
+        return $this->belongsTo(ExamType::class);
     }
 
     public function answerSheets(): HasMany

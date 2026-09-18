@@ -23,13 +23,17 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import api from '../utils/api'
 import { useAuthStore } from '../stores/auth'
+import { useBrandingStore } from '../stores/branding'
 import { useToast } from '../composables/useToast'
+import { formatDateTime } from '../utils/date'
 import SearchableSelect from '../components/common/SearchableSelect.vue'
 import DatePicker from '../components/common/DatePicker.vue'
 import TeacherAllocationModal from '../components/teachers/TeacherAllocationModal.vue'
+import SendAssignmentEmailModal from '../components/teachers/SendAssignmentEmailModal.vue'
 
 const toast = useToast()
 const authStore = useAuthStore()
+const brandingStore = useBrandingStore()
 
 const SEMESTER_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1)
 
@@ -37,14 +41,16 @@ const SEMESTER_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1)
 const filters = reactive({
   program_name: '',
   exam_term_id: '',
+  exam_type_id: '',
   course_id: '',
   semester: '',
   exam_year: new Date().getFullYear(),
 })
-const fieldErrors = reactive({ program_name: '', exam_term_id: '', course_id: '', semester: '', exam_year: '' })
+const fieldErrors = reactive({ program_name: '', exam_term_id: '', exam_type_id: '', course_id: '', semester: '', exam_year: '' })
 const fieldRefs = {
   program_name: ref(null),
   exam_term_id: ref(null),
+  exam_type_id: ref(null),
   course_id: ref(null),
   semester: ref(null),
   exam_year: ref(null),
@@ -107,6 +113,20 @@ async function loadExamTerms() {
   }
 }
 
+const availableExamTypes = ref([])
+const examTypesLoading = ref(true)
+async function loadExamTypes() {
+  examTypesLoading.value = true
+  try {
+    const res = await api.get('/exam-types', { params: { status: 'all', is_active: 'yes', table_fields: ['name'] } })
+    availableExamTypes.value = res.data.data
+  } catch {
+    // Same as loadPrograms() above.
+  } finally {
+    examTypesLoading.value = false
+  }
+}
+
 // --- Real backing data for the search (see the file's own docblock) ------
 const allMappings = ref([])
 const allPapers = ref([])
@@ -139,6 +159,19 @@ const departmentsLoading = ref(true)
 async function loadDepartments() {
   departmentsLoading.value = true
   try {
+    // A non-super-admin's own teacher list below is always restricted to
+    // their own department anyway (see loadTeachers()'s own
+    // department_scope=self, enforced server-side regardless of this
+    // dropdown — see TeacherController::index()'s own docblock), so there's
+    // no point offering them every other department here; it'd just be a
+    // list of options that always return zero results.
+    if (!authStore.user?.is_super_admin) {
+      availableDepartments.value = authStore.user?.department_id
+        ? [{ id: authStore.user.department_id, name: authStore.user.department || 'My Department' }]
+        : []
+      return
+    }
+
     const res = await api.get('/departments', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] } })
     // Same "Name (CODE)" convention as loadCourses() above — shown only
     // when a department actually has a code, since it's an optional field.
@@ -164,7 +197,7 @@ const teachersLoading = ref(true)
 async function loadTeachers() {
   teachersLoading.value = true
   try {
-    const params = { per_page: 200, is_active: 'yes' }
+    const params = { per_page: 200, is_active: 'yes', department_scope: 'self' }
     if (departmentFilter.value) params.department_id = departmentFilter.value
     const res = await api.get('/teachers', { params })
     teachers.value = res.data.data.items.map((t) => ({
@@ -176,6 +209,7 @@ async function loadTeachers() {
       selected: true, // every active teacher starts selected — deselect to exclude one
       assignQuantity: 0,
       allocatedCount: t.allocated_answer_sheet_count || 0,
+      completedCount: t.completed_answer_sheet_count || 0,
     }))
   } catch {
     // Non-fatal — same reasoning as loadPrograms() above.
@@ -217,17 +251,18 @@ onMounted(async () => {
   loadPrograms()
   loadCourses()
   loadExamTerms()
+  loadExamTypes()
   loadDepartments()
   loadBackingData()
   loadTeachers()
 })
 
 // --- Search ------------------------------------------------------------
-const REQUIRED_FILTERS = ['program_name', 'exam_term_id', 'course_id', 'semester', 'exam_year']
+const REQUIRED_FILTERS = ['program_name', 'exam_term_id', 'exam_type_id', 'course_id', 'semester', 'exam_year']
 const searched = ref(false)
 const matchingMappings = ref([])
 
-// Shared by runSearch() and by refreshAfterAssign() below — the exact same
+// Shared by runSearch() and by onAssigned() below — the exact same
 // five-field match, just re-run against whatever allMappings currently
 // holds (a fresh fetch after an Assign, so pending counts are current).
 function recomputeMatchingMappings() {
@@ -236,6 +271,7 @@ function recomputeMatchingMappings() {
     return (
       m.program_name === filters.program_name &&
       String(m.exam_term_id) === String(filters.exam_term_id) &&
+      String(m.exam_type_id) === String(filters.exam_type_id) &&
       String(m.course_id) === String(filters.course_id) &&
       Number(m.semester) === Number(filters.semester) &&
       !!paper &&
@@ -355,11 +391,18 @@ watch(evaluationStartDate, (newStart) => {
   }
 })
 
-// Final commit step, once the (equally-seeded or hand-edited) quantities
-// below look right — see AssignTeacherService's own docblock on the
-// backend for exactly what this persists.
-const assigning = ref(false)
-async function assignPapers() {
+// Validation gate before "Assign" actually commits anything — once it
+// passes, a "Send Mail and Assign" modal opens (pre-filled subject/body)
+// instead of posting right away; the modal itself is what calls POST
+// /assign-teacher (see SendAssignmentEmailModal.vue) so an admin always
+// gets a chance to review the email before the assignment is persisted.
+const showSendMailModal = ref(false)
+const pendingAssignPayload = ref(null)
+// availableCourses' own name already carries " (CODE)" (see loadCourses())
+// — reused as-is for the email preview instead of re-deriving it.
+const assignEmailCourseName = computed(() => availableCourses.value.find((c) => c.id === filters.course_id)?.name || '')
+
+function assignPapers() {
   if (!totalAssignedQuantity.value) {
     toast.error('Enter at least one quantity, or click "Distribute Equally" first.')
     return
@@ -374,19 +417,20 @@ async function assignPapers() {
   if (evaluationStartDate.value && evaluationEndDate.value && evaluationEndDate.value < evaluationStartDate.value) {
     evaluationDateErrors.evaluation_end_date = 'End date cannot be before the start date.'
   }
-  // Whole minutes only — no decimal point, no letters. Matches the
-  // backend's own 'integer' rule (see AssignTeacherController).
+  // Optional — leave blank for no per-sheet time limit (see
+  // EvaluatePaperView.vue's totalMinutes, which already treats a null
+  // evaluation_time_per_sheet as "no limit"). If given at all, still whole
+  // minutes only — no decimal point, no letters. Matches the backend's own
+  // 'nullable', 'integer' rule (see AssignTeacherController).
   const timeValue = evaluationTimePerSheet.value.trim()
-  if (!timeValue) {
-    evaluationDateErrors.evaluation_time_per_sheet = 'Required.'
-  } else if (!/^\d+$/.test(timeValue) || Number(timeValue) < 1) {
+  if (timeValue && (!/^\d+$/.test(timeValue) || Number(timeValue) < 1)) {
     evaluationDateErrors.evaluation_time_per_sheet = 'Whole minutes only (e.g. 60) — no decimals.'
   } else {
     evaluationDateErrors.evaluation_time_per_sheet = ''
   }
 
   if (evaluationDateErrors.evaluation_start_date || evaluationDateErrors.evaluation_end_date || evaluationDateErrors.evaluation_time_per_sheet) {
-    toast.error('Set the evaluation start date, end date, and evaluation time before assigning.')
+    toast.error('Set the evaluation start date and end date before assigning.')
     // Same "focus the first invalid field" convention as every other
     // form in this app — left-to-right order across the row.
     if (evaluationDateErrors.evaluation_start_date) evaluationStartDateRef.value?.focus()
@@ -395,38 +439,63 @@ async function assignPapers() {
     return
   }
 
-  assigning.value = true
-  try {
-    const assignedTeachers = teachers.value.filter((t) => Number(t.assignQuantity) > 0)
-    const res = await api.post('/assign-teacher', {
-      program_name: filters.program_name,
-      exam_term_id: filters.exam_term_id,
-      course_id: filters.course_id,
-      semester: filters.semester,
-      exam_year: filters.exam_year,
-      evaluation_start_date: evaluationStartDate.value,
-      evaluation_end_date: evaluationEndDate.value,
-      evaluation_time_per_sheet: Number(timeValue),
-      assignments: assignedTeachers.map((t) => ({ teacher_id: t.id, quantity: Number(t.assignQuantity) })),
-    })
-
-    toast.success(res.data.message || 'Assignment saved successfully.')
-
-    // Assigned sheets are no longer pending — refresh both sides of that
-    // so the page can't go on showing a stale (too-high) pending count or
-    // let a second click re-assign sheets that are already spoken for.
-    // "Already Allocated" is bumped locally (rather than a full
-    // loadTeachers() re-fetch) so the checkbox/search state on the table
-    // isn't disturbed by this.
-    assignedTeachers.forEach((t) => (t.allocatedCount += Number(t.assignQuantity)))
-    teachers.value.forEach((t) => (t.assignQuantity = 0))
-    await loadBackingData()
-    recomputeMatchingMappings()
-  } catch (err) {
-    toast.error(err.response?.data?.message || 'Could not save this assignment.')
-  } finally {
-    assigning.value = false
+  const assignedTeachers = teachers.value.filter((t) => Number(t.assignQuantity) > 0)
+  pendingAssignPayload.value = {
+    program_name: filters.program_name,
+    exam_term_id: filters.exam_term_id,
+    exam_type_id: filters.exam_type_id,
+    course_id: filters.course_id,
+    semester: filters.semester,
+    exam_year: filters.exam_year,
+    evaluation_start_date: evaluationStartDate.value,
+    evaluation_end_date: evaluationEndDate.value,
+    evaluation_time_per_sheet: timeValue ? Number(timeValue) : null,
+    assignments: assignedTeachers.map((t) => ({ teacher_id: t.id, quantity: Number(t.assignQuantity) })),
   }
+  showSendMailModal.value = true
+}
+
+// Fires once SendAssignmentEmailModal.vue's own POST /assign-teacher call
+// has actually committed the assignment. Two things happen:
+//  1. Pending sheet counts and per-teacher allocation/completed totals are
+//     re-pulled from the server (not patched by hand) so a *later* search
+//     against the same course never shows a stale, too-high pending count
+//     — the exact bug this whole refresh exists to prevent.
+//  2. The page itself resets all the way back to the blank "Select Exam
+//     Details" search form (see resetSearchForm()) — this assignment is
+//     done, and the admin's next click is almost always a fresh search for
+//     a different course, not staring at zeroed-out leftovers from the one
+//     they just finished.
+async function onAssigned(resData) {
+  toast.success(resData.message || 'Assignment saved successfully.')
+
+  await Promise.all([loadBackingData(), loadTeachers()])
+  resetSearchForm()
+}
+
+function resetSearchForm() {
+  filters.program_name = ''
+  filters.exam_term_id = ''
+  filters.exam_type_id = ''
+  filters.course_id = ''
+  filters.semester = ''
+  filters.exam_year = new Date().getFullYear()
+  fieldErrors.program_name = ''
+  fieldErrors.exam_term_id = ''
+  fieldErrors.exam_type_id = ''
+  fieldErrors.course_id = ''
+  fieldErrors.semester = ''
+  fieldErrors.exam_year = ''
+  departmentFilter.value = ''
+  teacherSearch.value = ''
+  evaluationStartDate.value = ''
+  evaluationEndDate.value = ''
+  evaluationTimePerSheet.value = ''
+  evaluationDateErrors.evaluation_start_date = ''
+  evaluationDateErrors.evaluation_end_date = ''
+  evaluationDateErrors.evaluation_time_per_sheet = ''
+  searched.value = false
+  matchingMappings.value = []
 }
 </script>
 
@@ -472,7 +541,7 @@ async function assignPapers() {
           <h2 class="text-[14px] sm:text-[15px] font-semibold text-gray-900">Select Exam Details</h2>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
           <div class="flex flex-col gap-1">
             <label for="assign_program" class="text-[12px] text-label">Program <span class="text-brand">*</span></label>
             <SearchableSelect
@@ -519,6 +588,22 @@ async function assignPapers() {
               @change="clearFieldError('exam_term_id')"
             />
             <p v-if="fieldErrors.exam_term_id" class="text-[11px] text-brand">{{ fieldErrors.exam_term_id }}</p>
+          </div>
+
+          <div class="flex flex-col gap-1">
+            <label for="assign_exam_type" class="text-[12px] text-label">Exam Type <span class="text-brand">*</span></label>
+            <SearchableSelect
+              id="assign_exam_type"
+              :ref="(el) => (fieldRefs.exam_type_id.value = el)"
+              v-model="filters.exam_type_id"
+              :options="availableExamTypes"
+              :loading="examTypesLoading"
+              :error="!!fieldErrors.exam_type_id"
+              placeholder="Select"
+              search-placeholder="Search exam types…"
+              @change="clearFieldError('exam_type_id')"
+            />
+            <p v-if="fieldErrors.exam_type_id" class="text-[11px] text-brand">{{ fieldErrors.exam_type_id }}</p>
           </div>
 
           <div class="flex flex-col gap-1">
@@ -646,12 +731,13 @@ async function assignPapers() {
                     <th class="px-2.5 py-1.5 font-medium">Department</th>
                     <th class="px-2.5 py-1.5 font-medium">Designation</th>
                     <th class="px-2.5 py-1.5 font-medium text-center">Already Allocated</th>
+                    <th class="px-2.5 py-1.5 font-medium text-center">Completed</th>
                     <th class="px-2.5 py-1.5 font-medium text-center">Assign Quantity</th>
                   </tr>
                 </thead>
                 <tbody class="bg-white">
                   <tr v-if="!filteredTeachers.length">
-                    <td colspan="7" class="px-2.5 py-6 text-center text-muted">No teachers found.</td>
+                    <td colspan="8" class="px-2.5 py-6 text-center text-muted">No teachers found.</td>
                   </tr>
                   <tr v-for="teacher in filteredTeachers" :key="teacher.id" class="border-b border-gray-100 last:border-b-0 even:bg-gray-50">
                     <td class="px-2.5 py-1.5">
@@ -671,6 +757,7 @@ async function assignPapers() {
                         {{ teacher.allocatedCount }}
                       </button>
                     </td>
+                    <td class="px-2.5 py-1.5 text-center font-semibold text-success">{{ teacher.completedCount }}</td>
                     <td class="px-2.5 py-1.5 text-center">
                       <input
                         v-model.number="teacher.assignQuantity"
@@ -724,14 +811,14 @@ async function assignPapers() {
               </div>
 
               <div class="flex flex-col gap-1 w-36">
-                <label for="assign_evaluation_time_per_sheet" class="text-[11px] text-label">Eval. Time (min) <span class="text-brand">*</span></label>
+                <label for="assign_evaluation_time_per_sheet" class="text-[11px] text-label">Eval. Time (min)</label>
                 <input
                   id="assign_evaluation_time_per_sheet"
                   ref="evaluationTimePerSheetRef"
                   v-model="evaluationTimePerSheet"
                   type="text"
                   inputmode="numeric"
-                  placeholder="e.g. 60"
+                  placeholder="No limit if blank"
                   class="w-full h-8 px-2.5 rounded-xl bg-input-bg text-[11px] text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition"
                   :class="evaluationDateErrors.evaluation_time_per_sheet ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
                   @input="evaluationDateErrors.evaluation_time_per_sheet = ''"
@@ -744,7 +831,6 @@ async function assignPapers() {
                 <button
                   type="button"
                   class="h-9 inline-flex items-center gap-2 rounded-xl bg-btn-gradient text-white text-[13px] font-semibold px-4 hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
-                  :disabled="assigning"
                   @click="assignPapers"
                 >
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12" /></svg>
@@ -758,5 +844,18 @@ async function assignPapers() {
     </div>
 
     <TeacherAllocationModal v-if="allocationModalTeacher" :teacher="allocationModalTeacher" @close="closeAllocationModal" />
+
+    <SendAssignmentEmailModal
+      v-if="showSendMailModal"
+      endpoint="/assign-teacher"
+      action-word="Assign"
+      :payload="pendingAssignPayload"
+      :course-name="assignEmailCourseName"
+      :evaluation-start-date-display="formatDateTime(evaluationStartDate)"
+      :evaluation-end-date-display="formatDateTime(evaluationEndDate)"
+      :site-title="brandingStore.siteTitleValue"
+      @close="showSendMailModal = false"
+      @assigned="onAssigned"
+    />
   </div>
 </template>

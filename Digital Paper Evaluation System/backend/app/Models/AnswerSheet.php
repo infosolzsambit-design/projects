@@ -33,6 +33,7 @@ class AnswerSheet extends Model implements AuditableContract
     protected $fillable = [
         'question_answer_sheet_mapping_id',
         'teacher_id',
+        'assigned_at',
         'evaluation_start_date',
         'evaluation_end_date',
         'evaluation_time_per_sheet',
@@ -40,6 +41,16 @@ class AnswerSheet extends Model implements AuditableContract
         'draft_marks',
         'draft_marks_breakdown',
         'draft_annotations',
+        'issue_master_id',
+        'issue_raised_by',
+        'issue_raised_at',
+        'issue_status',
+        'issue_remarks',
+        'issue_fixed_at',
+        'issue_fixed_by',
+        'issue_admin_remarks',
+        'evaluation_session_token',
+        'evaluation_session_expires_at',
         'branch_code',
         'branch_name',
         'subject_code',
@@ -55,6 +66,7 @@ class AnswerSheet extends Model implements AuditableContract
         'packet_no',
         'barcode',
         'marks',
+        'evaluated_at',
         'top_sheet',
         'pdf_name',
         'pdf_path',
@@ -79,6 +91,11 @@ class AnswerSheet extends Model implements AuditableContract
         'draft_marks',
         'draft_marks_breakdown',
         'draft_annotations',
+        // Rotated on every "Start Evaluate"/"Continue Evaluate" click (see
+        // startEvaluation()) — same noise reasoning as the draft_* fields
+        // above, not meaningful change history.
+        'evaluation_session_token',
+        'evaluation_session_expires_at',
     ];
 
     /**
@@ -89,7 +106,9 @@ class AnswerSheet extends Model implements AuditableContract
         return [
             'semester' => 'integer',
             'absent' => 'boolean',
+            'assigned_at' => 'datetime',
             'marks' => 'decimal:2',
+            'evaluated_at' => 'datetime',
             'evaluation_start_date' => 'datetime',
             'evaluation_end_date' => 'datetime',
             'evaluation_time_per_sheet' => 'integer',
@@ -97,6 +116,9 @@ class AnswerSheet extends Model implements AuditableContract
             'draft_marks' => 'decimal:2',
             'draft_marks_breakdown' => 'array',
             'draft_annotations' => 'array',
+            'issue_raised_at' => 'datetime',
+            'issue_fixed_at' => 'datetime',
+            'evaluation_session_expires_at' => 'datetime',
         ];
     }
 
@@ -113,6 +135,34 @@ class AnswerSheet extends Model implements AuditableContract
     public function teacher(): BelongsTo
     {
         return $this->belongsTo(User::class, 'teacher_id');
+    }
+
+    /**
+     * The evaluation-issue type raised against this sheet (see
+     * MyPendingCourseController::raiseIssue()) — null means none has been.
+     */
+    public function issueMaster(): BelongsTo
+    {
+        return $this->belongsTo(IssueMaster::class, 'issue_master_id');
+    }
+
+    /**
+     * The teacher who raised the issue — not necessarily the same as
+     * teacher() above by the time it's viewed (the sheet could since have
+     * been reassigned), so kept as its own column rather than assumed.
+     */
+    public function issueRaisedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'issue_raised_by');
+    }
+
+    /**
+     * Whoever resolved the issue (see NotificationController's own
+     * resolveTimingIssue()/resolvePrintingIssue()) — null until then.
+     */
+    public function issueFixedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'issue_fixed_by');
     }
 
     public function creator(): BelongsTo

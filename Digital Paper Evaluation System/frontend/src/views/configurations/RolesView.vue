@@ -159,11 +159,11 @@ onMounted(async () => {
       <div class="overflow-x-auto">
         <table class="w-full min-w-[560px] text-left">
           <thead>
-            <tr class="bg-subject-header text-white text-[13px] font-medium">
-              <th class="px-4 py-3.5 font-medium rounded-tl-2xl">#</th>
-              <th class="px-4 py-3.5 font-medium">Name</th>
-              <th class="px-4 py-3.5 font-medium">Permissions</th>
-              <th class="px-4 py-3.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('role-edit') || authStore.can('role-delete')">Action</th>
+            <tr class="bg-subject-header text-white text-[12px] font-medium">
+              <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
+              <th class="px-4 py-1.5 font-medium">Name</th>
+              <th class="px-4 py-1.5 font-medium">Permissions</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('role-edit') || authStore.can('role-delete')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
@@ -177,16 +177,16 @@ onMounted(async () => {
               v-for="(role, index) in roles"
               v-else
               :key="role.id"
-              class="text-[13px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0"
+              class="text-[12px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0"
             >
-              <td class="px-4 py-3.5">
-                <span class="inline-flex items-center justify-center min-w-[46px] rounded-md status-gradient-border px-2 py-1.5 text-[12px] font-medium">
+              <td class="px-4 py-1">
+                <span class="inline-flex items-center justify-center min-w-[40px] rounded-md status-gradient-border px-2 py-0.5 text-[11px] font-medium">
                   # {{ (pagination.current_page - 1) * pagination.per_page + index + 1 }}
                 </span>
               </td>
-              <td class="px-4 py-3.5 font-semibold">{{ role.name }}</td>
-              <td class="px-4 py-3.5">{{ role.permissions?.length || 0 }}</td>
-              <td v-if="authStore.can('role-edit') || authStore.can('role-delete')" class="px-4 py-3.5 text-center relative" @click.stop>
+              <td class="px-4 py-1 font-semibold">{{ role.name }}</td>
+              <td class="px-4 py-1">{{ role.permissions?.length || 0 }}</td>
+              <td v-if="authStore.can('role-edit') || authStore.can('role-delete')" class="px-4 py-1 text-center relative" @click.stop>
                 <RowActionMenu>
                   <button v-if="authStore.can('role-edit')" type="button" class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors" @click="goToEdit(role)">
                     Edit

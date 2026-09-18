@@ -33,16 +33,16 @@ use Illuminate\Validation\ValidationException;
 class AssignTeacherService
 {
     /**
-     * @param  array{program_name:string,exam_term_id:int,course_id:int,semester:int,exam_year:int}  $filters
+     * @param  array{program_name:string,exam_term_id:int,exam_type_id:int,course_id:int,semester:int,exam_year:int}  $filters
      * @param  list<array{teacher_id:int,quantity:int}>  $assignments
      * @return list<array{teacher_id:int,assigned_count:int}>
      *
      * @throws ValidationException when nothing matches the filters, or more
-     *                              sheets are requested than are still
-     *                              pending (e.g. someone else's "Assign"
-     *                              click already claimed some in between
-     *                              this admin loading the page and
-     *                              clicking their own "Assign").
+     *                             sheets are requested than are still
+     *                             pending (e.g. someone else's "Assign"
+     *                             click already claimed some in between
+     *                             this admin loading the page and
+     *                             clicking their own "Assign").
      */
     public function assign(array $filters, array $assignments, string $evaluationStartDate, string $evaluationEndDate, ?int $evaluationTimePerSheet = null): array
     {
@@ -50,6 +50,7 @@ class AssignTeacherService
             $mappingIds = QuestionAnswerSheetMapping::query()
                 ->where('program_name', $filters['program_name'])
                 ->where('exam_term_id', $filters['exam_term_id'])
+                ->where('exam_type_id', $filters['exam_type_id'])
                 ->where('course_id', $filters['course_id'])
                 ->where('semester', $filters['semester'])
                 ->whereHas('questionPaper', fn ($q) => $q->where('exam_year', $filters['exam_year']))
@@ -97,6 +98,7 @@ class AssignTeacherService
                 foreach ($slice as $sheet) {
                     $sheet->update([
                         'teacher_id' => $assignment['teacher_id'],
+                        'assigned_at' => now(),
                         'evaluation_start_date' => $evaluationStartDate,
                         'evaluation_end_date' => $evaluationEndDate,
                         'evaluation_time_per_sheet' => $evaluationTimePerSheet,
@@ -123,20 +125,31 @@ class AssignTeacherService
      * drawing from that teacher's own sheets in this packet instead of the
      * packet's unassigned pool.
      *
+     * Only sheets $fromTeacherId hasn't already completed (marks IS NULL)
+     * are eligible — once a teacher hits "Complete" that evaluation is
+     * final and can't be handed to someone else; not-started and in-draft
+     * sheets can. A reassigned sheet is also reset to a clean slate
+     * (draft_marks/draft_marks_breakdown/draft_annotations/consumed_time
+     * all nulled) so the new teacher starts evaluating from scratch rather
+     * than inheriting the previous teacher's half-finished work.
+     *
      * @param  list<array{teacher_id:int,quantity:int}>  $reassignments
-     * @return array{from_remaining:int,summary:list<array{teacher_id:int,reassigned_count:int}>}
+     * @return array{from_remaining:int,summary:list<array{teacher_id:int,reassigned_count:int,evaluation_start_date:?string,evaluation_end_date:?string,evaluation_time_per_sheet:?int}>}
      *
      * @throws ValidationException when more sheets are requested across
-     *                              $reassignments than are actually still
-     *                              with the from-teacher in that packet
-     *                              (stale page, or someone else already
-     *                              moved/reassigned some in between).
+     *                             $reassignments than are actually still
+     *                             eligible (not yet completed) with the
+     *                             from-teacher in that packet (stale
+     *                             page, someone already completed some,
+     *                             or someone else already moved/reassigned
+     *                             some in between).
      */
     public function reassign(int $mappingId, int $fromTeacherId, array $reassignments): array
     {
         return DB::transaction(function () use ($mappingId, $fromTeacherId, $reassignments) {
             $sheets = AnswerSheet::where('question_answer_sheet_mapping_id', $mappingId)
                 ->where('teacher_id', $fromTeacherId)
+                ->whereNull('marks')
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->get();
@@ -145,7 +158,7 @@ class AssignTeacherService
 
             if ($totalRequested > $sheets->count()) {
                 throw ValidationException::withMessages([
-                    'reassignments' => ["Only {$sheets->count()} answer sheet(s) are still with this teacher for this course — {$totalRequested} were requested."],
+                    'reassignments' => ["Only {$sheets->count()} answer sheet(s) are still eligible to reassign (not yet completed) with this teacher for this course — {$totalRequested} were requested."],
                 ]);
             }
 
@@ -162,12 +175,35 @@ class AssignTeacherService
                 $cursor += $quantity;
 
                 foreach ($slice as $sheet) {
-                    $sheet->update(['teacher_id' => $reassignment['teacher_id']]);
+                    $sheet->update([
+                        'teacher_id' => $reassignment['teacher_id'],
+                        'assigned_at' => now(),
+                        'draft_marks' => null,
+                        'draft_marks_breakdown' => null,
+                        'draft_annotations' => null,
+                        'consumed_time' => null,
+                    ]);
                 }
 
+                // The window every reassigned sheet in this slice already
+                // carries (reassign() never changes it, see this method's
+                // own docblock) — reported here purely so the "you've been
+                // reassigned work" email (see TeacherReassignMailService)
+                // can tell the new teacher when it's due, without a second
+                // query. min/max in case the slice happens to span sheets
+                // originally assigned in different batches with slightly
+                // different windows.
                 $summary[] = [
                     'teacher_id' => (int) $reassignment['teacher_id'],
                     'reassigned_count' => $slice->count(),
+                    'evaluation_start_date' => $slice->pluck('evaluation_start_date')->filter()->min()?->toDateTimeString(),
+                    'evaluation_end_date' => $slice->pluck('evaluation_end_date')->filter()->max()?->toDateTimeString(),
+                    // reassign() never changes this field (see this
+                    // method's own docblock) — just whatever the first
+                    // sheet in the slice already carries, same "one
+                    // representative value for the email" approach as the
+                    // window's own min/max above.
+                    'evaluation_time_per_sheet' => $slice->pluck('evaluation_time_per_sheet')->filter()->first(),
                 ];
             }
 

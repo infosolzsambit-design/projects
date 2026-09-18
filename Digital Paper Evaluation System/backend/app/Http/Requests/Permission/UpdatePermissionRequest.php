@@ -31,7 +31,7 @@ class UpdatePermissionRequest extends FormRequest
             ],
             // See StorePermissionRequest for why this regex exists
             // alongside the frontend's own live auto-slugify.
-            'name' => ['required', 'string', 'max:255', 'regex:/^[a-z0-9]+(-[a-z0-9]+)*$/', Rule::unique('permissions', 'name')->ignore($permissionId)->whereNull('deleted_at')],
+            'name' => ['required', 'string', 'max:255', 'regex:/^[a-z0-9]+(-[a-z0-9]+)*$/', Rule::unique('permissions', 'name')->ignore($permission?->id)->whereNull('deleted_at')],
         ];
     }
 }

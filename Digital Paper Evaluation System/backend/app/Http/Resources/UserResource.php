@@ -27,6 +27,14 @@ class UserResource extends JsonResource
             'last_login_ip' => $this->last_login_ip,
             'roles' => RoleResource::collection($this->whenLoaded('roles')),
             'permissions' => PermissionResource::collection($this->whenLoaded('permissions')),
+            // This user's own department, if they have a teacher_details
+            // row at all (a plain admin-type account without one just gets
+            // null here) — only meaningfully populated on login()/me()'s
+            // own response, which eager-loads 'teacherDetail'. Drives the
+            // department-scoping AssignTeacherView.vue/AssignedTeachersView
+            // .vue apply for a non-super-admin (see HasDepartmentScope).
+            'department_id' => $this->whenLoaded('teacherDetail', fn () => $this->teacherDetail?->department_id),
+            'department' => $this->whenLoaded('teacherDetail', fn () => $this->teacherDetail?->department),
             'created_by' => $this->created_by,
             'updated_by' => $this->updated_by,
             'deleted_by' => $this->when($this->trashed(), $this->deleted_by),

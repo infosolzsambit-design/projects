@@ -44,7 +44,7 @@ onMounted(fetchAssignments)
 
 <template>
   <div class="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4" @click.self="close">
-    <div class="bg-white rounded-[24px] shadow-card w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
+    <div class="bg-white rounded-[24px] shadow-card w-full max-w-6xl max-h-[85vh] flex flex-col overflow-hidden">
       <div class="flex items-start justify-between gap-3 px-5 pt-5 pb-3 border-b border-soft">
         <div>
           <h2 class="text-lg font-bold text-black">Allocated Answer Sheets — {{ teacher.name }}</h2>
@@ -62,24 +62,27 @@ onMounted(fetchAssignments)
 
         <template v-else>
           <div class="overflow-x-auto">
-            <table class="w-full min-w-[820px] text-left border-separate border-spacing-0">
+            <table class="w-full min-w-[920px] text-left border-separate border-spacing-0">
               <thead>
                 <tr class="bg-subject-header text-white text-[11px] font-medium">
                   <th class="px-2.5 py-2 rounded-tl-xl">Program</th>
                   <th class="px-2.5 py-2">Course</th>
                   <th class="px-2.5 py-2">Exam Term</th>
+                  <th class="px-2.5 py-2">Exam Type</th>
                   <th class="px-2.5 py-2 text-center">Semester</th>
                   <th class="px-2.5 py-2 text-center">Exam Year</th>
                   <th class="px-2.5 py-2">Packet Code</th>
-                  <th class="px-2.5 py-2 text-center rounded-tr-xl">Sheets</th>
+                  <th class="px-2.5 py-2 text-center">Sheets</th>
+                  <th class="px-2.5 py-2 text-center">Completed</th>
+                  <th class="px-2.5 py-2 text-center rounded-tr-xl">In Draft</th>
                 </tr>
               </thead>
               <tbody class="bg-white">
                 <tr v-if="loading">
-                  <td colspan="7" class="px-2.5 py-10 text-center text-[13px] text-muted">Loading&hellip;</td>
+                  <td colspan="10" class="px-2.5 py-10 text-center text-[13px] text-muted">Loading&hellip;</td>
                 </tr>
                 <tr v-else-if="!breakdown.length">
-                  <td colspan="7" class="px-2.5 py-10 text-center text-[13px] text-muted">No answer sheets allocated to this teacher yet.</td>
+                  <td colspan="10" class="px-2.5 py-10 text-center text-[13px] text-muted">No answer sheets allocated to this teacher yet.</td>
                 </tr>
                 <tr
                   v-for="row in breakdown"
@@ -93,10 +96,13 @@ onMounted(fetchAssignments)
                     <span v-if="row.course_code" class="text-muted">({{ row.course_code }})</span>
                   </td>
                   <td class="px-2.5 py-2.5">{{ row.exam_term_name || '—' }}</td>
+                  <td class="px-2.5 py-2.5">{{ row.exam_type_name || '—' }}</td>
                   <td class="px-2.5 py-2.5 text-center">{{ row.semester ?? '—' }}</td>
                   <td class="px-2.5 py-2.5 text-center">{{ row.exam_year ?? '—' }}</td>
                   <td class="px-2.5 py-2.5 font-medium">{{ row.packet_code || '—' }}</td>
                   <td class="px-2.5 py-2.5 text-center font-semibold">{{ row.sheet_count }}</td>
+                  <td class="px-2.5 py-2.5 text-center text-success font-semibold">{{ row.completed_count }}</td>
+                  <td class="px-2.5 py-2.5 text-center text-brand font-semibold">{{ row.draft_count }}</td>
                 </tr>
               </tbody>
             </table>

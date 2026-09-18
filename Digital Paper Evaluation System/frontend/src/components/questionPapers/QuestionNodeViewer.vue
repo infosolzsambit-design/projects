@@ -6,7 +6,7 @@
 // for looking at a finished setup without any risk of accidentally
 // changing it (no inputs, no drag handles, no save).
 import { computed } from 'vue'
-import { slotCount } from '../../utils/questionPaperNode'
+import { availableSlotCount } from '../../utils/questionPaperNode'
 
 const props = defineProps({
   node: { type: Object, required: true },
@@ -24,7 +24,11 @@ const props = defineProps({
   parentLabel: { type: String, default: '' },
 })
 
-const availableSlots = computed(() => props.node.children.reduce((sum, child) => sum + slotCount(child), 0))
+// Respects a reviewer's own manual slots_override (set in
+// QuestionNodeEditor.vue), same as that component's own display, so this
+// read-only view never contradicts what was actually saved. See
+// availableSlotCount()'s own docblock.
+const availableSlots = computed(() => availableSlotCount(props.node))
 
 const modeText = computed(() => {
   if (props.node.mode === 'choose') return `Choose ${props.node.choose_count} of ${availableSlots.value}`

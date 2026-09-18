@@ -169,6 +169,14 @@ async function submit() {
     if (data?.errors) {
       applyServerErrors(data.errors)
       focusFirstError()
+      // Every field saves together in one submission (see submit()'s own
+      // docblock) — one bad field (which may be scrolled out of view, or a
+      // radio/checkbox group focusFirstError() can't scroll to) silently
+      // discards every other change on the page too, including ones that
+      // were themselves perfectly valid. Without this banner an admin who
+      // doesn't spot the one inline red message below has no way to tell
+      // their save didn't go through at all.
+      formError.value = 'Some fields need attention — nothing on this page was saved. Please fix the highlighted field(s) below and save again.'
     } else {
       formError.value = data?.message || 'Could not save settings.'
     }

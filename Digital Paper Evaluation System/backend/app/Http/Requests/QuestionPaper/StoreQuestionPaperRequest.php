@@ -3,6 +3,7 @@
 namespace App\Http\Requests\QuestionPaper;
 
 use App\Http\Requests\QuestionPaper\Concerns\ValidatesQuestionPaperNodes;
+use App\Models\QuestionPaper;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -66,6 +67,34 @@ class StoreQuestionPaperRequest extends FormRequest
      */
     public function withValidator($validator): void
     {
+        $validator->after(fn (Validator $v) => $this->validateNoDuplicatePaper($v));
         $validator->after(fn (Validator $v) => $this->validateGroupsStructure($v));
+    }
+
+    /**
+     * One question paper per (exam_year, course_id, exam_term_id,
+     * semester) combination — a second upload for the same exam is a
+     * duplicate, not a new paper (see QuestionPaperSetupView.vue's Step 1
+     * "Setup" button, which pre-checks this same combination before moving
+     * on to Step 2, so this is a backstop that always applies, not just a
+     * UX nicety). Only checked once the four fields are themselves valid —
+     * an already-invalid exam_year/course_id/etc. gets its own error
+     * without this piling on a second, confusing one.
+     */
+    private function validateNoDuplicatePaper(Validator $validator): void
+    {
+        if ($validator->errors()->hasAny(['exam_year', 'course_id', 'exam_term_id', 'semester'])) {
+            return;
+        }
+
+        $exists = QuestionPaper::where('exam_year', $this->input('exam_year'))
+            ->where('course_id', $this->input('course_id'))
+            ->where('exam_term_id', $this->input('exam_term_id'))
+            ->where('semester', $this->input('semester'))
+            ->exists();
+
+        if ($exists) {
+            $validator->errors()->add('exam_year', 'A question paper already exists for this Exam Year, Course, Exam Term and Semester combination.');
+        }
     }
 }

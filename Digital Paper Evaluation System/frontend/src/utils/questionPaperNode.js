@@ -40,6 +40,10 @@ export function createBranch(mode, instruction = '') {
     instruction,
     mode,
     choose_count: mode === 'choose' ? 1 : '',
+    // Only ever meaningful on a 'choose' node — see that column's own
+    // migration docblock on the backend. '' = "keep auto-computing the
+    // 'of N' total from the children below", same as before this existed.
+    slots_override: '',
     marks: '',
     children: [],
     labelError: '',
@@ -63,6 +67,7 @@ export function mapNodeFromData(raw) {
     instruction: raw.instruction ?? '',
     mode: raw.mode ?? 'leaf',
     choose_count: raw.choose_count ?? '',
+    slots_override: raw.slots_override ?? '',
     marks: raw.marks ?? '',
     bloom_level: raw.bloom_level ?? '',
     co: raw.co ?? '',
@@ -86,7 +91,12 @@ export function nodeToPayload(node) {
     payload.bloom_level = node.bloom_level || null
     payload.co = node.co || null
   } else {
-    if (node.mode === 'choose') payload.choose_count = Number(node.choose_count)
+    if (node.mode === 'choose') {
+      payload.choose_count = Number(node.choose_count)
+      if (node.slots_override !== '' && node.slots_override !== null && node.slots_override !== undefined) {
+        payload.slots_override = Number(node.slots_override)
+      }
+    }
     payload.children = node.children.map(nodeToPayload)
   }
   return payload
@@ -112,6 +122,24 @@ export function sumMarks(node) {
  */
 export function slotCount(node) {
   if (node.mode !== 'all') return 1
+  return node.children.reduce((sum, child) => sum + slotCount(child), 0)
+}
+
+/**
+ * A "choose" (or "all") node's own "of N" total — the sum of its direct
+ * children's own slotCount(), *unless* the reviewer has typed a manual
+ * slots_override directly onto this node (see that field's own migration
+ * docblock on the backend for why: the auto-computed sum can occasionally
+ * misjudge a scanned paper's real structure, and rather than chase every
+ * such misreading in the OCR parser, this lets it just be corrected by
+ * hand). Used both for the live "of N" display (QuestionNodeEditor.vue)
+ * and for validateNode()'s own choose_count bounds check below, so the
+ * two can never disagree about what the real ceiling is.
+ */
+export function availableSlotCount(node) {
+  if (node.slots_override !== '' && node.slots_override !== null && node.slots_override !== undefined) {
+    return Number(node.slots_override)
+  }
   return node.children.reduce((sum, child) => sum + slotCount(child), 0)
 }
 
@@ -156,7 +184,7 @@ export function validateNode(node) {
 
   if (node.mode === 'choose') {
     const count = Number(node.choose_count)
-    const slots = node.children.reduce((sum, child) => sum + slotCount(child), 0)
+    const slots = availableSlotCount(node)
     if (!count) {
       node.chooseCountError = 'Enter how many of these must be attempted.'
       ok = false

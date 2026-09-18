@@ -15,6 +15,11 @@
 // stop rendering the dropdown *inside* that clipped DOM subtree at all —
 // hence the Teleport to <body> here, with its position computed from the
 // trigger button's own bounding box instead of relying on `absolute`.
+//
+// z-[210] — one tier above every modal's own z-[200] (see
+// AnswerSheetRowsModal.vue, which opens this menu from a row *inside* a
+// modal), but still well under the toast stack's z-[300]/GlobalLoader's
+// z-[400] (see Toaster.vue), so this can never outrank either of those.
 import { nextTick, onBeforeUnmount, ref } from 'vue'
 
 defineProps({
@@ -86,7 +91,7 @@ onBeforeUnmount(close)
     <div
       v-if="open"
       :style="menuStyle"
-      class="fixed bg-white rounded-xl shadow-panel border border-soft py-1.5 z-50 text-left"
+      class="fixed bg-white rounded-xl shadow-panel border border-soft py-1.5 z-[210] text-left"
       :class="width"
       @click="close"
     >

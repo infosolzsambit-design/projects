@@ -82,6 +82,11 @@ trait ValidatesQuestionPaperNodes
         }
 
         if ($mode === 'choose') {
+            $slotsOverride = $node['slots_override'] ?? null;
+            if ($slotsOverride !== null && $slotsOverride !== '' && (! is_numeric($slotsOverride) || (int) $slotsOverride < 1)) {
+                $validator->errors()->add("{$path}.slots_override", 'Must be a whole number of 1 or more.');
+            }
+
             // Bounds are checked against the *slot* count, not the raw
             // direct-children count — a child can itself be an "all"
             // sub-group standing in for several real questions (e.g. three
@@ -89,7 +94,13 @@ trait ValidatesQuestionPaperNodes
             // pool), and a plain "choose_count" comparison against
             // count($children) (3, in that example) would wrongly reject
             // it. See self::slotCount().
-            $slotCount = array_sum(array_map(fn ($child) => $this->slotCount((array) $child), $children));
+            //
+            // A reviewer's own slots_override, when set, wins outright —
+            // see that column's own migration docblock for why an
+            // auto-computed total can be wrong in the first place.
+            $slotCount = ! empty($node['slots_override'])
+                ? (int) $node['slots_override']
+                : array_sum(array_map(fn ($child) => $this->slotCount((array) $child), $children));
             $chooseCount = $node['choose_count'] ?? null;
             if (! is_numeric($chooseCount) || (int) $chooseCount < 1) {
                 $validator->errors()->add("{$path}.choose_count", 'Enter how many of these must be attempted.');

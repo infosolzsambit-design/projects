@@ -12,6 +12,7 @@ use App\Models\QuestionAnswerSheetMapping;
 use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -34,6 +35,16 @@ class QuestionAnswerSheetMappingController extends Controller
      * StoreAnswerSheetRowsRequest's own docblock), and the list only ever
      * needs the count, not every row.
      */
+    /**
+     * GET /answer-sheet-mappings — backs AnswerSheetsView.vue's own header
+     * search box and Filter dropdown:
+     *  - ?search=          → matches packet code, program name, course
+     *    name/code, and exam term name
+     *  - ?course_id=, ?exam_term_id=, ?semester=
+     *  - ?status=uploaded|empty → whether the packet has any rows at all
+     *    yet (see storeRows()) — matches the "Uploaded"/"Empty" badge this
+     *    same view already renders per row.
+     */
     public function index(Request $request): JsonResponse
     {
         $perPage = max(1, min(
@@ -41,10 +52,41 @@ class QuestionAnswerSheetMappingController extends Controller
             (int) config('pagination.max_per_page'),
         ));
 
-        $mappings = QuestionAnswerSheetMapping::with(['course', 'questionPaper', 'examTerm', 'creator'])
-            ->withCount(['answerSheets', 'answerSheets as pending_answer_sheet_count' => fn ($q) => $q->whereNull('teacher_id')])
-            ->latest('id')
-            ->paginate($perPage);
+        $query = QuestionAnswerSheetMapping::with(['course', 'questionPaper', 'examTerm', 'examType', 'creator'])
+            ->withCount(['answerSheets', 'answerSheets as pending_answer_sheet_count' => fn ($q) => $q->whereNull('teacher_id')]);
+
+        if ($search = $request->string('search')->toString()) {
+            $query->where(function ($q) use ($search) {
+                $q->where('packet_code', 'like', "%{$search}%")
+                    ->orWhere('program_name', 'like', "%{$search}%")
+                    ->orWhereHas('course', fn ($q2) => $q2->where('name', 'like', "%{$search}%")->orWhere('code', 'like', "%{$search}%"))
+                    ->orWhereHas('examTerm', fn ($q2) => $q2->where('name', 'like', "%{$search}%"));
+            });
+        }
+
+        if ($request->filled('course_id')) {
+            $query->where('course_id', $request->integer('course_id'));
+        }
+        if ($request->filled('exam_term_id')) {
+            $query->where('exam_term_id', $request->integer('exam_term_id'));
+        }
+        if ($request->filled('exam_type_id')) {
+            $query->where('exam_type_id', $request->integer('exam_type_id'));
+        }
+        if ($request->filled('semester')) {
+            $query->where('semester', $request->integer('semester'));
+        }
+
+        if ($request->filled('status')) {
+            $status = $request->string('status')->toString();
+            if ($status === 'uploaded') {
+                $query->whereHas('answerSheets');
+            } elseif ($status === 'empty') {
+                $query->whereDoesntHave('answerSheets');
+            }
+        }
+
+        $mappings = $query->latest('id')->paginate($perPage);
 
         return $this->paginated($mappings, 'Answer sheet packets fetched successfully.', QuestionAnswerSheetMappingResource::collection($mappings));
     }
@@ -52,7 +94,7 @@ class QuestionAnswerSheetMappingController extends Controller
     public function show(QuestionAnswerSheetMapping $questionAnswerSheetMapping): JsonResponse
     {
         return $this->success(
-            new QuestionAnswerSheetMappingResource($questionAnswerSheetMapping->loadCount(['answerSheets', 'answerSheets as pending_answer_sheet_count' => fn ($q) => $q->whereNull('teacher_id')])->load(['course', 'questionPaper', 'examTerm'])),
+            new QuestionAnswerSheetMappingResource($questionAnswerSheetMapping->loadCount(['answerSheets', 'answerSheets as pending_answer_sheet_count' => fn ($q) => $q->whereNull('teacher_id')])->load(['course', 'questionPaper', 'examTerm', 'examType'])),
             'Answer sheet packet fetched successfully.',
         );
     }
@@ -60,9 +102,12 @@ class QuestionAnswerSheetMappingController extends Controller
     /**
      * GET /answer-sheet-mappings/{mapping}/rows — the packet's own answer
      * sheets, paginated (see AnswerSheetsView.vue's "View Answer Sheets"
-     * modal). A dedicated, paginated endpoint rather than embedding these
-     * in show() — a packet can hold thousands of rows, and a modal only
-     * ever needs one page of them at a time.
+     * modal, AnswerSheetRowsModal.vue). A dedicated, paginated endpoint
+     * rather than embedding these in show() — a packet can hold thousands
+     * of rows, and a modal only ever needs one page of them at a time.
+     *
+     * ?search= matches Roll No, Name, or Subject Barcode — the same three
+     * columns the modal's own search box filters against.
      */
     public function rows(Request $request, QuestionAnswerSheetMapping $questionAnswerSheetMapping): JsonResponse
     {
@@ -71,9 +116,110 @@ class QuestionAnswerSheetMappingController extends Controller
             (int) config('pagination.max_per_page'),
         ));
 
-        $rows = $questionAnswerSheetMapping->answerSheets()->with('teacher')->orderBy('id')->paginate($perPage);
+        // teacher.teacherDetail — AnswerSheetRowsModal.vue's own "Evaluation
+        // By" column shows the assigned teacher's emp code alongside their
+        // name (see AnswerSheetResource's own teacher_emp_code field).
+        $query = $questionAnswerSheetMapping->answerSheets()->with('teacher.teacherDetail');
+
+        if ($search = $request->string('search')->toString()) {
+            $query->where(function ($q) use ($search) {
+                $q->where('roll_no', 'like', "%{$search}%")
+                    ->orWhere('name', 'like', "%{$search}%")
+                    ->orWhere('subject_barcode', 'like', "%{$search}%");
+            });
+        }
+
+        $rows = $query->orderBy('id')->paginate($perPage);
 
         return $this->paginated($rows, 'Answer sheets fetched successfully.', AnswerSheetResource::collection($rows));
+    }
+
+    /**
+     * DELETE /answer-sheet-mappings/{mapping}/rows/{answer_sheet} — removes
+     * one wrongly-uploaded row from a packet (AnswerSheetRowsModal.vue's
+     * own row action) without touching the rest of the packet. A plain
+     * soft delete (see AnswerSheet's own SoftDeletes) — reversible, and the
+     * row simply drops out of every query that already respects deleted_at
+     * (this modal's own listing, a teacher's pending queue, ...) — nothing
+     * special has to happen for it to "disappear". The row's own PDF is
+     * left on disk, same as a whole packet's soft delete does (see
+     * QuestionAnswerSheetMapping::booted()) — only a *force* delete ever
+     * actually removes files.
+     */
+    public function deleteRow(QuestionAnswerSheetMapping $questionAnswerSheetMapping, AnswerSheet $answerSheet): JsonResponse
+    {
+        if ($answerSheet->question_answer_sheet_mapping_id !== $questionAnswerSheetMapping->id) {
+            return $this->notFound('No answer sheet found in this packet.');
+        }
+
+        $answerSheet->delete();
+
+        return $this->success(null, 'Answer sheet deleted successfully.');
+    }
+
+    /**
+     * POST /answer-sheet-mappings/check-duplicate-barcodes — the same
+     * "QR code already used for this exact packet combination" check
+     * StoreAnswerSheetRowsRequest itself authoritatively enforces (see that
+     * class's withValidator()), exposed standalone so AnswerSheetUploadView
+     * .vue's Check step can surface it *before* Submit — at that point no
+     * QuestionAnswerSheetMapping row exists yet at all (phase 1's store()
+     * hasn't run), so there's nothing to scope a per-mapping check to; this
+     * takes the packet's own identifying fields directly instead.
+     *
+     * "Combination" here is every field that together identifies one exam
+     * sitting (program_name, packet_code, question_paper_id, course_id,
+     * exam_term_id, exam_type_id, semester) — the same seven fields Packet
+     * Details asks for. The same subject_barcode can absolutely repeat
+     * *across* a different combination (a different question paper, say);
+     * it's only a duplicate within the same one.
+     */
+    public function checkDuplicateBarcodes(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'program_name' => ['required', 'string'],
+            'packet_code' => ['required', 'string'],
+            'question_paper_id' => ['required', 'integer'],
+            'course_id' => ['required', 'integer'],
+            'exam_term_id' => ['required', 'integer'],
+            'exam_type_id' => ['required', 'integer'],
+            'semester' => ['required', 'integer'],
+            'barcodes' => ['required', 'array', 'min:1'],
+            'barcodes.*' => ['string'],
+        ]);
+
+        $duplicates = AnswerSheet::withTrashed()
+            ->whereIn('question_answer_sheet_mapping_id', $this->siblingMappingIds($data))
+            ->whereIn('subject_barcode', $data['barcodes'])
+            ->pluck('subject_barcode')
+            ->unique()
+            ->values();
+
+        return $this->success(['duplicate_barcodes' => $duplicates], 'Checked successfully.');
+    }
+
+    /**
+     * Every (non-deleted) mapping sharing one packet's exact combination of
+     * program_name/packet_code/question_paper_id/course_id/exam_term_id/
+     * exam_type_id/semester — deliberately plural, since nothing stops the
+     * same combination being uploaded as more than one packet (see this
+     * controller's own store()), and a QR code must be unique across all
+     * of them together, not just within whichever single mapping id a
+     * caller happens to already have. Shared by checkDuplicateBarcodes()
+     * above and StoreAnswerSheetRowsRequest's own authoritative check.
+     *
+     * @param  array{program_name:string,packet_code:string,question_paper_id:int,course_id:int,exam_term_id:int,exam_type_id:int,semester:int}  $fields
+     */
+    public static function siblingMappingIds(array $fields): Collection
+    {
+        return QuestionAnswerSheetMapping::where('program_name', $fields['program_name'])
+            ->where('packet_code', $fields['packet_code'])
+            ->where('question_paper_id', $fields['question_paper_id'])
+            ->where('course_id', $fields['course_id'])
+            ->where('exam_term_id', $fields['exam_term_id'])
+            ->where('exam_type_id', $fields['exam_type_id'])
+            ->where('semester', $fields['semester'])
+            ->pluck('id');
     }
 
     /**

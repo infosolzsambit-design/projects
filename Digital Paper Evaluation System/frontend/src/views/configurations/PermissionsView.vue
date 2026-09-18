@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../../utils/api'
 import { useAuthStore } from '../../stores/auth'
@@ -18,6 +18,8 @@ const loading = ref(true)
 const loadError = ref('')
 
 const search = ref('')
+const groupFilter = ref('') // '' | permission_group id
+const subGroupFilter = ref('') // '' | permission_sub_group id
 
 const pagination = reactive({ current_page: 1, per_page: 20, total: 0, last_page: 1 })
 
@@ -27,6 +29,8 @@ async function fetchPermissions(page = 1) {
   try {
     const params = { page, per_page: pagination.per_page }
     if (search.value) params.search = search.value
+    if (groupFilter.value) params.permission_group_id = groupFilter.value
+    if (subGroupFilter.value) params.permission_sub_group_id = subGroupFilter.value
 
     // PermissionController::index has no ?status=all escape hatch (unlike
     // the Master-module controllers) — it's always this paginated listing.
@@ -41,6 +45,42 @@ async function fetchPermissions(page = 1) {
 }
 
 function runSearch() {
+  fetchPermissions(1)
+}
+
+const availableGroups = ref([])
+const availableSubGroups = ref([])
+async function loadGroupsAndSubGroups() {
+  try {
+    const [groupsRes, subGroupsRes] = await Promise.all([
+      api.get('/permission-groups', { params: { status: 'all', table_fields: ['name'] } }),
+      api.get('/permission-sub-groups', { params: { status: 'all', table_fields: ['name'] } }),
+    ])
+    availableGroups.value = groupsRes.data.data
+    availableSubGroups.value = subGroupsRes.data.data
+  } catch {
+    // Non-fatal — the group/sub-group filters just stay empty; search still works.
+  }
+}
+
+const showFilter = ref(false)
+function toggleFilter() {
+  showFilter.value = !showFilter.value
+}
+function closeFilter() {
+  showFilter.value = false
+}
+onMounted(() => document.addEventListener('click', closeFilter))
+onBeforeUnmount(() => document.removeEventListener('click', closeFilter))
+
+function applyFilters() {
+  showFilter.value = false
+  fetchPermissions(1)
+}
+function resetFilters() {
+  groupFilter.value = ''
+  subGroupFilter.value = ''
+  showFilter.value = false
   fetchPermissions(1)
 }
 
@@ -88,7 +128,10 @@ const permissionChecked = ref(false)
 onMounted(async () => {
   if (!authStore.user) await authStore.fetchMe().catch(() => {})
   permissionChecked.value = true
-  if (authStore.can('permission-list')) fetchPermissions(1)
+  if (authStore.can('permission-list')) {
+    fetchPermissions(1)
+    loadGroupsAndSubGroups()
+  }
 })
 </script>
 
@@ -151,6 +194,56 @@ onMounted(async () => {
         >
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
         </button>
+        <div class="relative">
+          <button
+            type="button"
+            class="h-10 shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[13px] font-medium px-3.5 transition-colors"
+            :aria-expanded="showFilter"
+            @click="toggleFilter"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+            Filter
+          </button>
+          <div
+            v-show="showFilter"
+            class="absolute right-0 top-full mt-2 z-40 w-[min(260px,calc(100vw-2rem))] bg-white rounded-2xl shadow-panel border border-soft p-4 text-left"
+            role="dialog"
+            aria-label="Filter permissions"
+          >
+            <div class="flex flex-col gap-3">
+              <div class="flex flex-col gap-1">
+                <label class="text-[13px] text-label">Permission Group</label>
+                <div class="relative">
+                  <select
+                    v-model="groupFilter"
+                    class="appearance-none w-full h-8 pl-3 pr-9 rounded-xl bg-input-bg text-[13px] text-gray-800 outline-none border border-input-border focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 transition cursor-pointer"
+                  >
+                    <option value="">All Groups</option>
+                    <option v-for="group in availableGroups" :key="group.id" :value="group.id">{{ group.name }}</option>
+                  </select>
+                  <svg class="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9" /></svg>
+                </div>
+              </div>
+              <div class="flex flex-col gap-1">
+                <label class="text-[13px] text-label">Permission Sub Group</label>
+                <div class="relative">
+                  <select
+                    v-model="subGroupFilter"
+                    class="appearance-none w-full h-8 pl-3 pr-9 rounded-xl bg-input-bg text-[13px] text-gray-800 outline-none border border-input-border focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 transition cursor-pointer"
+                  >
+                    <option value="">All Sub Groups</option>
+                    <option v-for="subGroup in availableSubGroups" :key="subGroup.id" :value="subGroup.id">{{ subGroup.name }}</option>
+                  </select>
+                  <svg class="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9" /></svg>
+                </div>
+              </div>
+              <div class="flex items-center justify-end gap-2 pt-1">
+                <button type="button" class="min-w-[88px] h-9 px-5 rounded-full border border-input-border bg-white text-[13px] font-semibold text-gray-700 hover:border-brand-blue hover:text-brand-blue transition-colors" @click="resetFilters">Reset</button>
+                <button type="button" class="min-w-[88px] h-9 px-5 rounded-full bg-btn-gradient text-white text-[13px] font-semibold hover:opacity-90 transition-all" @click="applyFilters">Search</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -159,13 +252,13 @@ onMounted(async () => {
       <div class="overflow-x-auto">
         <table class="w-full min-w-[760px] text-left">
           <thead>
-            <tr class="bg-subject-header text-white text-[13px] font-medium">
-              <th class="px-4 py-3.5 font-medium rounded-tl-2xl">#</th>
-              <th class="px-4 py-3.5 font-medium">Name</th>
-              <th class="px-4 py-3.5 font-medium">Group</th>
-              <th class="px-4 py-3.5 font-medium">Sub Group</th>
-              <th class="px-4 py-3.5 font-medium">Guard</th>
-              <th class="px-4 py-3.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('permission-edit') || authStore.can('permission-delete')">Action</th>
+            <tr class="bg-subject-header text-white text-[12px] font-medium">
+              <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
+              <th class="px-4 py-1.5 font-medium">Name</th>
+              <th class="px-4 py-1.5 font-medium">Group</th>
+              <th class="px-4 py-1.5 font-medium">Sub Group</th>
+              <th class="px-4 py-1.5 font-medium">Guard</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('permission-edit') || authStore.can('permission-delete')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
@@ -179,18 +272,18 @@ onMounted(async () => {
               v-for="(permission, index) in permissions"
               v-else
               :key="permission.id"
-              class="text-[13px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0"
+              class="text-[12px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0"
             >
-              <td class="px-4 py-3.5">
-                <span class="inline-flex items-center justify-center min-w-[46px] rounded-md status-gradient-border px-2 py-1.5 text-[12px] font-medium">
+              <td class="px-4 py-1">
+                <span class="inline-flex items-center justify-center min-w-[40px] rounded-md status-gradient-border px-2 py-0.5 text-[11px] font-medium">
                   # {{ (pagination.current_page - 1) * pagination.per_page + index + 1 }}
                 </span>
               </td>
-              <td class="px-4 py-3.5 font-semibold">{{ permission.name }}</td>
-              <td class="px-4 py-3.5">{{ permission.permission_group?.name || '—' }}</td>
-              <td class="px-4 py-3.5">{{ permission.permission_sub_group?.name || '—' }}</td>
-              <td class="px-4 py-3.5">{{ permission.guard_name }}</td>
-              <td v-if="authStore.can('permission-edit') || authStore.can('permission-delete')" class="px-4 py-3.5 text-center relative" @click.stop>
+              <td class="px-4 py-1 font-semibold">{{ permission.name }}</td>
+              <td class="px-4 py-1">{{ permission.permission_group?.name || '—' }}</td>
+              <td class="px-4 py-1">{{ permission.permission_sub_group?.name || '—' }}</td>
+              <td class="px-4 py-1">{{ permission.guard_name }}</td>
+              <td v-if="authStore.can('permission-edit') || authStore.can('permission-delete')" class="px-4 py-1 text-center relative" @click.stop>
                 <RowActionMenu>
                   <button v-if="authStore.can('permission-edit')" type="button" class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors" @click="goToEdit(permission)">
                     Edit
