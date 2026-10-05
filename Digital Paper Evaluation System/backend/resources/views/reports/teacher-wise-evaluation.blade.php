@@ -26,6 +26,7 @@
     margin to leave around this table on the actual printed PDF page (its
     own default is considerably roomier than this).
 --}}
+@php $cols = 15; @endphp
 <html>
 <head>
 <meta charset="utf-8">
@@ -35,18 +36,9 @@
 </head>
 <body style="margin: 0; font-family: Arial, Helvetica, sans-serif; color: #1f2937;">
 <table border="1" cellspacing="0" cellpadding="4" style="width: 100%; border-collapse: collapse; border: 1px solid #1f3a82;">
-    {{-- Title band — logo + site name, then the report name on its own
-         row underneath, both centred across every column. --}}
+    @include('reports.partials.logo-header', ['cols' => $cols])
     <tr>
-        <td colspan="14" align="center" style="border: 1px solid #1f3a82; background-color: #2f56c0; padding: 8px 10px 4px;">
-            @if ($logoDataUri)
-                <img src="{{ $logoDataUri }}" height="28" style="vertical-align: middle; margin-right: 8px;" alt="" />
-            @endif
-            <span style="font-size: 14px; font-weight: bold; color: #ffffff; letter-spacing: 0.02em; vertical-align: middle;">{{ $siteTitle }}</span>
-        </td>
-    </tr>
-    <tr>
-        <td colspan="14" align="center" style="border: 1px solid #1f3a82; background-color: #24418f; padding: 5px 10px 7px; font-size: 10px; font-weight: bold; color: #ffffff; letter-spacing: 0.1em;">
+        <td colspan="15" align="center" style="border: 1px solid #1f3a82; background-color: #24418f; padding: 5px 10px 7px; font-size: 10px; font-weight: bold; color: #ffffff; letter-spacing: 0.1em;">
             TEACHER WISE EVALUATION REPORT
         </td>
     </tr>
@@ -55,7 +47,7 @@
          called out on its own row right under the title so it's the
          first thing visible, not buried in the meta strip below. --}}
     <tr>
-        <td colspan="14" align="center" style="border: 1px solid #1f3a82; background-color: #eef2fb; padding: 5px 10px; font-size: 10px; font-weight: bold; color: #1f3a82; letter-spacing: 0.03em;">
+        <td colspan="15" align="center" style="border: 1px solid #1f3a82; background-color: #eef2fb; padding: 5px 10px; font-size: 10px; font-weight: bold; color: #1f3a82; letter-spacing: 0.03em;">
             Examination: {{ $examinationName ?? '—' }}
         </td>
     </tr>
@@ -66,7 +58,7 @@
         <td colspan="7" align="left" style="border: 1px solid #dae2f0; background-color: #f0f3f8; padding: 4px 10px; font-size: 9px; color: #374151;">
             <strong>Printed By:</strong> {{ $printedBy }}
         </td>
-        <td colspan="7" align="right" style="border: 1px solid #dae2f0; background-color: #f0f3f8; padding: 4px 10px; font-size: 9px; color: #374151;">
+        <td colspan="8" align="right" style="border: 1px solid #dae2f0; background-color: #f0f3f8; padding: 4px 10px; font-size: 9px; color: #374151;">
             <strong>Download Time:</strong> {{ $downloadedAt }}
         </td>
     </tr>
@@ -82,6 +74,7 @@
         <th align="center" style="border: 1px solid #1f3a82; background-color: #2f56c0; color: #ffffff; padding: 4px 6px; font-size: 9px;">Examination</th>
         <th align="center" style="border: 1px solid #1f3a82; background-color: #2f56c0; color: #ffffff; padding: 4px 6px; font-size: 9px;">Subject Name</th>
         <th align="center" style="border: 1px solid #1f3a82; background-color: #2f56c0; color: #ffffff; padding: 4px 6px; font-size: 9px;">Subject Code</th>
+        <th align="center" style="border: 1px solid #1f3a82; background-color: #2f56c0; color: #ffffff; padding: 4px 6px; font-size: 9px;">Department</th>
         <th align="center" style="border: 1px solid #1f3a82; background-color: #2f56c0; color: #ffffff; padding: 4px 6px; font-size: 9px;">Semester</th>
         <th align="center" style="border: 1px solid #1f3a82; background-color: #2f56c0; color: #ffffff; padding: 4px 6px; font-size: 9px;">Allotted Script</th>
         <th align="center" style="border: 1px solid #1f3a82; background-color: #2f56c0; color: #ffffff; padding: 4px 6px; font-size: 9px;">Allocation Date</th>
@@ -99,8 +92,9 @@
             <td align="center" style="border: 1px solid #d0d5dd; background-color: {{ $rowBg }}; padding: 3px 6px; font-size: 8.5px;">{{ $row['emp_code'] ?? '—' }}</td>
             <td align="center" style="border: 1px solid #d0d5dd; background-color: {{ $rowBg }}; padding: 3px 6px; font-size: 8.5px;">{{ $row['mobile_no'] ?? '—' }}</td>
             <td align="center" style="border: 1px solid #d0d5dd; background-color: {{ $rowBg }}; padding: 3px 6px; font-size: 8.5px;">{{ $row['exam_type_name'] ?? '—' }}</td>
-            <td align="left" style="border: 1px solid #d0d5dd; background-color: {{ $rowBg }}; padding: 3px 6px; font-size: 8.5px;">{{ $row['subject_name'] ?? '—' }}</td>
+            <td align="left" style="border: 1px solid #d0d5dd; background-color: {{ $rowBg }}; padding: 3px 6px; font-size: 8.5px;">{{ \App\Helpers\CourseLabel::withType($row['subject_name'] ?? '—', $row['subject_type'] ?? null) }}</td>
             <td align="center" style="border: 1px solid #d0d5dd; background-color: {{ $rowBg }}; padding: 3px 6px; font-size: 8.5px;">{{ $row['subject_code'] ?? '—' }}</td>
+            <td align="left" style="border: 1px solid #d0d5dd; background-color: {{ $rowBg }}; padding: 3px 6px; font-size: 8.5px;">{{ $row['department_name'] ?: '—' }}</td>
             <td align="center" style="border: 1px solid #d0d5dd; background-color: {{ $rowBg }}; padding: 3px 6px; font-size: 8.5px;">{{ $row['semester'] }}</td>
             <td align="center" style="border: 1px solid #d0d5dd; background-color: {{ $rowBg }}; padding: 3px 6px; font-size: 8.5px;">{{ $row['allotted_script'] }}</td>
             <td align="center" style="border: 1px solid #d0d5dd; background-color: {{ $rowBg }}; padding: 3px 6px; font-size: 8.5px;">{{ $row['allocation_date'] ?? '—' }}</td>
@@ -112,12 +106,12 @@
         </tr>
     @empty
         <tr>
-            <td colspan="14" align="center" style="border: 1px solid #d0d5dd; padding: 10px; font-size: 11px;">No matching evaluation activity found for this search.</td>
+            <td colspan="15" align="center" style="border: 1px solid #d0d5dd; padding: 10px; font-size: 11px;">No matching evaluation activity found for this search.</td>
         </tr>
     @endforelse
 
     <tr>
-        <td colspan="14" align="right" style="border: 1px solid #d0d5dd; background-color: #f9fafb; padding: 4px 10px; font-size: 9.5px; color: #6b7280;">
+        <td colspan="15" align="right" style="border: 1px solid #d0d5dd; background-color: #f9fafb; padding: 4px 10px; font-size: 9.5px; color: #6b7280;">
             {{ count($rows) }} record{{ count($rows) === 1 ? '' : 's' }} in this report.
         </td>
     </tr>

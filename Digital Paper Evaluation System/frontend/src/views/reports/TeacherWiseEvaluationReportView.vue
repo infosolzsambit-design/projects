@@ -13,15 +13,21 @@ import api from '../../utils/api'
 import { useAuthStore } from '../../stores/auth'
 import { useToast } from '../../composables/useToast'
 import SearchableSelect from '../../components/common/SearchableSelect.vue'
+import { useProgramsStore } from '../../stores/programs'
+import { courseLabel } from '../../utils/course'
+import { ordinal } from '../../utils/ordinal'
 
 const toast = useToast()
 const authStore = useAuthStore()
 
 const SEMESTER_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1)
+// Same searchable dropdown as the other filters; shown as 1st, 2nd, …
+const semesterOptions = SEMESTER_OPTIONS.map((n) => ({ id: n, name: ordinal(n) }))
 
 const filters = reactive({
   program_name: '',
   course_id: '',
+  department_id: '', // optional — the packet's department
   exam_term_id: '',
   exam_type_id: '',
   semester: '',
@@ -64,11 +70,13 @@ function validateFilters() {
 // filter row already uses. ---------------------------------------------
 const availablePrograms = ref([])
 const programsLoading = ref(true)
+const programsStore = useProgramsStore()
 async function loadPrograms() {
   programsLoading.value = true
   try {
-    const res = await api.get('/programs', { params: { status: 'all', is_active: 'yes', table_fields: ['name'] } })
-    availablePrograms.value = res.data.data.map((program) => ({ id: program.name, name: program.name }))
+    // Shown as "Name (Label)"; the value stays the plain program name.
+    await programsStore.load(true)
+    availablePrograms.value = programsStore.options()
   } catch {
     // Non-fatal — the dropdown just stays empty; the page itself doesn't
     // depend on this succeeding to render.
@@ -82,15 +90,29 @@ const coursesLoading = ref(true)
 async function loadCourses() {
   coursesLoading.value = true
   try {
-    const res = await api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] } })
+    const res = await api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code', 'type'] } })
     availableCourses.value = res.data.data.map((course) => ({
       ...course,
-      name: course.code ? `${course.name} (${course.code})` : course.name,
+      name: courseLabel(course.name, course.code, course.type),
     }))
   } catch {
     // Same as loadPrograms() above.
   } finally {
     coursesLoading.value = false
+  }
+}
+
+const availableDepartments = ref([])
+const departmentsLoading = ref(true)
+async function loadDepartments() {
+  departmentsLoading.value = true
+  try {
+    const res = await api.get('/departments', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] } })
+    availableDepartments.value = res.data.data.map((d) => ({ ...d, name: d.code ? `${d.name} (${d.code})` : d.name }))
+  } catch {
+    // Same as loadPrograms() above.
+  } finally {
+    departmentsLoading.value = false
   }
 }
 
@@ -149,6 +171,7 @@ onMounted(async () => {
   if (!authStore.can('teacher-wise-evaluation-report')) return
   loadPrograms()
   loadCourses()
+  loadDepartments()
   loadExamTerms()
   loadExamTypes()
   loadTeachers()
@@ -163,6 +186,7 @@ const rows = ref([])
 function exportParams() {
   const params = { ...filters }
   if (!params.teacher_id) delete params.teacher_id
+  if (!params.department_id) delete params.department_id
   return params
 }
 
@@ -261,7 +285,9 @@ async function downloadReport() {
         <h3 class="text-[14px] sm:text-[15px] font-semibold text-gray-900">Select Exam Details</h3>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-2.5">
+      <!-- Row 1: Program · Course · Exam Type · Exam Term (same layout as
+           Assign Teacher / Generate Marksheet — Program and Course wider). -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_1fr_1fr] gap-2.5">
         <div class="flex flex-col gap-1">
           <label for="fwer_program" class="text-[12px] text-label">Program <span class="text-brand">*</span></label>
           <SearchableSelect
@@ -295,22 +321,6 @@ async function downloadReport() {
         </div>
 
         <div class="flex flex-col gap-1">
-          <label for="fwer_exam_term" class="text-[12px] text-label">Exam Term <span class="text-brand">*</span></label>
-          <SearchableSelect
-            id="fwer_exam_term"
-            :ref="(el) => (fieldRefs.exam_term_id.value = el)"
-            v-model="filters.exam_term_id"
-            :options="availableExamTerms"
-            :loading="examTermsLoading"
-            :error="!!fieldErrors.exam_term_id"
-            placeholder="Select"
-            search-placeholder="Search exam terms…"
-            @change="clearFieldError('exam_term_id')"
-          />
-          <p v-if="fieldErrors.exam_term_id" class="text-[11px] text-brand">{{ fieldErrors.exam_term_id }}</p>
-        </div>
-
-        <div class="flex flex-col gap-1">
           <label for="fwer_exam_type" class="text-[12px] text-label">Exam Type <span class="text-brand">*</span></label>
           <SearchableSelect
             id="fwer_exam_type"
@@ -327,18 +337,48 @@ async function downloadReport() {
         </div>
 
         <div class="flex flex-col gap-1">
+          <label for="fwer_exam_term" class="text-[12px] text-label">Exam Term <span class="text-brand">*</span></label>
+          <SearchableSelect
+            id="fwer_exam_term"
+            :ref="(el) => (fieldRefs.exam_term_id.value = el)"
+            v-model="filters.exam_term_id"
+            :options="availableExamTerms"
+            :loading="examTermsLoading"
+            :error="!!fieldErrors.exam_term_id"
+            placeholder="Select"
+            search-placeholder="Search exam terms…"
+            @change="clearFieldError('exam_term_id')"
+          />
+          <p v-if="fieldErrors.exam_term_id" class="text-[11px] text-brand">{{ fieldErrors.exam_term_id }}</p>
+        </div>
+      </div>
+
+      <!-- Row 2: Department · Semester · Exam Year · Teacher · Search -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1.4fr_auto] gap-2.5 mt-2.5">
+        <div class="flex flex-col gap-1 min-w-0">
+          <label for="fwer_department" class="text-[12px] text-label">Department <span class="text-muted">(optional)</span></label>
+          <SearchableSelect
+            id="fwer_department"
+            v-model="filters.department_id"
+            :options="availableDepartments"
+            :loading="departmentsLoading"
+            placeholder="All departments"
+            search-placeholder="Search departments…"
+          />
+        </div>
+
+        <div class="flex flex-col gap-1">
           <label for="fwer_semester" class="text-[12px] text-label">Semester <span class="text-brand">*</span></label>
-          <select
+          <SearchableSelect
             id="fwer_semester"
             :ref="(el) => (fieldRefs.semester.value = el)"
             v-model="filters.semester"
-            class="w-full h-10 px-3 rounded-xl bg-input-bg text-sm text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition cursor-pointer"
-            :class="fieldErrors.semester ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
+            :options="semesterOptions"
+            :error="!!fieldErrors.semester"
+            placeholder="Select"
+            search-placeholder="Search semesters…"
             @change="clearFieldError('semester')"
-          >
-            <option value="" disabled>Select</option>
-            <option v-for="option in SEMESTER_OPTIONS" :key="option" :value="option">{{ option }}</option>
-          </select>
+          />
           <p v-if="fieldErrors.semester" class="text-[11px] text-brand">{{ fieldErrors.semester }}</p>
         </div>
 
@@ -367,18 +407,19 @@ async function downloadReport() {
             search-placeholder="Search teachers…"
           />
         </div>
-      </div>
 
-      <div class="flex justify-end mt-3">
-        <button
-          type="button"
-          class="h-10 inline-flex items-center justify-center gap-2 rounded-xl bg-btn-gradient text-white text-[13px] font-semibold px-6 hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
-          :disabled="searching"
-          @click="runSearch"
-        >
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-          {{ searching ? 'Searching…' : 'Search' }}
-        </button>
+        <div class="flex flex-col gap-1">
+          <label class="text-[12px] text-label invisible" aria-hidden="true">Search</label>
+          <button
+            type="button"
+            class="h-10 inline-flex items-center justify-center gap-2 rounded-xl bg-btn-gradient text-white text-[13px] font-semibold px-6 hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed self-start"
+            :disabled="searching"
+            @click="runSearch"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            {{ searching ? 'Searching…' : 'Search' }}
+          </button>
+        </div>
       </div>
     </section>
 
@@ -414,44 +455,64 @@ async function downloadReport() {
       <p v-if="searchError" class="text-[13px] text-brand text-center py-8">{{ searchError }}</p>
 
       <div v-else class="overflow-x-auto">
-        <table class="w-full min-w-[1280px] text-left">
+        <table class="w-full min-w-[1000px] text-left">
           <thead>
-            <tr class="bg-subject-header text-white text-[12px] font-medium">
-              <th class="px-3 py-2.5 rounded-tl-xl">Teacher Name</th>
-              <th class="px-3 py-2.5">Emp Code</th>
-              <th class="px-3 py-2.5">Mobile No</th>
-              <th class="px-3 py-2.5">Examination</th>
-              <th class="px-3 py-2.5">Subject Name</th>
-              <th class="px-3 py-2.5">Subject Code</th>
-              <th class="px-3 py-2.5 text-center">Semester</th>
-              <th class="px-3 py-2.5 text-center">Allotted Script</th>
-              <th class="px-3 py-2.5">Allocation Date</th>
-              <th class="px-3 py-2.5 text-center">Total Evaluated</th>
-              <th class="px-3 py-2.5 text-center">Total Problem Script</th>
-              <th class="px-3 py-2.5 text-center">Total Pending</th>
-              <th class="px-3 py-2.5">Evaluation Start</th>
-              <th class="px-3 py-2.5 rounded-tr-xl">Evaluation End</th>
+            <tr class="bg-subject-header text-white text-[12px] font-medium whitespace-nowrap">
+              <th class="px-2 py-2.5 rounded-tl-xl">Teacher</th>
+              <th class="px-2 py-2.5">Examination</th>
+              <th class="px-2 py-2.5">Course</th>
+              <th class="px-2 py-2.5 text-center" title="Semester">Sem</th>
+              <th class="px-2 py-2.5 whitespace-nowrap">Allotted / Evaluated</th>
+              <th class="px-2 py-2.5">Allocation Date</th>
+              <th class="px-2 py-2.5 whitespace-nowrap">Pending / Problem</th>
+              <th class="px-2 py-2.5 rounded-tr-xl">Evaluation Window</th>
             </tr>
           </thead>
           <tbody class="bg-white">
             <tr v-if="!rows.length">
-              <td colspan="14" class="px-3 py-8 text-center text-sm text-muted">No evaluation activity found for this search.</td>
+              <td colspan="8" class="px-3 py-8 text-center text-sm text-muted">No evaluation activity found for this search.</td>
             </tr>
             <tr v-for="(row, i) in rows" v-else :key="i" class="text-[12.5px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0">
-              <td class="px-3 py-2.5 font-medium whitespace-nowrap">{{ row.teacher_name }}</td>
-              <td class="px-3 py-2.5">{{ row.emp_code || '—' }}</td>
-              <td class="px-3 py-2.5 whitespace-nowrap">{{ row.mobile_no || '—' }}</td>
-              <td class="px-3 py-2.5">{{ row.exam_type_name || '—' }}</td>
-              <td class="px-3 py-2.5">{{ row.subject_name || '—' }}</td>
-              <td class="px-3 py-2.5">{{ row.subject_code || '—' }}</td>
-              <td class="px-3 py-2.5 text-center">{{ row.semester }}</td>
-              <td class="px-3 py-2.5 text-center font-semibold">{{ row.allotted_script }}</td>
-              <td class="px-3 py-2.5 whitespace-nowrap">{{ row.allocation_date || '—' }}</td>
-              <td class="px-3 py-2.5 text-center text-success font-semibold">{{ row.total_evaluated }}</td>
-              <td class="px-3 py-2.5 text-center">{{ row.total_problem_script }}</td>
-              <td class="px-3 py-2.5 text-center text-brand font-semibold">{{ row.total_pending }}</td>
-              <td class="px-3 py-2.5 whitespace-nowrap">{{ row.evaluation_start_date || '—' }}</td>
-              <td class="px-3 py-2.5 whitespace-nowrap">{{ row.evaluation_end_date || '—' }}</td>
+              <!-- Teacher name (Emp Code), with the mobile number below it. -->
+              <td class="px-2 py-2.5 whitespace-nowrap">
+                <p class="leading-snug">
+                  <span class="font-medium">{{ row.teacher_name }}</span>
+                  <span v-if="row.emp_code" class="text-muted"> ({{ row.emp_code }})</span>
+                </p>
+                <p class="mt-0.5 flex items-center gap-1 text-[11px] text-muted leading-snug" title="Mobile No">
+                  <svg class="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
+                  {{ row.mobile_no || '—' }}
+                </p>
+              </td>
+              <td class="px-2 py-2.5 min-w-[90px]">{{ row.exam_type_name || '—' }}</td>
+              <!-- Course (name, code, type) on one line; the packet's
+                   department below it. -->
+              <td class="px-2 py-2.5">
+                <p class="leading-snug whitespace-nowrap">{{ row.subject_name ? courseLabel(row.subject_name, row.subject_code, row.subject_type) : '—' }}</p>
+                <p class="mt-0.5 text-[11px] text-muted leading-snug">{{ row.department_name || '—' }}</p>
+              </td>
+              <td class="px-2 py-2.5 text-center">{{ ordinal(row.semester) }}</td>
+              <!-- Allotted with Evaluated below — label : value, lined up. -->
+              <td class="px-2 py-2.5">
+                <div class="inline-grid grid-cols-[auto_auto_auto] gap-x-1.5 gap-y-0.5 text-[12px] leading-snug whitespace-nowrap">
+                  <span class="text-muted">Allotted</span><span class="text-muted">:</span><span class="font-semibold text-gray-900">{{ row.allotted_script }}</span>
+                  <span class="text-muted">Evaluated</span><span class="text-muted">:</span><span class="font-semibold text-success">{{ row.total_evaluated }}</span>
+                </div>
+              </td>
+              <td class="px-2 py-2.5 whitespace-nowrap">{{ row.allocation_date || '—' }}</td>
+              <!-- Label : value pairs, labels and values lined up. -->
+              <td class="px-2 py-2.5">
+                <div class="inline-grid grid-cols-[auto_auto_auto] gap-x-1.5 gap-y-0.5 text-[12px] leading-snug whitespace-nowrap">
+                  <span class="text-muted">Pending</span><span class="text-muted">:</span><span class="font-semibold text-brand">{{ row.total_pending }}</span>
+                  <span class="text-muted">Problem</span><span class="text-muted">:</span><span class="font-semibold text-amber-600">{{ row.total_problem_script }}</span>
+                </div>
+              </td>
+              <td class="px-2 py-2.5">
+                <div class="inline-grid grid-cols-[auto_auto_auto] gap-x-1.5 gap-y-0.5 text-[12px] leading-snug whitespace-nowrap">
+                  <span class="text-muted">Start</span><span class="text-muted">:</span><span class="text-gray-800">{{ row.evaluation_start_date || '—' }}</span>
+                  <span class="text-muted">End</span><span class="text-muted">:</span><span class="text-gray-800">{{ row.evaluation_end_date || '—' }}</span>
+                </div>
+              </td>
             </tr>
           </tbody>
         </table>

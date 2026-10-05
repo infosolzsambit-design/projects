@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import api from '../../utils/api'
+import { courseLabel } from '../../utils/course'
 
 // Swaps in a new scan for an already-set-up paper's PDF only — reachable
 // from QuestionPapersView.vue's row action menu, deliberately enabled even
@@ -73,7 +74,7 @@ function close() {
 
       <form class="p-5 flex flex-col gap-4" @submit.prevent="submit">
         <p class="text-[13px] text-muted">
-          Upload a new scan for {{ paper.course_name || 'this question paper' }} ({{ paper.exam_year }}, Sem {{ paper.semester }}).
+          Upload a new scan for {{ paper.course_name ? courseLabel(paper.course_name, paper.course_code, paper.course_type) : 'this question paper' }} ({{ paper.exam_year }}, Sem {{ paper.semester }}).
           Only the file is replaced — marks, Bloom/CO tags and the question structure stay exactly as already set up.
         </p>
 

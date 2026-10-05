@@ -344,9 +344,7 @@ function retakeFromView() {
             <tr class="bg-subject-header text-white text-[12px] font-medium">
               <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
               <th class="px-4 py-1.5 font-medium">Name</th>
-              <th class="px-4 py-1.5 font-medium">Emp Code</th>
-              <th class="px-4 py-1.5 font-medium">Email</th>
-              <th class="px-4 py-1.5 font-medium">Phone</th>
+              <th class="px-4 py-1.5 font-medium">Contact</th>
               <th class="px-4 py-1.5 font-medium">Department</th>
               <th class="px-4 py-1.5 font-medium">Designation</th>
               <th class="px-4 py-1.5 font-medium" v-if="authStore.can('teacher-face-scan')">Face Scan</th>
@@ -356,10 +354,10 @@ function retakeFromView() {
           </thead>
           <tbody class="bg-white">
             <tr v-if="loading">
-              <td colspan="10" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
+              <td colspan="8" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
             </tr>
             <tr v-else-if="!teachers.length">
-              <td colspan="10" class="px-4 py-8 text-center text-sm text-muted">No teachers found.</td>
+              <td colspan="8" class="px-4 py-8 text-center text-sm text-muted">No teachers found.</td>
             </tr>
             <tr
               v-for="(teacher, index) in teachers"
@@ -372,10 +370,27 @@ function retakeFromView() {
                   # {{ (pagination.current_page - 1) * pagination.per_page + index + 1 }}
                 </span>
               </td>
-              <td class="px-4 py-1 font-semibold">{{ teacher.name }}</td>
-              <td class="px-4 py-1">{{ teacher.emp_code || '—' }}</td>
-              <td class="px-4 py-1">{{ teacher.email }}</td>
-              <td class="px-4 py-1">{{ teacher.phone_no || '—' }}</td>
+              <!-- Name with the Emp Code below it. -->
+              <td class="px-4 py-1.5">
+                <p class="font-semibold text-gray-900 leading-snug">{{ teacher.name }}</p>
+                <p class="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted leading-snug" title="Emp Code">
+                  <svg class="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="6" y1="10" x2="12" y2="10" /><line x1="6" y1="14" x2="10" y2="14" /><circle cx="16.5" cy="12" r="2" /></svg>
+                  <span class="font-medium text-gray-600">{{ teacher.emp_code || '—' }}</span>
+                </p>
+              </td>
+              <!-- Contact: Email with the Phone below it. -->
+              <td class="px-4 py-1.5">
+                <div class="space-y-0.5 text-[12px] leading-snug">
+                  <p class="flex items-center gap-1.5 min-w-0" title="Email">
+                    <svg class="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2" /><polyline points="22 6 12 13 2 6" /></svg>
+                    <span class="truncate">{{ teacher.email || '—' }}</span>
+                  </p>
+                  <p class="flex items-center gap-1.5" title="Phone">
+                    <svg class="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
+                    <span>{{ teacher.phone_no || '—' }}</span>
+                  </p>
+                </div>
+              </td>
               <td class="px-4 py-1">{{ teacher.department || '—' }}</td>
               <td class="px-4 py-1">{{ teacher.designation || '—' }}</td>
               <td v-if="authStore.can('teacher-face-scan')" class="px-4 py-1" @click.stop>

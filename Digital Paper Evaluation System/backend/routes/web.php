@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 
 /*
 |--------------------------------------------------------------------------
@@ -19,6 +20,26 @@ Route::get('/', function () {
         // 'documentation' => 'https://your-api-docs-url.com' // Optional
     ], 200);
 });
+
+// Uploaded PDFs/images (question papers, answer sheets, branding) are fetched
+// cross-origin by the frontend's own domain — see resolveStorageUrl() in the
+// frontend's utils/api.js. Some production hosts serve these as plain static
+// files with no way to attach a CORS header at the web-server level (no
+// mod_headers), so this route exists specifically to add it in PHP instead.
+// public/.htaccess forces every /storage/* request through here rather than
+// letting Apache serve the file directly.
+Route::get('storage/{path}', function (string $path) {
+    $disk = Storage::disk('public');
+
+    if (str_contains($path, '..') || ! $disk->exists($path)) {
+        abort(404);
+    }
+
+    return response()->file($disk->path($path), [
+        'Access-Control-Allow-Origin' => config('app.frontend_url'),
+        'Access-Control-Allow-Methods' => 'GET, HEAD, OPTIONS',
+    ]);
+})->where('path', '.*');
 
 // Fallback route for any unknown routes
 Route::fallback(function () {

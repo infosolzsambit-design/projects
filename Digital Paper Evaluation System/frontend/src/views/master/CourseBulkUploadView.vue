@@ -10,7 +10,7 @@ const toast = useToast()
 
 // --- CSV template download.
 function downloadTemplate() {
-  const sample = [{ Name: 'Demo Course', Code: 'DEMO101' }]
+  const sample = [{ Name: 'Demo Course', Code: 'DEMO101', Type: 'Theory' }]
   const worksheet = XLSX.utils.json_to_sheet(sample)
   const workbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Courses')
@@ -29,10 +29,12 @@ function makeRow(raw) {
   const keys = Object.keys(raw)
   const nameKey = findColumn(keys, 'name')
   const codeKey = findColumn(keys, 'code')
+  const typeKey = findColumn(keys, 'type')
 
   return reactive({
     name: nameKey ? String(raw[nameKey] ?? '').trim() : '',
     code: codeKey ? String(raw[codeKey] ?? '').trim() : '',
+    type: typeKey ? String(raw[typeKey] ?? '').trim() : '',
     errors: {},
     valid: null,
   })
@@ -84,7 +86,14 @@ function setFieldRef(index, field, el) {
   if (!fieldRefs[index]) fieldRefs[index] = {}
   fieldRefs[index][field] = el
 }
-const ROW_FIELD_ORDER = ['name', 'code']
+const ROW_FIELD_ORDER = ['name', 'code', 'type']
+const COMBO_FIELDS = ['name', 'code', 'type']
+
+// A combined Name + Code + Type duplicate comes back on all three cells —
+// show the text once (under Name) and just outline the other two.
+function showRowMessage(row, field) {
+  return !!row.errors[field] && (field === 'name' || row.errors[field] !== row.errors.name)
+}
 
 function focusFirstError() {
   const rowIndex = rows.value.findIndex((r) => r.valid === false)
@@ -94,6 +103,12 @@ function focusFirstError() {
 }
 
 function markEdited(row, field) {
+  if (field && COMBO_FIELDS.includes(field) && row.errors[field]) {
+    const message = row.errors[field]
+    COMBO_FIELDS.forEach((key) => {
+      if (row.errors[key] === message) row.errors[key] = ''
+    })
+  }
   if (field) row.errors[field] = ''
   row.valid = null
   allValid.value = false
@@ -106,7 +121,7 @@ function removeRow(index) {
 }
 
 function toPayload() {
-  return rows.value.map((r) => ({ name: r.name, code: r.code }))
+  return rows.value.map((r) => ({ name: r.name, code: r.code, type: r.type }))
 }
 
 function applyResults(results) {
@@ -201,7 +216,8 @@ function cancel() {
         <section class="bg-white rounded-[28px] shadow-card p-4 sm:p-5">
           <h2 class="text-[16px] sm:text-[18px] font-semibold text-gray-900 mb-1">1. Download the CSV template</h2>
           <p class="text-[13px] text-muted mb-3">
-            Columns: <span class="font-medium text-gray-700">Name, Code</span>. Both are required — Code must be unique.
+            Columns: <span class="font-medium text-gray-700">Name, Code, Type</span>. All three are required. Type is free text, e.g.
+            T, P, Theory or Practical (max 50 characters). The combination of Name, Code and Type must be unique.
           </p>
           <button
             type="button"
@@ -250,12 +266,16 @@ function cancel() {
 
         <div class="flex-1 overflow-y-auto overflow-x-hidden px-5 py-3">
           <div class="overflow-x-auto">
-            <table class="w-full min-w-[420px] text-left border-separate border-spacing-0">
+            <datalist id="course-type-options">
+              <option value="T" /><option value="P" /><option value="Theory" /><option value="Practical" />
+            </datalist>
+            <table class="w-full min-w-[560px] text-left border-separate border-spacing-0">
               <thead>
                 <tr class="bg-subject-header text-white text-[11px] font-medium">
                   <th class="px-2 py-1.5 rounded-tl-xl">#</th>
                   <th class="px-2 py-1.5 min-w-[220px]">Name</th>
                   <th class="px-2 py-1.5 min-w-[140px]">Code</th>
+                  <th class="px-2 py-1.5 min-w-[120px]">Type</th>
                   <th class="px-2 py-1.5 text-center min-w-[80px]">Status</th>
                   <th class="px-2 py-1.5 rounded-tr-xl w-8"></th>
                 </tr>
@@ -283,7 +303,21 @@ function cancel() {
                       :class="row.errors.code ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
                       @input="markEdited(row, 'code')"
                     />
-                    <p v-if="row.errors.code" class="text-[10px] text-brand mt-0.5">{{ row.errors.code }}</p>
+                    <p v-if="showRowMessage(row, 'code')" class="text-[10px] text-brand mt-0.5">{{ row.errors.code }}</p>
+                  </td>
+                  <td class="px-2 py-1.5">
+                    <input
+                      :ref="(el) => setFieldRef(index, 'type', el)"
+                      v-model="row.type"
+                      type="text"
+                      maxlength="50"
+                      list="course-type-options"
+                      placeholder="Theory / Practical"
+                      class="w-full h-8 px-2 rounded-lg bg-input-bg text-[12px] outline-none border"
+                      :class="row.errors.type ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
+                      @input="markEdited(row, 'type')"
+                    />
+                    <p v-if="showRowMessage(row, 'type')" class="text-[10px] text-brand mt-0.5">{{ row.errors.type }}</p>
                   </td>
                   <td class="px-2 py-1.5 text-center">
                     <span v-if="row.valid === true" class="inline-flex items-center gap-1 text-[10px] font-medium text-green-700 bg-green-100 rounded-full px-1.5 py-0.5">

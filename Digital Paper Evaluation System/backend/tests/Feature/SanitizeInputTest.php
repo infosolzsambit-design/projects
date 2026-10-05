@@ -45,6 +45,7 @@ class SanitizeInputTest extends TestCase
         $response = $this->withApiKey()->postJson('/api/v1/courses', [
             'name' => '<script>alert(1)</script>Physics',
             'code' => 'SAN-01',
+            'type' => 'Theory',
         ]);
 
         $response->assertStatus(201);
@@ -60,6 +61,7 @@ class SanitizeInputTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/programs', [
             'name' => '<img src=x onerror=alert(1)>Engineering',
+            'label' => '<b>UG</b>',
             'department_id' => $department->id,
             'code' => 'SAN-02',
             'course_ids' => [$course->id],
@@ -67,6 +69,7 @@ class SanitizeInputTest extends TestCase
 
         $response->assertStatus(201);
         $this->assertSame('Engineering', $response->json('data.name'));
+        $this->assertSame('UG', $response->json('data.label'));
     }
 
     public function test_a_script_tag_in_a_user_name_is_stripped(): void

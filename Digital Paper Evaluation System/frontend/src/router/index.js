@@ -129,6 +129,18 @@ const router = createRouter({
           meta: { title: 'Teacher Wise Evaluation Report' },
         },
         {
+          path: 'reports/problem-report',
+          name: 'reports-problem-report',
+          component: () => import('../views/reports/ProblemReportView.vue'),
+          meta: { title: 'Problem Report' },
+        },
+        {
+          path: 'reports/pending-report',
+          name: 'reports-pending-report',
+          component: () => import('../views/reports/PendingReportView.vue'),
+          meta: { title: 'Pending Report' },
+        },
+        {
           path: 'reports/answer-book-top-sheet',
           name: 'reports-answer-book-top-sheet',
           component: () => import('../views/reports/AnswerBookTopSheetReportView.vue'),
@@ -165,16 +177,36 @@ const router = createRouter({
           meta: { title: 'Students' },
         },
         {
-          path: 'notifications',
-          name: 'notifications',
+          path: 'problems',
+          name: 'problems',
           component: () => import('../views/NotificationsView.vue'),
-          meta: { title: 'Notifications' },
+          meta: { title: 'Problems' },
         },
+        // Old URL — kept so existing bookmarks/links still land on the page.
+        { path: 'notifications', redirect: { name: 'problems' } },
         {
           path: 'my-pending-courses',
           name: 'my-pending-courses',
           component: () => import('../views/MyPendingCoursesView.vue'),
           meta: { title: 'My Pending Course' },
+        },
+        {
+          path: 'generate-marksheet',
+          name: 'generate-marksheet',
+          component: () => import('../views/GenerateMarksheetView.vue'),
+          meta: { title: 'Generate Marksheet' },
+        },
+        {
+          path: 'reset-evaluation',
+          name: 'reset-evaluation',
+          component: () => import('../views/ResetEvaluationView.vue'),
+          meta: { title: 'Reset Evaluation' },
+        },
+        {
+          path: 'my-problem-courses',
+          name: 'my-problem-courses',
+          component: () => import('../views/MyProblemCoursesView.vue'),
+          meta: { title: 'My Problem Course' },
         },
         {
           path: 'my-completed-courses',

@@ -52,8 +52,25 @@ function highlight(name) {
   return safe.replace(new RegExp(escapeRegExp(escapeHtml(q)), 'gi'), (m) => `<mark class="bg-yellow-300 rounded-sm px-0.5">${m}</mark>`)
 }
 
+// Opens upward when there isn't room below — e.g. a field on a search
+// panel's second row, where the list would otherwise run under the page
+// footer (which sits above page content) or off the bottom of the window.
+const dropUp = ref(false)
+const PANEL_HEIGHT = 300 // search box + up to max-h-56 of options, with margin
+
+function decideDirection() {
+  const rect = rootEl.value?.getBoundingClientRect()
+  if (!rect) return
+  const footerTop = document.getElementById('site-footer')?.getBoundingClientRect().top ?? Infinity
+  const bottomLimit = Math.min(window.innerHeight, footerTop)
+  const spaceBelow = bottomLimit - rect.bottom
+  const spaceAbove = rect.top
+  dropUp.value = spaceBelow < PANEL_HEIGHT && spaceAbove > spaceBelow
+}
+
 async function open() {
   if (props.disabled || props.loading) return
+  decideDirection()
   isOpen.value = true
   search.value = ''
   highlightedIndex.value = Math.max(
@@ -154,7 +171,8 @@ defineExpose({ focus })
 
     <div
       v-if="isOpen"
-      class="absolute left-0 right-0 top-full mt-1.5 bg-white rounded-xl shadow-panel border border-soft z-30 overflow-hidden"
+      class="absolute left-0 right-0 bg-white rounded-xl shadow-panel border border-soft z-30 overflow-hidden"
+      :class="dropUp ? 'bottom-full mb-1.5' : 'top-full mt-1.5'"
     >
       <div class="p-2 border-b border-soft">
         <input

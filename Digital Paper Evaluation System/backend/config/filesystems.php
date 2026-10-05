@@ -33,14 +33,26 @@ return [
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            // Was true — Laravel auto-registers a storage/{path} route for
+            // any disk with 'serve' enabled, and that framework route was
+            // silently shadowing our own storage/{path} route in
+            // routes/web.php (the one that adds the CORS headers cross-
+            // origin PDF/image fetches need), since it gets registered
+            // first. Nothing in this app downloads from the private disk
+            // via a public URL anyway.
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],
 
+        // Points straight at public/storage — no storage:link symlink in the
+        // loop. The hosting environment's FTP-only deploys can't reliably
+        // create or keep a symlink in place (see the stale-directory bug it
+        // caused in production), so uploads/downloads read and write this
+        // folder directly instead of going through storage/app/public.
         'public' => [
             'driver' => 'local',
-            'root' => storage_path('app/public'),
+            'root' => public_path('storage'),
             'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
             'visibility' => 'public',
             'throw' => false,
@@ -73,8 +85,8 @@ return [
     |
     */
 
-    'links' => [
-        public_path('storage') => storage_path('app/public'),
-    ],
+    // No symlink needed — the 'public' disk above points straight at
+    // public/storage now.
+    'links' => [],
 
 ];

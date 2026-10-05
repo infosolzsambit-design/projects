@@ -6,6 +6,7 @@ use App\Traits\HasAuditContext;
 use App\Traits\HasDateTimeTimestamps;
 use App\Traits\HasUserstamps;
 use Database\Factories\AnswerSheetFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -34,6 +35,7 @@ class AnswerSheet extends Model implements AuditableContract
         'question_answer_sheet_mapping_id',
         'teacher_id',
         'assigned_at',
+        'assigned_by',
         'evaluation_start_date',
         'evaluation_end_date',
         'evaluation_time_per_sheet',
@@ -59,6 +61,12 @@ class AnswerSheet extends Model implements AuditableContract
         'subject_barcode',
         'fi_code',
         'roll_no',
+        'student_id_read',
+        'roll_no_check_status',
+        'student_id_crop_path',
+        'roll_no_checked_at',
+        'student_id_verified_by',
+        'student_id_verified_at',
         'name',
         'registration_no',
         'absent',
@@ -119,6 +127,8 @@ class AnswerSheet extends Model implements AuditableContract
             'issue_raised_at' => 'datetime',
             'issue_fixed_at' => 'datetime',
             'evaluation_session_expires_at' => 'datetime',
+            'roll_no_checked_at' => 'datetime',
+            'student_id_verified_at' => 'datetime',
         ];
     }
 
@@ -175,8 +185,65 @@ class AnswerSheet extends Model implements AuditableContract
         return $this->belongsTo(User::class, 'updated_by');
     }
 
+    /** Who assigned (or last reassigned) this sheet to its teacher. */
+    public function assigner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_by');
+    }
+
     public function deleter(): BelongsTo
     {
         return $this->belongsTo(User::class, 'deleted_by');
+    }
+
+    public function hasOpenIssue(): bool
+    {
+        return $this->issue_status === 'open';
+    }
+
+    /**
+     * A sheet with an open issue (either type) sits in the teacher's
+     * "Problem Course" list instead of "Pending Course", and can't be
+     * evaluated until an admin resolves it.
+     */
+    public function scopeWithOpenIssue(Builder $query): Builder
+    {
+        return $query->where($query->qualifyColumn('issue_status'), 'open');
+    }
+
+    public function scopeWithoutOpenIssue(Builder $query): Builder
+    {
+        $column = $query->qualifyColumn('issue_status');
+
+        return $query->where(fn (Builder $q) => $q->whereNull($column)->orWhere($column, '!=', 'open'));
+    }
+
+    /*
+     * The one definition of the evaluation buckets, used by every count in
+     * the app (allocation modal, dashboard, reports, Generate Marksheet,
+     * My Pending Course). For any set of sheets:
+     *
+     *   total = evaluated + problem + pending
+     *
+     * evaluated = marks submitted; problem = not evaluated, open issue
+     * (waiting on the admin — shown under Problem Course, not Pending);
+     * pending = not evaluated and no open issue (a resolved issue puts the
+     * sheet back into pending). Where a count covers unassigned sheets
+     * too, those are pending unless the caller splits them out.
+     */
+    public static function pendingSql(string $table = 'answer_sheets'): string
+    {
+        return "({$table}.marks IS NULL AND ({$table}.issue_status IS NULL OR {$table}.issue_status <> 'open'))";
+    }
+
+    public static function problemSql(string $table = 'answer_sheets'): string
+    {
+        return "({$table}.marks IS NULL AND {$table}.issue_status = 'open')";
+    }
+
+    /** Sheets still waiting to be evaluated — see pendingSql(). */
+    public function scopePendingEvaluation(Builder $query): Builder
+    {
+        return $query->whereNull($query->qualifyColumn('marks'))->withoutOpenIssue();
     }
 }

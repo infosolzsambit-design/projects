@@ -7,6 +7,9 @@ import { useConfirm } from '../../composables/useConfirm'
 import { useToast } from '../../composables/useToast'
 import Pagination from '../../components/common/Pagination.vue'
 import RowActionMenu from '../../components/common/RowActionMenu.vue'
+import { useProgramsStore } from '../../stores/programs'
+import ProgramCoursesModal from '../../components/programs/ProgramCoursesModal.vue'
+import { courseLabel } from '../../utils/course'
 
 const router = useRouter()
 const { confirmDialog } = useConfirm()
@@ -46,6 +49,31 @@ function runSearch() {
 
 // Shows up to 2 course names then "+N more", so the column doesn't
 // balloon for programs mapped to many courses.
+// Courses column's eye icon — hover shows a quick preview (teleported to
+// <body> so the table's overflow can't clip it), click opens the full list.
+const PREVIEW_LIMIT = 8
+const coursesModalProgram = ref(null)
+const preview = ref(null) // { program, top, left }
+
+function showPreview(program, event) {
+  const rect = event.currentTarget.getBoundingClientRect()
+  const width = 320
+  const below = window.innerHeight - rect.bottom > 260
+  preview.value = {
+    program,
+    left: Math.max(8, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 8)),
+    top: below ? rect.bottom + 8 : null,
+    bottom: below ? null : window.innerHeight - rect.top + 8,
+  }
+}
+function hidePreview() {
+  preview.value = null
+}
+function openCoursesModal(program) {
+  preview.value = null
+  coursesModalProgram.value = program
+}
+
 function courseSummary(program) {
   const names = (program.courses || []).map((c) => c.name)
   if (names.length === 0) return '—'
@@ -88,6 +116,7 @@ async function toggleStatus(program) {
     await api.put(`/programs/${program.id}`, { status: next })
     program.status = next
     toast.success(`Program ${next ? 'activated' : 'deactivated'} successfully.`)
+    useProgramsStore().loaded = false // other screens re-read program labels
   } catch (err) {
     loadError.value = err.response?.data?.message || 'Could not update program status.'
   } finally {
@@ -119,6 +148,7 @@ async function removeProgram(program) {
       await fetchPrograms(pagination.current_page)
     }
     toast.success('Program deleted successfully.')
+    useProgramsStore().loaded = false // other screens re-read program labels
   } catch (err) {
     loadError.value = err.response?.data?.message || 'Could not delete program.'
   } finally {
@@ -254,6 +284,7 @@ onMounted(async () => {
             <tr class="bg-subject-header text-white text-[12px] font-medium">
               <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
               <th class="px-4 py-1.5 font-medium">Name</th>
+              <th class="px-4 py-1.5 font-medium">Label</th>
               <th class="px-4 py-1.5 font-medium">Department</th>
               <th class="px-4 py-1.5 font-medium">Code</th>
               <th class="px-4 py-1.5 font-medium">Courses</th>
@@ -263,10 +294,10 @@ onMounted(async () => {
           </thead>
           <tbody class="bg-white">
             <tr v-if="loading">
-              <td colspan="7" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
+              <td colspan="8" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
             </tr>
             <tr v-else-if="!programs.length">
-              <td colspan="7" class="px-4 py-8 text-center text-sm text-muted">No programs found.</td>
+              <td colspan="8" class="px-4 py-8 text-center text-sm text-muted">No programs found.</td>
             </tr>
             <tr
               v-for="(program, index) in programs"
@@ -280,9 +311,31 @@ onMounted(async () => {
                 </span>
               </td>
               <td class="px-4 py-1 font-semibold">{{ program.name }}</td>
+              <td class="px-4 py-1">
+                <span v-if="program.label" class="inline-flex items-center rounded-md bg-soft text-brand-blue px-2 py-0.5 text-[11px] font-semibold">{{ program.label }}</span>
+                <span v-else class="text-muted" title="No label yet — edit this program to add one">—</span>
+              </td>
               <td class="px-4 py-1">{{ program.department }}</td>
               <td class="px-4 py-1">{{ program.code || '—' }}</td>
-              <td class="px-4 py-1 text-muted">{{ courseSummary(program) }}</td>
+              <td class="px-4 py-1 text-muted">
+                <div class="flex items-center gap-2">
+                  <span class="min-w-0">{{ courseSummary(program) }}</span>
+                  <button
+                    v-if="program.courses?.length"
+                    type="button"
+                    class="shrink-0 inline-flex items-center gap-1 h-6 px-1.5 rounded-md text-brand-blue hover:bg-soft transition-colors"
+                    :aria-label="`View ${program.courses.length} mapped course${program.courses.length === 1 ? '' : 's'}`"
+                    @mouseenter="showPreview(program, $event)"
+                    @mouseleave="hidePreview"
+                    @focus="showPreview(program, $event)"
+                    @blur="hidePreview"
+                    @click.stop="openCoursesModal(program)"
+                  >
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                    <span class="text-[11px] font-semibold">{{ program.courses.length }}</span>
+                  </button>
+                </div>
+              </td>
               <td v-if="authStore.can('program-status-change')" class="px-4 py-1" @click.stop>
                 <button
                   type="button"
@@ -330,5 +383,28 @@ onMounted(async () => {
       :total="pagination.total"
       @change="goToPage"
     />
+
+    <Teleport to="body">
+      <div
+        v-if="preview"
+        class="fixed z-[150] w-[320px] rounded-xl bg-white shadow-panel border border-soft p-3 pointer-events-none"
+        :style="{ left: preview.left + 'px', top: preview.top != null ? preview.top + 'px' : 'auto', bottom: preview.bottom != null ? preview.bottom + 'px' : 'auto' }"
+        role="tooltip"
+      >
+        <p class="text-[11px] font-semibold text-muted uppercase tracking-wide mb-1.5">
+          {{ preview.program.courses.length }} mapped course{{ preview.program.courses.length === 1 ? '' : 's' }}
+        </p>
+        <ul class="space-y-1">
+          <li v-for="course in preview.program.courses.slice(0, PREVIEW_LIMIT)" :key="course.id" class="text-[12px] text-gray-800 leading-snug">
+            {{ courseLabel(course.name, course.code, course.type) }}
+          </li>
+        </ul>
+        <p class="mt-2 pt-2 border-t border-soft text-[11px] text-brand-blue">
+          <template v-if="preview.program.courses.length > PREVIEW_LIMIT">+{{ preview.program.courses.length - PREVIEW_LIMIT }} more · </template>Click to view all
+        </p>
+      </div>
+
+      <ProgramCoursesModal v-if="coursesModalProgram" :program="coursesModalProgram" @close="coursesModalProgram = null" />
+    </Teleport>
   </div>
 </template>

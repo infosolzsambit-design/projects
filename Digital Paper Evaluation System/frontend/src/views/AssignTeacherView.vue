@@ -30,12 +30,17 @@ import SearchableSelect from '../components/common/SearchableSelect.vue'
 import DatePicker from '../components/common/DatePicker.vue'
 import TeacherAllocationModal from '../components/teachers/TeacherAllocationModal.vue'
 import SendAssignmentEmailModal from '../components/teachers/SendAssignmentEmailModal.vue'
+import { useProgramsStore } from '../stores/programs'
+import { courseLabel } from '../utils/course'
+import { ordinal } from '../utils/ordinal'
 
 const toast = useToast()
 const authStore = useAuthStore()
 const brandingStore = useBrandingStore()
 
 const SEMESTER_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1)
+// Same searchable dropdown as the other filters; shown as 1st, 2nd, …
+const semesterOptions = SEMESTER_OPTIONS.map((n) => ({ id: n, name: ordinal(n) }))
 
 // --- Filter dropdowns ------------------------------------------------------
 const filters = reactive({
@@ -45,6 +50,10 @@ const filters = reactive({
   course_id: '',
   semester: '',
   exam_year: new Date().getFullYear(),
+  // Optional — only packets uploaded under this department count as pending
+  // (question_answer_sheet_mappings.department_id). Separate from the
+  // teacher list's own department filter below.
+  department_id: '',
 })
 const fieldErrors = reactive({ program_name: '', exam_term_id: '', exam_type_id: '', course_id: '', semester: '', exam_year: '' })
 const fieldRefs = {
@@ -69,11 +78,13 @@ function focusFirstError() {
 
 const availablePrograms = ref([])
 const programsLoading = ref(true)
+const programsStore = useProgramsStore()
 async function loadPrograms() {
   programsLoading.value = true
   try {
-    const res = await api.get('/programs', { params: { status: 'all', is_active: 'yes', table_fields: ['name'] } })
-    availablePrograms.value = res.data.data.map((program) => ({ id: program.name, name: program.name }))
+    // Shown as "Name (Label)"; the value stays the plain program name.
+    await programsStore.load(true)
+    availablePrograms.value = programsStore.options()
   } catch {
     // Non-fatal — the dropdown just stays empty; the page itself doesn't
     // depend on this succeeding to render.
@@ -87,10 +98,10 @@ const coursesLoading = ref(true)
 async function loadCourses() {
   coursesLoading.value = true
   try {
-    const res = await api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] } })
+    const res = await api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code', 'type'] } })
     availableCourses.value = res.data.data.map((course) => ({
       ...course,
-      name: course.code ? `${course.name} (${course.code})` : course.name,
+      name: courseLabel(course.name, course.code, course.type),
     }))
   } catch {
     // Same as loadPrograms() above.
@@ -185,6 +196,23 @@ async function loadDepartments() {
     departmentsLoading.value = false
   }
 }
+// Search panel's Department: every department (an older packet may belong
+// to one that's since been switched off).
+const packetDepartments = ref([])
+const packetDepartmentsLoading = ref(true)
+async function loadPacketDepartments() {
+  packetDepartmentsLoading.value = true
+  try {
+    const res = await api.get('/departments', { params: { status: 'all', table_fields: ['name', 'code'] } })
+    packetDepartments.value = res.data.data.map((d) => ({ ...d, name: d.code ? `${d.name} (${d.code})` : d.name }))
+  } catch {
+    packetDepartments.value = []
+  } finally {
+    packetDepartmentsLoading.value = false
+  }
+}
+const packetDepartmentOptions = computed(() => [{ id: '', name: 'All Departments' }, ...packetDepartments.value])
+
 // A synthetic "All Departments" option up front — SearchableSelect has no
 // built-in way to clear back to "nothing picked" once something's chosen,
 // so this is the only way back to an unfiltered teacher list.
@@ -253,6 +281,7 @@ onMounted(async () => {
   loadExamTerms()
   loadExamTypes()
   loadDepartments()
+  loadPacketDepartments()
   loadBackingData()
   loadTeachers()
 })
@@ -274,6 +303,7 @@ function recomputeMatchingMappings() {
       String(m.exam_type_id) === String(filters.exam_type_id) &&
       String(m.course_id) === String(filters.course_id) &&
       Number(m.semester) === Number(filters.semester) &&
+      (!filters.department_id || String(m.department_id) === String(filters.department_id)) &&
       !!paper &&
       Number(paper.exam_year) === Number(filters.exam_year)
     )
@@ -300,6 +330,18 @@ function runSearch() {
   // A fresh search invalidates any distribution already worked out for the
   // *previous* search's own pending count.
   teachers.value.forEach((t) => (t.assignQuantity = 0))
+
+  // Searching by a department pre-selects the same department for the
+  // teacher list below (still changeable there). Only when it's one of the
+  // teacher list's own options — a non-super-admin only has their own.
+  if (
+    filters.department_id &&
+    String(departmentFilter.value) !== String(filters.department_id) &&
+    availableDepartments.value.some((d) => String(d.id) === String(filters.department_id))
+  ) {
+    departmentFilter.value = filters.department_id
+    loadTeachers()
+  }
 }
 
 // Pending, not total — a packet's answer_sheet_count never drops even once
@@ -447,6 +489,7 @@ function assignPapers() {
     course_id: filters.course_id,
     semester: filters.semester,
     exam_year: filters.exam_year,
+    department_id: filters.department_id || null,
     evaluation_start_date: evaluationStartDate.value,
     evaluation_end_date: evaluationEndDate.value,
     evaluation_time_per_sheet: timeValue ? Number(timeValue) : null,
@@ -480,6 +523,7 @@ function resetSearchForm() {
   filters.course_id = ''
   filters.semester = ''
   filters.exam_year = new Date().getFullYear()
+  filters.department_id = ''
   fieldErrors.program_name = ''
   fieldErrors.exam_term_id = ''
   fieldErrors.exam_type_id = ''
@@ -541,7 +585,10 @@ function resetSearchForm() {
           <h2 class="text-[14px] sm:text-[15px] font-semibold text-gray-900">Select Exam Details</h2>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+        <!-- Row 1: Program · Course · Exam Type · Exam Term. Program and
+             Course get more width (their names are long); row 2 uses the
+             same column widths so the fields line up. -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_1fr_1fr] gap-2.5">
           <div class="flex flex-col gap-1">
             <label for="assign_program" class="text-[12px] text-label">Program <span class="text-brand">*</span></label>
             <SearchableSelect
@@ -575,22 +622,6 @@ function resetSearchForm() {
           </div>
 
           <div class="flex flex-col gap-1">
-            <label for="assign_exam_term" class="text-[12px] text-label">Exam Term <span class="text-brand">*</span></label>
-            <SearchableSelect
-              id="assign_exam_term"
-              :ref="(el) => (fieldRefs.exam_term_id.value = el)"
-              v-model="filters.exam_term_id"
-              :options="availableExamTerms"
-              :loading="examTermsLoading"
-              :error="!!fieldErrors.exam_term_id"
-              placeholder="Select"
-              search-placeholder="Search exam terms…"
-              @change="clearFieldError('exam_term_id')"
-            />
-            <p v-if="fieldErrors.exam_term_id" class="text-[11px] text-brand">{{ fieldErrors.exam_term_id }}</p>
-          </div>
-
-          <div class="flex flex-col gap-1">
             <label for="assign_exam_type" class="text-[12px] text-label">Exam Type <span class="text-brand">*</span></label>
             <SearchableSelect
               id="assign_exam_type"
@@ -607,23 +638,39 @@ function resetSearchForm() {
           </div>
 
           <div class="flex flex-col gap-1">
-            <label for="assign_semester" class="text-[12px] text-label">Semester <span class="text-brand">*</span></label>
-            <select
-              id="assign_semester"
-              :ref="(el) => (fieldRefs.semester.value = el)"
-              v-model="filters.semester"
-              @change="clearFieldError('semester')"
-              class="w-full h-10 px-3 rounded-xl bg-input-bg text-sm text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition cursor-pointer"
-              :class="fieldErrors.semester ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
-            >
-              <option value="" disabled>Select</option>
-              <option v-for="option in SEMESTER_OPTIONS" :key="option" :value="option">{{ option }}</option>
-            </select>
-            <p v-if="fieldErrors.semester" class="text-[11px] text-brand">{{ fieldErrors.semester }}</p>
+            <label for="assign_exam_term" class="text-[12px] text-label">Exam Term <span class="text-brand">*</span></label>
+            <SearchableSelect
+              id="assign_exam_term"
+              :ref="(el) => (fieldRefs.exam_term_id.value = el)"
+              v-model="filters.exam_term_id"
+              :options="availableExamTerms"
+              :loading="examTermsLoading"
+              :error="!!fieldErrors.exam_term_id"
+              placeholder="Select"
+              search-placeholder="Search exam terms…"
+              @change="clearFieldError('exam_term_id')"
+            />
+            <p v-if="fieldErrors.exam_term_id" class="text-[11px] text-brand">{{ fieldErrors.exam_term_id }}</p>
           </div>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-2.5">
+        <!-- Row 2: Semester · Exam Year · Department · Search -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_1fr_1fr] gap-2.5 mt-2.5">
+          <div class="flex flex-col gap-1">
+            <label for="assign_semester" class="text-[12px] text-label">Semester <span class="text-brand">*</span></label>
+            <SearchableSelect
+              id="assign_semester"
+              :ref="(el) => (fieldRefs.semester.value = el)"
+              v-model="filters.semester"
+              :options="semesterOptions"
+              :error="!!fieldErrors.semester"
+              placeholder="Select"
+              search-placeholder="Search semesters…"
+              @change="clearFieldError('semester')"
+            />
+            <p v-if="fieldErrors.semester" class="text-[11px] text-brand">{{ fieldErrors.semester }}</p>
+          </div>
+
           <div class="flex flex-col gap-1">
             <label for="assign_exam_year" class="text-[12px] text-label">Exam Year <span class="text-brand">*</span></label>
             <input
@@ -640,15 +687,14 @@ function resetSearchForm() {
           </div>
 
           <div class="flex flex-col gap-1">
-            <label for="teacher_department" class="text-[12px] text-label">Department</label>
+            <label for="assign_department" class="text-[12px] text-label">Department</label>
             <SearchableSelect
-              id="teacher_department"
-              v-model="departmentFilter"
-              :options="departmentFilterOptions"
-              :loading="departmentsLoading"
+              id="assign_department"
+              v-model="filters.department_id"
+              :options="packetDepartmentOptions"
+              :loading="packetDepartmentsLoading"
               placeholder="All departments"
               search-placeholder="Search departments…"
-              @change="loadTeachers"
             />
           </div>
 
@@ -702,12 +748,28 @@ function resetSearchForm() {
             </div>
 
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-              <input
-                v-model="teacherSearch"
-                type="text"
-                placeholder="Search teacher…"
-                class="w-full sm:w-56 h-9 px-3 rounded-lg bg-input-bg text-[13px] text-gray-800 outline-none border border-input-border focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 transition"
-              />
+              <!-- Teacher search + the teacher list's own Department filter, same line. -->
+              <div class="flex flex-col sm:flex-row sm:items-center gap-2">
+                <input
+                  v-model="teacherSearch"
+                  type="text"
+                  placeholder="Search teacher…"
+                  class="w-full sm:w-56 h-8 px-3 rounded-lg bg-input-bg text-[12px] text-gray-800 outline-none border border-input-border focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 transition"
+                />
+                <div class="w-full sm:w-64">
+                  <SearchableSelect
+                    id="teacher_department"
+                    v-model="departmentFilter"
+                    :options="departmentFilterOptions"
+                    :loading="departmentsLoading"
+                    dense
+                    placeholder="All departments"
+                    search-placeholder="Search departments…"
+                    aria-label="Teacher department"
+                    @change="loadTeachers"
+                  />
+                </div>
+              </div>
 
               <button
                 type="button"

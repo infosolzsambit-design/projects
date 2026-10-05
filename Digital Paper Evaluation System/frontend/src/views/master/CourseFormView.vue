@@ -14,7 +14,11 @@ const isEdit = computed(() => !!courseId.value)
 const form = reactive({
   name: '',
   code: '',
+  type: '',
 })
+
+// Suggestions only — Type is free text (up to 50 characters).
+const TYPE_SUGGESTIONS = ['T', 'P', 'Theory', 'Practical']
 
 const loading = ref(isEdit.value)
 const loadError = ref('')
@@ -24,17 +28,35 @@ const formError = ref('')
 const fieldErrors = reactive({
   name: '',
   code: '',
+  type: '',
 })
 // Order matters — the first of these (in this order) that has an error is
 // the one that gets focused after a failed validate()/submit.
-const FIELD_ORDER = ['name', 'code']
+const FIELD_ORDER = ['name', 'code', 'type']
 const fieldRefs = {
   name: ref(null),
   code: ref(null),
+  type: ref(null),
 }
 
+const COMBO_FIELDS = ['name', 'code', 'type']
+
 function clearFieldError(field) {
+  // Changing any of Name / Code / Type resolves a combined-duplicate error
+  // on all three at once.
+  const message = fieldErrors[field]
+  if (message && COMBO_FIELDS.includes(field)) {
+    COMBO_FIELDS.forEach((key) => {
+      if (fieldErrors[key] === message) fieldErrors[key] = ''
+    })
+  }
   fieldErrors[field] = ''
+}
+
+// The combined Name + Code + Type duplicate error comes back on all three
+// fields — show its text once (under Name) and just outline the other two.
+function showFieldMessage(field) {
+  return !!fieldErrors[field] && (field === 'name' || fieldErrors[field] !== fieldErrors.name)
 }
 
 function focusFirstError() {
@@ -56,6 +78,10 @@ async function loadCourse() {
     const course = res.data.data
     form.name = course.name
     form.code = course.code || ''
+    form.type = course.type || ''
+    // Courses created before Type existed have none yet — it's required
+    // now, so point that out up front rather than only on Save.
+    if (!form.type) fieldErrors.type = 'This course has no type yet — please add one (e.g. Theory, Practical).'
     initialForm = { ...form }
   } catch (err) {
     loadError.value = err.response?.data?.message || 'Could not load this course.'
@@ -96,6 +122,8 @@ function applyServerErrors(err) {
 function validate() {
   if (!form.name.trim()) fieldErrors.name = 'Name is required.'
   if (!form.code.trim()) fieldErrors.code = 'Code is required.'
+  if (!form.type.trim()) fieldErrors.type = 'Type is required.'
+  else if (form.type.trim().length > 50) fieldErrors.type = 'Type may not be longer than 50 characters.'
   return FIELD_ORDER.every((key) => !fieldErrors[key])
 }
 
@@ -169,7 +197,7 @@ function cancel() {
       <form v-else class="space-y-4" @submit.prevent="submitForm">
         <section class="bg-white rounded-[28px] shadow-card p-4 sm:p-5">
           <h2 class="text-[16px] sm:text-[18px] font-semibold text-gray-900 mb-1">Course Details</h2>
-          <p class="text-[13px] text-muted mb-3">Name and Code are required. Code must be unique.</p>
+          <p class="text-[13px] text-muted mb-3">Name, Code and Type are required. The combination of Name, Code and Type must be unique.</p>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div class="flex flex-col gap-1.5">
@@ -199,7 +227,26 @@ function cancel() {
                 class="w-full h-10 px-3 rounded-xl bg-input-bg text-sm text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition"
                 :class="fieldErrors.code ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
               />
-              <p v-if="fieldErrors.code" class="text-[12px] text-brand">{{ fieldErrors.code }}</p>
+              <p v-if="showFieldMessage('code')" class="text-[12px] text-brand">{{ fieldErrors.code }}</p>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label for="type" class="text-[13px] text-label">Type <span class="text-brand">*</span></label>
+              <input
+                id="type"
+                :ref="(el) => (fieldRefs.type.value = el)"
+                v-model="form.type"
+                type="text"
+                maxlength="50"
+                list="course-type-options"
+                placeholder="e.g. Theory, Practical, T, P"
+                @input="clearFieldError('type')"
+                class="w-full h-10 px-3 rounded-xl bg-input-bg text-sm text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition"
+                :class="fieldErrors.type ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
+              />
+              <datalist id="course-type-options">
+                <option v-for="option in TYPE_SUGGESTIONS" :key="option" :value="option" />
+              </datalist>
+              <p v-if="showFieldMessage('type')" class="text-[12px] text-brand">{{ fieldErrors.type }}</p>
             </div>
           </div>
         </section>

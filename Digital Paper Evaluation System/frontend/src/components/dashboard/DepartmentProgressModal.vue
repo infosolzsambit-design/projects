@@ -23,6 +23,7 @@ async function fetchDepartments() {
       name: d.name,
       evaluated: d.evaluated_pct,
       pending: d.pending_pct,
+      problem: d.problem_pct ?? 0,
       notAssigned: d.not_assigned_pct,
     }))
   } catch (err) {
@@ -63,14 +64,16 @@ function close() {
               <div class="flex-1 h-2.5 rounded-full overflow-hidden bg-gray-100 flex">
                 <span class="h-full bg-emerald-500" :style="{ width: dept.evaluated + '%' }"></span>
                 <span class="h-full bg-amber-400" :style="{ width: dept.pending + '%' }"></span>
+              <span class="h-full bg-rose-500" :style="{ width: dept.problem + '%' }"></span>
                 <span class="h-full bg-gray-300" :style="{ width: dept.notAssigned + '%' }"></span>
               </div>
               <span class="w-9 shrink-0 text-right text-[12.5px] font-semibold text-gray-800">{{ dept.evaluated }}%</span>
             </div>
           </div>
-          <div class="flex items-center gap-4 text-[11px] text-gray-600 mt-4 pt-3 border-t border-soft">
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-gray-600 mt-4 pt-3 border-t border-soft">
             <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>Evaluated</span>
             <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>Pending</span>
+            <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>Problem</span>
             <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-gray-300"></span>Not Assigned</span>
           </div>
         </template>

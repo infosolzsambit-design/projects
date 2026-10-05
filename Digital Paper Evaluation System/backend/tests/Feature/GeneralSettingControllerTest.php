@@ -35,15 +35,53 @@ class GeneralSettingControllerTest extends TestCase
         $this->assertSame(['a_field', 'b_field'], $fieldNames->toArray());
     }
 
-    public function test_index_excludes_inactive_settings(): void
+    public function test_index_includes_settings_that_are_off_with_their_status(): void
     {
         $this->actingAdmin();
-        GeneralSetting::factory()->inactive()->create(['field_name' => 'hidden_field']);
+        GeneralSetting::factory()->create(['field_name' => 'on_field', 'sort_order' => 1]);
+        GeneralSetting::factory()->inactive()->create(['field_name' => 'off_field', 'sort_order' => 2]);
 
-        $response = $this->withApiKey()->getJson('/api/v1/general-settings');
+        $rows = collect($this->withApiKey()->getJson('/api/v1/general-settings')->assertOk()->json('data'))->keyBy('field_name');
 
-        $response->assertOk();
-        $this->assertFalse(collect($response->json('data'))->pluck('field_name')->contains('hidden_field'));
+        $this->assertTrue($rows['on_field']['status']);
+        $this->assertFalse($rows['off_field']['status']);
+    }
+
+    public function test_status_switch_turns_a_setting_off_and_back_on(): void
+    {
+        $this->actingAdmin();
+        $setting = GeneralSetting::factory()->create(['field_name' => 'site_title', 'value' => 'My College']);
+
+        $this->withApiKey()->patchJson("/api/v1/general-settings/{$setting->id}/status", ['status' => false])
+            ->assertOk()->assertJsonPath('data.status', false);
+        $this->assertFalse($setting->fresh()->status);
+        // Off → the app no longer uses it (branding falls back to its default).
+        $this->withApiKey()->getJson('/api/v1/branding')->assertJsonPath('data.site_title', null);
+
+        $this->withApiKey()->patchJson("/api/v1/general-settings/{$setting->id}/status", ['status' => true])
+            ->assertOk()->assertJsonPath('data.status', true);
+        $this->withApiKey()->getJson('/api/v1/branding')->assertJsonPath('data.site_title', 'My College');
+        // The value itself is kept while off.
+        $this->assertSame('My College', $setting->fresh()->value);
+    }
+
+    public function test_status_switch_requires_a_boolean(): void
+    {
+        $this->actingAdmin();
+        $setting = GeneralSetting::factory()->create();
+
+        $this->withApiKey()->patchJson("/api/v1/general-settings/{$setting->id}/status", [])->assertStatus(422);
+        $this->withApiKey()->patchJson("/api/v1/general-settings/{$setting->id}/status", ['status' => 'maybe'])->assertStatus(422);
+    }
+
+    public function test_update_skips_a_required_setting_that_is_off(): void
+    {
+        $this->actingAdmin();
+        $off = GeneralSetting::factory()->inactive()->create(['field_name' => 'university_code', 'type' => 'text', 'is_required' => true, 'value' => 'TIU']);
+
+        // Not sent at all — still saves, since an off setting isn't validated or changed.
+        $this->withApiKey()->post('/api/v1/general-settings', [])->assertOk();
+        $this->assertSame('TIU', $off->fresh()->value);
     }
 
     public function test_index_excludes_soft_deleted_settings(): void
@@ -114,6 +152,16 @@ class GeneralSettingControllerTest extends TestCase
         $response = $this->withApiKey()->getJson('/api/v1/branding');
 
         $response->assertOk()->assertJsonPath('data.site_title', 'Acme Evaluation Portal');
+    }
+
+    public function test_branding_includes_the_organization_logo_only_while_it_is_on(): void
+    {
+        $logo = GeneralSetting::factory()->create(['field_name' => 'organization_logo', 'type' => 'file', 'value' => '/storage/general-settings/org.png']);
+
+        $this->withApiKey()->getJson('/api/v1/branding')->assertJsonPath('data.organization_logo', '/storage/general-settings/org.png');
+
+        $logo->update(['status' => false]);
+        $this->withApiKey()->getJson('/api/v1/branding')->assertJsonPath('data.organization_logo', null);
     }
 
     public function test_branding_never_exposes_non_branding_settings(): void

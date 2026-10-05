@@ -9,6 +9,7 @@ use Database\Factories\QuestionPaperFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Storage;
@@ -83,6 +84,12 @@ class QuestionPaper extends Model implements AuditableContract
     public function course(): BelongsTo
     {
         return $this->belongsTo(Course::class);
+    }
+
+    /** A paper can be tagged with several departments (question_paper_departments pivot). */
+    public function departments(): BelongsToMany
+    {
+        return $this->belongsToMany(Department::class, 'question_paper_departments')->withTimestamps();
     }
 
     public function examTerm(): BelongsTo

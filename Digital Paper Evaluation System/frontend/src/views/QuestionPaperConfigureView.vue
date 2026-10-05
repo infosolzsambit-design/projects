@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import api, { resolveStorageUrl } from '../utils/api'
 import { useToast } from '../composables/useToast'
 import QuestionPaperStructureBuilder from '../components/questionPapers/QuestionPaperStructureBuilder.vue'
+import SearchableMultiSelect from '../components/common/SearchableMultiSelect.vue'
 
 // Editing an *existing* saved paper's structure later (the "Edit Setup"
 // list action) — fetch it by id, then hand it to the shared builder (see
@@ -40,6 +41,8 @@ async function loadPaper() {
     pdfSource.value = resolveStorageUrl(data.pdf_url)
     initialForm.value = {
       exam_year: data.exam_year,
+      // Papers set up before Department existed have none yet — required now.
+      department_ids: data.department_ids ?? [],
       course_id: data.course_id,
       exam_term_id: data.exam_term_id ?? '',
       semester: data.semester,
@@ -47,6 +50,7 @@ async function loadPaper() {
       time_allotted: data.time_allotted ?? '',
     }
     initialGroups.value = data.groups ?? []
+    lockedDepartmentIds.value = data.department_ids ?? []
   } catch (err) {
     loadError.value = err.response?.data?.message || 'Could not load this question paper.'
   } finally {
@@ -55,6 +59,43 @@ async function loadPaper() {
 }
 
 onMounted(loadPaper)
+
+// Locked papers (evaluation started) can't change their structure, but the
+// Department tag can still be set/changed — it's just a label.
+const lockedDepartmentIds = ref([])
+const lockedDepartmentError = ref('')
+const savingDepartment = ref(false)
+const availableDepartments = ref([])
+const departmentsLoading = ref(true)
+async function loadDepartments() {
+  departmentsLoading.value = true
+  try {
+    const res = await api.get('/departments', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] } })
+    availableDepartments.value = res.data.data.map((d) => ({ ...d, name: d.code ? `${d.name} (${d.code})` : d.name }))
+  } catch {
+    availableDepartments.value = []
+  } finally {
+    departmentsLoading.value = false
+  }
+}
+onMounted(loadDepartments)
+
+async function saveLockedDepartment() {
+  lockedDepartmentError.value = ''
+  if (!lockedDepartmentIds.value.length) {
+    lockedDepartmentError.value = 'Select at least one department.'
+    return
+  }
+  savingDepartment.value = true
+  try {
+    await api.patch(`/question-papers/${paperId.value}/departments`, { department_ids: lockedDepartmentIds.value })
+    toast.success('Departments updated successfully.')
+  } catch (err) {
+    lockedDepartmentError.value = err.response?.data?.errors?.department_ids?.[0] || err.response?.data?.message || 'Could not update the departments.'
+  } finally {
+    savingDepartment.value = false
+  }
+}
 
 async function submitFn(payload) {
   return api.put(`/question-papers/${paperId.value}`, payload)
@@ -114,6 +155,36 @@ function onSaved() {
       <div v-else-if="evaluationStarted" class="bg-white rounded-2xl shadow-panel p-10 text-center">
         <p class="text-[15px] font-semibold text-gray-900">This question paper's structure is locked.</p>
         <p class="mt-1 text-[13px] text-muted">A teacher has already started evaluating an answer sheet mapped to it, so it can no longer be edited.</p>
+
+        <!-- The department tags can still be changed. -->
+        <div class="mt-6 mx-auto max-w-[460px] text-left rounded-2xl border border-soft bg-page-bg/60 p-4">
+          <label for="locked_department" class="text-[13px] text-label">Departments <span class="text-brand">*</span></label>
+          <p class="text-[12px] text-muted mb-2">These can still be set or changed — they don't affect the questions or marks.</p>
+          <div class="flex items-start gap-2">
+            <div class="flex-1 min-w-0">
+              <SearchableMultiSelect
+                id="locked_department"
+                v-model="lockedDepartmentIds"
+                :options="availableDepartments"
+                :loading="departmentsLoading"
+                :error="!!lockedDepartmentError"
+                placeholder="Select one or more departments"
+                search-placeholder="Search departments…"
+                @change="lockedDepartmentError = ''"
+              />
+            </div>
+            <button
+              type="button"
+              class="h-10 shrink-0 inline-flex items-center rounded-xl bg-btn-gradient text-white text-[13px] font-semibold px-5 hover:opacity-90 transition-opacity disabled:opacity-60"
+              :disabled="savingDepartment"
+              @click="saveLockedDepartment"
+            >
+              {{ savingDepartment ? 'Saving…' : 'Save' }}
+            </button>
+          </div>
+          <p v-if="lockedDepartmentError" class="mt-1 text-[12px] text-brand">{{ lockedDepartmentError }}</p>
+        </div>
+
         <button type="button" class="mt-4 h-9 inline-flex items-center gap-1.5 rounded-xl border border-input-border bg-white text-[13px] font-semibold text-gray-700 px-4 hover:border-brand-blue hover:text-brand-blue transition-colors" @click="goToList">
           Back to Question Papers
         </button>

@@ -23,12 +23,15 @@ class QuestionAnswerSheetMappingResource extends JsonResource
             'course_id' => $this->course_id,
             'course_name' => $this->whenLoaded('course', fn () => $this->course?->name),
             'course_code' => $this->whenLoaded('course', fn () => $this->course?->code),
+            'course_type' => $this->whenLoaded('course', fn () => $this->course?->type),
             'semester' => $this->semester,
             'exam_term_id' => $this->exam_term_id,
             'exam_term_name' => $this->whenLoaded('examTerm', fn () => $this->examTerm?->name),
             'exam_type_id' => $this->exam_type_id,
             'exam_type_name' => $this->whenLoaded('examType', fn () => $this->examType?->name),
             'program_name' => $this->program_name,
+            'department_id' => $this->department_id,
+            'department_name' => $this->department_name,
             'packet_code' => $this->packet_code,
             // Set via ->withCount('answerSheets') on the query (index()/
             // show()) — a *count* query, not an eager-loaded collection, so

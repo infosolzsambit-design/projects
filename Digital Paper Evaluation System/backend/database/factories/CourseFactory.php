@@ -20,6 +20,7 @@ class CourseFactory extends Factory
         return [
             'name' => fake()->unique()->words(3, true),
             'code' => strtoupper(fake()->unique()->bothify('??-###')),
+            'type' => fake()->randomElement(['Theory', 'Practical']),
             'status' => true,
         ];
     }

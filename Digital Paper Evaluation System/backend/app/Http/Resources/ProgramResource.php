@@ -19,11 +19,12 @@ class ProgramResource extends JsonResource
         return [
             'id' => $this->id,
             'name' => $this->name,
+            'label' => $this->label,
             'department' => $this->department,
             'department_id' => $this->department_id,
             'code' => $this->code,
             'status' => (bool) $this->status,
-            // Always eager-loaded as courses:id,name,code (see
+            // Always eager-loaded as courses:id,name,code,type (see
             // ProgramController) — kept to just those fields here too, so
             // this never shows a misleading null for a column that was
             // deliberately never selected.
@@ -31,6 +32,7 @@ class ProgramResource extends JsonResource
                 'id' => $course->id,
                 'name' => $course->name,
                 'code' => $course->code,
+                'type' => $course->type,
             ])),
             'created_by' => $this->created_by,
             'updated_by' => $this->updated_by,

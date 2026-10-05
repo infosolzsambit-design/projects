@@ -76,7 +76,7 @@ class PasswordResetTest extends TestCase
 
             return str_contains($rendered, 'Reset Your Password')
                 && str_contains($rendered, 'Jane Doe')
-                && str_contains($rendered, 'logo-image.png');
+                && str_contains($rendered, 'header_logo.png'); // shared email header's CJ logo
         });
     }
 

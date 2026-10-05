@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AnswerSheet;
 use App\Models\Course;
+use App\Models\Department;
 use App\Models\ExamTerm;
 use App\Models\ExamType;
 use App\Models\QuestionAnswerSheetMapping;
@@ -77,7 +78,8 @@ class TeacherWiseEvaluationReportControllerTest extends TestCase
         ])->user_id;
 
         AnswerSheet::factory()->count(3)->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => 10]);
-        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => null, 'issue_master_id' => 1]);
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => null, 'issue_master_id' => 1, 'issue_status' => 'open']);
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => null]);
         // Unassigned sheet in the same packet — must not appear as its own row.
         AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => null]);
 
@@ -93,9 +95,10 @@ class TeacherWiseEvaluationReportControllerTest extends TestCase
         $this->assertSame('Data Structures', $rows[0]['subject_name']);
         $this->assertSame('CS-101', $rows[0]['subject_code']);
         $this->assertSame(6, $rows[0]['semester']);
-        $this->assertSame(4, $rows[0]['allotted_script']);
+        $this->assertSame(5, $rows[0]['allotted_script']);
         $this->assertSame(3, $rows[0]['total_evaluated']);
         $this->assertSame(1, $rows[0]['total_problem_script']);
+        // Open-issue sheet is a problem, not pending: 5 - 3 - 1 = 1.
         $this->assertSame(1, $rows[0]['total_pending']);
     }
 
@@ -131,6 +134,36 @@ class TeacherWiseEvaluationReportControllerTest extends TestCase
         $rows = $response->json('data.rows');
         $this->assertCount(1, $rows);
         $this->assertSame('Teacher A', $rows[0]['teacher_name']);
+    }
+
+    public function test_index_filters_by_the_packet_department_and_returns_it(): void
+    {
+        $this->actingUser();
+        $physics = Department::factory()->create(['name' => 'Physics Dept']);
+        $chemistry = Department::factory()->create(['name' => 'Chemistry Dept']);
+        ['mapping' => $inPhysics, 'filters' => $filters] = $this->searchableMapping(['department_id' => $physics->id, 'department_name' => 'Physics Dept']);
+        $inChemistry = QuestionAnswerSheetMapping::factory()->create(
+            $inPhysics->only(['program_name', 'course_id', 'exam_term_id', 'exam_type_id', 'semester', 'question_paper_id'])
+            + ['department_id' => $chemistry->id, 'department_name' => 'Chemistry Dept'],
+        );
+        $teacher = TeacherDetail::factory()->create()->user_id;
+        AnswerSheet::factory()->count(2)->create(['question_answer_sheet_mapping_id' => $inPhysics->id, 'teacher_id' => $teacher]);
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $inChemistry->id, 'teacher_id' => $teacher]);
+
+        $this->withApiKey()->getJson('/api/v1/reports/teacher-wise-evaluation?'.http_build_query($filters))
+            ->assertOk()->assertJsonCount(2, 'data.rows');
+
+        $this->withApiKey()->getJson('/api/v1/reports/teacher-wise-evaluation?'.http_build_query($filters + ['department_id' => $physics->id]))
+            ->assertOk()
+            ->assertJsonCount(1, 'data.rows')
+            ->assertJsonPath('data.rows.0.allotted_script', 2)
+            ->assertJsonPath('data.rows.0.department_name', 'Physics Dept');
+
+        $excel = $this->withApiKey()->get('/api/v1/reports/teacher-wise-evaluation/export?'.http_build_query($filters + ['department_id' => $physics->id]));
+        $excel->assertOk();
+        $this->assertMatchesRegularExpression('/>Subject Code<\/th>\s*<th[^>]*>Department<\/th>/', $excel->getContent());
+        $this->assertStringContainsString('Physics Dept', $excel->getContent());
+        $this->assertStringNotContainsString('Chemistry Dept', $excel->getContent());
     }
 
     public function test_export_downloads_an_excel_file_by_default(): void

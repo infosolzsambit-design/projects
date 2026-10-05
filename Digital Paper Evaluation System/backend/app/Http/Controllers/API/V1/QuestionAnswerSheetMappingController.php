@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers\API\V1;
 
+use App\Helpers\PublicStorage;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AnswerSheet\StoreAnswerSheetRowsRequest;
 use App\Http\Requests\AnswerSheet\StoreQuestionAnswerSheetMappingRequest;
 use App\Http\Resources\AnswerSheetResource;
 use App\Http\Resources\QuestionAnswerSheetMappingResource;
 use App\Models\AnswerSheet;
+use App\Models\Department;
 use App\Models\QuestionAnswerSheetMapping;
 use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
@@ -59,6 +61,7 @@ class QuestionAnswerSheetMappingController extends Controller
             $query->where(function ($q) use ($search) {
                 $q->where('packet_code', 'like', "%{$search}%")
                     ->orWhere('program_name', 'like', "%{$search}%")
+                    ->orWhere('department_name', 'like', "%{$search}%")
                     ->orWhereHas('course', fn ($q2) => $q2->where('name', 'like', "%{$search}%")->orWhere('code', 'like', "%{$search}%"))
                     ->orWhereHas('examTerm', fn ($q2) => $q2->where('name', 'like', "%{$search}%"));
             });
@@ -66,6 +69,9 @@ class QuestionAnswerSheetMappingController extends Controller
 
         if ($request->filled('course_id')) {
             $query->where('course_id', $request->integer('course_id'));
+        }
+        if ($request->filled('department_id')) {
+            $query->where('department_id', $request->integer('department_id'));
         }
         if ($request->filled('exam_term_id')) {
             $query->where('exam_term_id', $request->integer('exam_term_id'));
@@ -230,6 +236,9 @@ class QuestionAnswerSheetMappingController extends Controller
     public function store(StoreQuestionAnswerSheetMappingRequest $request): JsonResponse
     {
         $data = $request->validated();
+        // Keep the department's name alongside its id (like program_name),
+        // as it was at upload time.
+        $data['department_name'] = Department::whereKey($data['department_id'])->value('name');
 
         $mapping = QuestionAnswerSheetMapping::create($data); // $data already carries every validated field, including exam_term_id
 
@@ -275,6 +284,7 @@ class QuestionAnswerSheetMappingController extends Controller
                     // uploaded filename through at all would let one center
                     // silently overwrite another's "scan1.pdf").
                     $stored = $pdfs[$barcode]->store("answer-sheets/{$questionAnswerSheetMapping->id}", 'public');
+                    PublicStorage::openFolder(dirname($stored));
                     $pdfName = basename($stored);
                     $pdfPath = '/storage/'.$stored;
                 }

@@ -76,7 +76,7 @@ class AssignTeacherTest extends TestCase
 
     public function test_assign_splits_pending_sheets_across_teachers_and_reduces_pending_count(): void
     {
-        $this->actingAdmin();
+        $admin = $this->actingAdmin();
         ['filters' => $filters] = $this->mappingWithPendingSheets(11);
 
         $teacherA = TeacherDetail::factory()->create()->user_id;
@@ -97,6 +97,17 @@ class AssignTeacherTest extends TestCase
         $this->assertSame(6, AnswerSheet::where('teacher_id', $teacherA)->count());
         $this->assertSame(5, AnswerSheet::where('teacher_id', $teacherB)->count());
         $this->assertSame(0, AnswerSheet::whereNull('teacher_id')->count());
+        // Every assigned sheet records who assigned it, and when.
+        $this->assertSame(11, AnswerSheet::where('assigned_by', $admin->id)->whereNotNull('assigned_at')->count());
+
+        // Each teacher gets an in-app bell notification pointing at Pending Course.
+        foreach ([$teacherA => 6, $teacherB => 5] as $teacherId => $count) {
+            $this->assertDatabaseHas('user_notifications', [
+                'user_id' => $teacherId, 'type' => 'answer_sheets_assigned', 'link' => '/my-pending-courses', 'read_at' => null,
+            ]);
+            $this->assertStringContainsString("{$count} answer sheets have been assigned",
+                \App\Models\UserNotification::where('user_id', $teacherId)->value('message'));
+        }
 
         // The mapping's own pending_answer_sheet_count should now reflect
         // the assignment, distinct from its always-11 answer_sheet_count.
@@ -104,6 +115,41 @@ class AssignTeacherTest extends TestCase
         $row = collect($show->json('data.items'))->firstWhere('program_name', $filters['program_name']);
         $this->assertSame(11, $row['answer_sheet_count']);
         $this->assertSame(0, $row['pending_answer_sheet_count']);
+    }
+
+    public function test_assign_with_a_department_only_takes_that_departments_packets(): void
+    {
+        $this->actingAdmin();
+        $science = \App\Models\Department::factory()->create();
+        $arts = \App\Models\Department::factory()->create();
+        ['mapping' => $scienceMapping, 'filters' => $filters] = $this->mappingWithPendingSheets(4, ['department_id' => $science->id, 'department_name' => 'Science']);
+        // Same exam details, other department's packet.
+        $artsMapping = QuestionAnswerSheetMapping::factory()->create([
+            'question_paper_id' => $scienceMapping->question_paper_id,
+            'course_id' => $scienceMapping->course_id,
+            'exam_term_id' => $scienceMapping->exam_term_id,
+            'exam_type_id' => $scienceMapping->exam_type_id,
+            'semester' => $scienceMapping->semester,
+            'program_name' => $scienceMapping->program_name,
+            'department_id' => $arts->id,
+            'department_name' => 'Arts',
+        ]);
+        AnswerSheet::factory()->count(3)->create(['question_answer_sheet_mapping_id' => $artsMapping->id]);
+        $teacher = TeacherDetail::factory()->create()->user_id;
+
+        // Only 4 are pending in Science — asking for 5 is refused.
+        $this->withApiKey()->postJson('/api/v1/assign-teacher', [
+            ...$filters, ...$this->evaluationWindow(), 'department_id' => $science->id,
+            'assignments' => [['teacher_id' => $teacher, 'quantity' => 5]],
+        ])->assertStatus(422);
+
+        $this->withApiKey()->postJson('/api/v1/assign-teacher', [
+            ...$filters, ...$this->evaluationWindow(), 'department_id' => $science->id,
+            'assignments' => [['teacher_id' => $teacher, 'quantity' => 4]],
+        ])->assertOk();
+
+        $this->assertSame(4, AnswerSheet::where('question_answer_sheet_mapping_id', $scienceMapping->id)->where('teacher_id', $teacher)->count());
+        $this->assertSame(0, AnswerSheet::where('question_answer_sheet_mapping_id', $artsMapping->id)->whereNotNull('teacher_id')->count());
     }
 
     public function test_assign_stamps_the_evaluation_window_on_every_assigned_sheet(): void

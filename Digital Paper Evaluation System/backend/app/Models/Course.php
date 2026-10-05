@@ -27,6 +27,7 @@ class Course extends Model implements AuditableContract
     protected $fillable = [
         'name',
         'code',
+        'type',
         'status',
     ];
 
@@ -38,6 +39,28 @@ class Course extends Model implements AuditableContract
         return [
             'status' => 'boolean',
         ];
+    }
+
+    public const DUPLICATE_MESSAGE = 'A course with this Name, Code and Type already exists.';
+
+    /**
+     * A course is unique by the combination name + code + type among
+     * non-deleted courses (so "Physics / PHY101 / Theory" and "Physics /
+     * PHY101 / Practical" can both exist). Case-insensitive via the column
+     * collation. Used by the create/edit form, bulk upload and restore.
+     */
+    public static function hasDuplicate(string $name, string $code, ?string $type, ?int $ignoreId = null): bool
+    {
+        return static::query()
+            ->where('name', trim($name))
+            ->where('code', trim($code))
+            ->when(
+                $type === null || trim($type) === '',
+                fn ($q) => $q->where(fn ($w) => $w->whereNull('type')->orWhere('type', '')),
+                fn ($q) => $q->where('type', trim($type)),
+            )
+            ->when($ignoreId !== null, fn ($q) => $q->whereKeyNot($ignoreId))
+            ->exists();
     }
 
     public function programs(): BelongsToMany

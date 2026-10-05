@@ -115,12 +115,14 @@ class DashboardControllerTest extends TestCase
         $this->assertSame(4, $workflow['assigned']);
         $this->assertSame(1, $workflow['pending_assignment']);
         $this->assertSame(1, $workflow['evaluated']);
-        $this->assertSame(3, $workflow['pending_evaluation']);
+        // Assigned & unevaluated = 3, minus the open-issue one → 2 (the
+        // resolved one is back in pending).
+        $this->assertSame(2, $workflow['pending_evaluation']);
         $this->assertSame(2, $workflow['raised_issues']);
         $this->assertSame(1, $workflow['pending_issues']);
     }
 
-    public function test_evaluation_status_pending_evaluation_and_evaluated_always_sum_to_total(): void
+    public function test_evaluation_status_buckets_always_sum_to_total(): void
     {
         $this->actingUser();
         $mapping = $this->mappingThisYear()['mapping'];
@@ -129,16 +131,18 @@ class DashboardControllerTest extends TestCase
         AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => null, 'marks' => null]);
         AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => null]);
         AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => 12]);
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => null, 'issue_status' => 'open']);
 
         $response = $this->withApiKey()->getJson('/api/v1/dashboard/admin-summary');
 
         $response->assertOk();
         $status = $response->json('data.evaluation_status');
-        $this->assertSame(3, $status['total']);
+        $this->assertSame(4, $status['total']);
         $this->assertSame(1, $status['evaluated']);
-        $this->assertSame(2, $status['pending_evaluation']);
+        $this->assertSame(1, $status['pending_evaluation']);
+        $this->assertSame(1, $status['problem']);
         $this->assertSame(1, $status['not_assigned']);
-        $this->assertSame($status['total'], $status['evaluated'] + $status['pending_evaluation']);
+        $this->assertSame($status['total'], $status['evaluated'] + $status['pending_evaluation'] + $status['problem'] + $status['not_assigned']);
     }
 
     public function test_evaluation_progress_buckets_by_assigned_at_and_evaluated_at(): void

@@ -25,6 +25,7 @@ import RowActionMenu from '../components/common/RowActionMenu.vue'
 import TeacherAllocationModal from '../components/teachers/TeacherAllocationModal.vue'
 import TeacherCoursesModal from '../components/teachers/TeacherCoursesModal.vue'
 import TeacherReassignModal from '../components/teachers/TeacherReassignModal.vue'
+import TeacherTimeSpanModal from '../components/teachers/TeacherTimeSpanModal.vue'
 
 const authStore = useAuthStore()
 const examYearStore = useExamYearStore()
@@ -138,7 +139,10 @@ watch(
 )
 
 const allocationModalTeacher = ref(null)
-function openAllocationModal(teacher) {
+// true when opened from the Pending count — same modal, pending packets only.
+const allocationModalPendingOnly = ref(false)
+function openAllocationModal(teacher, pendingOnly = false) {
+  allocationModalPendingOnly.value = pendingOnly
   allocationModalTeacher.value = teacher
 }
 function closeAllocationModal() {
@@ -159,6 +163,11 @@ function openReassignModal(teacher) {
 }
 function closeReassignModal() {
   reassignModalTeacher.value = null
+}
+
+const timeSpanModalTeacher = ref(null)
+function openTimeSpanModal(teacher) {
+  timeSpanModalTeacher.value = teacher
 }
 </script>
 
@@ -257,14 +266,14 @@ function closeReassignModal() {
           <thead>
             <tr class="bg-subject-header text-white text-[12px] font-medium">
               <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
-              <th class="px-4 py-1.5 font-medium">Name</th>
-              <th class="px-4 py-1.5 font-medium">Emp Code</th>
-              <th class="px-4 py-1.5 font-medium">Department</th>
-              <th class="px-4 py-1.5 font-medium">Designation</th>
+              <th class="px-4 py-1.5 font-medium">Teacher</th>
+              <th class="px-4 py-1.5 font-medium">Contact</th>
+              <th class="px-4 py-1.5 font-medium whitespace-nowrap">Teacher Dept</th>
               <th class="px-4 py-1.5 font-medium text-center" v-if="authStore.can('view-allocated-answersheet')">Courses</th>
               <th class="px-4 py-1.5 font-medium text-center" v-if="authStore.can('view-allocated-answersheet')">Allocated Answer Sheets</th>
+              <th class="px-4 py-1.5 font-medium text-center" v-if="authStore.can('view-allocated-answersheet')">Pending</th>
               <th class="px-4 py-1.5 font-medium text-center" v-if="authStore.can('view-allocated-answersheet')">Completed Sheets</th>
-              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('reassign-teacher')">Action</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('reassign-teacher') || authStore.can('update-time-span')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
@@ -285,10 +294,17 @@ function closeReassignModal() {
                   # {{ (pagination.current_page - 1) * pagination.per_page + index + 1 }}
                 </span>
               </td>
-              <td class="px-4 py-1 font-semibold">{{ teacher.name }}</td>
-              <td class="px-4 py-1">{{ teacher.emp_code || '—' }}</td>
+              <!-- Teacher: name (Emp Code), with the Designation below. -->
+              <td class="px-4 py-1.5 whitespace-nowrap">
+                <p class="leading-snug"><span class="font-semibold text-gray-900">{{ teacher.name }}</span><span v-if="teacher.emp_code" class="text-muted"> ({{ teacher.emp_code }})</span></p>
+                <p class="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted leading-snug" title="Designation"><svg class="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg><span>{{ teacher.designation || '—' }}</span></p>
+              </td>
+              <!-- Contact: email, with the phone number below. -->
+              <td class="px-4 py-1.5">
+                <p class="flex items-center gap-1.5 text-[12px] leading-snug min-w-0" title="Email"><svg class="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2" /><polyline points="22 6 12 13 2 6" /></svg><span class="truncate">{{ teacher.email || '—' }}</span></p>
+                <p class="mt-0.5 flex items-center gap-1.5 text-[12px] leading-snug" title="Phone"><svg class="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" /></svg><span>{{ teacher.phone_no || '—' }}</span></p>
+              </td>
               <td class="px-4 py-1">{{ teacher.department || '—' }}</td>
-              <td class="px-4 py-1">{{ teacher.designation || '—' }}</td>
               <td v-if="authStore.can('view-allocated-answersheet')" class="px-4 py-1 text-center">
                 <button
                   type="button"
@@ -307,17 +323,38 @@ function closeReassignModal() {
                   {{ teacher.allocated_answer_sheet_count }}
                 </button>
               </td>
+              <!-- Not evaluated and no open problem — same count as the
+                   Pending column in the allocation modal. -->
+              <td v-if="authStore.can('view-allocated-answersheet')" class="px-4 py-1 text-center">
+                <button
+                  v-if="teacher.pending_answer_sheet_count > 0"
+                  type="button"
+                  class="font-semibold text-brand hover:underline"
+                  @click="openAllocationModal(teacher, true)"
+                >
+                  {{ teacher.pending_answer_sheet_count }}
+                </button>
+                <span v-else class="font-semibold text-brand">0</span>
+              </td>
               <td v-if="authStore.can('view-allocated-answersheet')" class="px-4 py-1 text-center font-semibold text-success">
                 {{ teacher.completed_answer_sheet_count }}
               </td>
-              <td v-if="authStore.can('reassign-teacher')" class="px-4 py-1 text-center relative" @click.stop>
+              
+              <td v-if="authStore.can('reassign-teacher') || authStore.can('update-time-span')" class="px-4 py-1 text-center relative" @click.stop>
                 <RowActionMenu width="w-40">
-                  <button
+                  <button  v-if="authStore.can('reassign-teacher')"
                     type="button"
                     class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors"
                     @click="openReassignModal(teacher)"
                   >
                     Reassign
+                  </button>
+                  <button v-if="authStore.can('update-time-span')"
+                    type="button"
+                    class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors"
+                    @click="openTimeSpanModal(teacher)"
+                  >
+                    Update Time Span
                   </button>
                 </RowActionMenu>
               </td>
@@ -335,7 +372,7 @@ function closeReassignModal() {
       @change="goToPage"
     />
 
-    <TeacherAllocationModal v-if="allocationModalTeacher" :teacher="allocationModalTeacher" @close="closeAllocationModal" />
+    <TeacherAllocationModal v-if="allocationModalTeacher" :teacher="allocationModalTeacher" :pending-only="allocationModalPendingOnly" @close="closeAllocationModal" />
 
     <TeacherCoursesModal v-if="coursesModalTeacher" :teacher="coursesModalTeacher" @close="closeCoursesModal" />
 
@@ -345,5 +382,7 @@ function closeReassignModal() {
       @close="closeReassignModal"
       @reassigned="fetchTeachers(pagination.current_page)"
     />
+
+    <TeacherTimeSpanModal v-if="timeSpanModalTeacher" :teacher="timeSpanModalTeacher" @close="timeSpanModalTeacher = null" />
   </div>
 </template>

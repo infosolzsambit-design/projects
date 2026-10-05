@@ -1,5 +1,5 @@
 <script setup>
-// Sidebar's "Notifications" page — every evaluation issue a teacher has
+// Sidebar's "Problems" page — every evaluation issue a teacher has
 // raised against an answer sheet (see RaiseIssueModal.vue /
 // MyPendingCourseController::raiseIssue()), most recent first, open or
 // already resolved. Same list-page shell as every other master list in
@@ -23,6 +23,7 @@ import { formatDateTime } from '../utils/date'
 import DatePicker from '../components/common/DatePicker.vue'
 import ResolveTimingIssueModal from '../components/notifications/ResolveTimingIssueModal.vue'
 import ResolvePrintingIssueModal from '../components/notifications/ResolvePrintingIssueModal.vue'
+import { typeSuffix } from '../utils/course'
 
 const authStore = useAuthStore()
 const notificationsStore = useNotificationsStore()
@@ -47,7 +48,7 @@ async function loadNotifications() {
     const res = await api.get('/notifications', { params })
     notifications.value = res.data.data
   } catch (err) {
-    loadError.value = err.response?.data?.message || 'Could not load notifications.'
+    loadError.value = err.response?.data?.message || 'Could not load problems.'
   } finally {
     loading.value = false
   }
@@ -58,7 +59,7 @@ const permissionChecked = ref(false)
 onMounted(async () => {
   if (!authStore.user) await authStore.fetchMe().catch(() => {})
   permissionChecked.value = true
-  if (authStore.can('notification-list')) loadNotifications()
+  if (authStore.can('problem-list')) loadNotifications()
 })
 
 function runSearch() {
@@ -108,7 +109,7 @@ function onResolved() {
 
 <template>
   <p v-if="!permissionChecked" class="text-center text-sm text-muted py-10">Loading&hellip;</p>
-  <div v-else-if="!authStore.can('notification-list')" class="bg-white rounded-2xl shadow-panel p-10 text-center">
+  <div v-else-if="!authStore.can('problem-list')" class="bg-white rounded-2xl shadow-panel p-10 text-center">
     <p class="text-[15px] font-semibold text-gray-900">You don't have permission to view this page.</p>
     <p class="mt-1 text-[13px] text-muted">Contact an administrator if you think this is a mistake.</p>
   </div>
@@ -120,7 +121,7 @@ function onResolved() {
         Home
       </RouterLink>
       <span class="w-px h-4 bg-gray-300 shrink-0"></span>
-      <span class="text-[13px] sm:text-sm text-gray-700">Notifications</span>
+      <span class="text-[13px] sm:text-sm text-gray-700">Problems</span>
     </div>
 
     <p v-if="loadError" class="text-[13px] text-brand mb-4">{{ loadError }}</p>
@@ -143,7 +144,7 @@ function onResolved() {
         <input
           v-model="search"
           type="text"
-          placeholder="Search notifications…"
+          placeholder="Search problems…"
           class="w-full sm:w-56 h-10 px-3.5 rounded-lg bg-white text-sm text-gray-800 outline-none border border-transparent focus:border-white/60 transition"
           @keyup.enter="runSearch"
         />
@@ -169,7 +170,7 @@ function onResolved() {
             v-show="showFilter"
             class="absolute right-0 top-full mt-2 z-40 w-[min(300px,calc(100vw-2rem))] bg-white rounded-2xl shadow-panel border border-soft p-4 text-left"
             role="dialog"
-            aria-label="Filter notifications"
+            aria-label="Filter problems"
           >
             <div class="flex flex-col gap-3">
               <div class="flex flex-col gap-1">
@@ -237,7 +238,7 @@ function onResolved() {
               <th class="px-4 py-1.5 font-medium">Raised By</th>
               <th class="px-4 py-1.5 font-medium">Raised At</th>
               <th class="px-4 py-1.5 font-medium">Status</th>
-              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('notification-resolve')">Action</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('problem-resolve')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
@@ -245,7 +246,7 @@ function onResolved() {
               <td colspan="9" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
             </tr>
             <tr v-else-if="!notifications.length">
-              <td colspan="9" class="px-4 py-8 text-center text-sm text-muted">No notifications found.</td>
+              <td colspan="9" class="px-4 py-8 text-center text-sm text-muted">No problems found.</td>
             </tr>
             <tr
               v-for="(item, index) in notifications"
@@ -259,7 +260,7 @@ function onResolved() {
               <td class="px-4 py-1 font-semibold">{{ item.unique_number || '—' }}</td>
               <td class="px-4 py-1">
                 {{ item.course_name || '—' }}
-                <span v-if="item.course_code" class="text-muted">({{ item.course_code }})</span>
+                <span v-if="item.course_code" class="text-muted">({{ item.course_code }})</span><span v-if="item.course_type" class="text-muted">{{ typeSuffix(item.course_type) }}</span>
               </td>
               <td class="px-4 py-1">{{ item.issue_name || '—' }}</td>
               <td class="px-4 py-1 max-w-[220px] truncate" :title="item.remarks || undefined">{{ item.remarks || '—' }}</td>
@@ -273,7 +274,7 @@ function onResolved() {
                   {{ item.issue_status === 'open' ? 'Open' : 'Resolved' }}
                 </span>
               </td>
-              <td class="px-4 py-1 text-center" v-if="authStore.can('notification-resolve')">
+              <td class="px-4 py-1 text-center" v-if="authStore.can('problem-resolve')">
                 <button
                   v-if="item.issue_status === 'open'"
                   type="button"

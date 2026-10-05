@@ -48,6 +48,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'full_marks' => 80,
             'time_allotted' => '3 hours',
             'pdf' => UploadedFile::fake()->create('question-paper.pdf', 500, 'application/pdf'),
@@ -67,6 +68,100 @@ class QuestionPaperControllerTest extends TestCase
         $this->assertSame(1, $paper->groups()->count());
     }
 
+    private function createPayload(array $overrides = []): array
+    {
+        return array_merge([
+            'exam_year' => 2025,
+            'course_id' => Course::factory()->create()->id,
+            'semester' => 5,
+            'exam_term_id' => ExamTerm::factory()->create()->id,
+            'pdf' => UploadedFile::fake()->create('question-paper.pdf', 500, 'application/pdf'),
+            'groups' => $this->validGroupsJson(),
+        ], $overrides);
+    }
+
+    public function test_a_question_paper_can_be_tagged_with_several_departments(): void
+    {
+        Storage::fake('public');
+        $this->actingAdmin();
+        $science = \App\Models\Department::factory()->create(['name' => 'Department of Science']);
+        $arts = \App\Models\Department::factory()->create(['name' => 'Department of Arts']);
+
+        $response = $this->withApiKey()->post('/api/v1/question-papers', $this->createPayload(['department_ids' => [$science->id, $arts->id]]))
+            ->assertCreated();
+
+        $this->assertEqualsCanonicalizing([$science->id, $arts->id], $response->json('data.department_ids'));
+        $this->assertEqualsCanonicalizing(['Department of Science', 'Department of Arts'], collect($response->json('data.departments'))->pluck('name')->all());
+        $this->assertDatabaseCount('question_paper_departments', 2);
+    }
+
+    public function test_at_least_one_active_department_is_required(): void
+    {
+        Storage::fake('public');
+        $this->actingAdmin();
+
+        $this->withApiKey()->postJson('/api/v1/question-papers', $this->createPayload())
+            ->assertStatus(422)->assertJsonValidationErrors('department_ids');
+        $this->withApiKey()->postJson('/api/v1/question-papers', $this->createPayload(['department_ids' => []]))
+            ->assertStatus(422)->assertJsonValidationErrors('department_ids');
+
+        $inactive = \App\Models\Department::factory()->create(['status' => false]);
+        $this->withApiKey()->postJson('/api/v1/question-papers', $this->createPayload(['department_ids' => [$inactive->id]]))
+            ->assertStatus(422)->assertJsonValidationErrors('department_ids.0');
+
+        $this->assertDatabaseCount('question_papers', 0);
+    }
+
+    public function test_departments_can_be_changed_even_after_evaluation_has_started(): void
+    {
+        $this->actingAdmin();
+        $paper = QuestionPaper::factory()->create();
+        $mapping = QuestionAnswerSheetMapping::factory()->create(['question_paper_id' => $paper->id]);
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'marks' => 30]);
+        $commerce = \App\Models\Department::factory()->create(['name' => 'Department of Commerce']);
+        $science = \App\Models\Department::factory()->create(['name' => 'Department of Science']);
+
+        $this->withApiKey()->patchJson("/api/v1/question-papers/{$paper->id}/departments", ['department_ids' => [$commerce->id, $science->id]])
+            ->assertOk();
+        $this->assertEqualsCanonicalizing([$commerce->id, $science->id], $paper->departments()->pluck('departments.id')->all());
+
+        // Replacing the list, not adding to it.
+        $this->withApiKey()->patchJson("/api/v1/question-papers/{$paper->id}/departments", ['department_ids' => [$science->id]])->assertOk();
+        $this->assertSame([$science->id], $paper->departments()->pluck('departments.id')->all());
+
+        $this->withApiKey()->patchJson("/api/v1/question-papers/{$paper->id}/departments", ['department_ids' => []])
+            ->assertStatus(422)->assertJsonValidationErrors('department_ids');
+    }
+
+    public function test_list_includes_who_uploaded_each_paper_and_when(): void
+    {
+        $admin = $this->actingAdmin();
+        $admin->update(['name' => 'Super Admin']);
+        $paper = QuestionPaper::factory()->create(['created_by' => $admin->id]);
+
+        $row = collect($this->withApiKey()->getJson('/api/v1/question-papers')->assertOk()->json('data.items'))->firstWhere('id', $paper->id);
+
+        $this->assertSame('Super Admin', $row['created_by_name']);
+        $this->assertNotNull($row['created_at']);
+    }
+
+    public function test_list_can_be_filtered_and_searched_by_department(): void
+    {
+        $this->actingAdmin();
+        $science = \App\Models\Department::factory()->create(['name' => 'Department of Science']);
+        $arts = \App\Models\Department::factory()->create(['name' => 'Department of Arts']);
+        $shared = QuestionPaper::factory()->create();
+        $shared->departments()->sync([$science->id, $arts->id]);
+        $artsOnly = QuestionPaper::factory()->create();
+        $artsOnly->departments()->sync([$arts->id]);
+
+        $ids = fn ($query) => collect($this->withApiKey()->getJson('/api/v1/question-papers?'.$query)->assertOk()->json('data.items'))->pluck('id')->sort()->values()->all();
+
+        $this->assertSame([$shared->id], $ids('department_id='.$science->id));
+        $this->assertSame(collect([$shared->id, $artsOnly->id])->sort()->values()->all(), $ids('department_id='.$arts->id));
+        $this->assertSame([$shared->id], $ids('search=Science'));
+    }
+
     public function test_creating_a_paper_with_an_invalid_structure_writes_nothing(): void
     {
         Storage::fake('public');
@@ -78,6 +173,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'pdf' => UploadedFile::fake()->create('question-paper.pdf', 500, 'application/pdf'),
             // a leaf with no marks — invalid
             'groups' => json_encode([
@@ -111,6 +207,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => $examTerm->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'pdf' => UploadedFile::fake()->create('question-paper.pdf', 500, 'application/pdf'),
             'groups' => $this->validGroupsJson(),
         ]);
@@ -142,6 +239,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => $examTerm->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'pdf' => UploadedFile::fake()->create('question-paper.pdf', 500, 'application/pdf'),
             'groups' => $this->validGroupsJson(),
         ]);
@@ -160,6 +258,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => $this->validGroupsJson(),
         ]);
 
@@ -177,6 +276,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'pdf' => UploadedFile::fake()->image('not-a-pdf.jpg'),
             'groups' => $this->validGroupsJson(),
         ]);
@@ -194,6 +294,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => 999999,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'pdf' => UploadedFile::fake()->create('question-paper.pdf', 100, 'application/pdf'),
             'groups' => $this->validGroupsJson(),
         ]);
@@ -212,6 +313,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'pdf' => UploadedFile::fake()->create('question-paper.pdf', 100, 'application/pdf'),
         ]);
 
@@ -298,6 +400,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'full_marks' => 80,
             'time_allotted' => '3 hours',
             'groups' => [
@@ -335,6 +438,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => [
                 [
                     'label' => 'Group A',
@@ -373,6 +477,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => [
                 [
                     'label' => 'Group B',
@@ -416,6 +521,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => [
                 [
                     'label' => 'Group B',
@@ -466,6 +572,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => [
                 [
                     'label' => 'Groups C, D & E',
@@ -511,6 +618,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => [
                 [
                     'label' => 'Groups C, D & E',
@@ -571,6 +679,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => [
                 [
                     'label' => 'Groups C, D & E',
@@ -597,6 +706,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => [
                 ['label' => 'New Group', 'mode' => 'all', 'children' => [['label' => '1', 'mode' => 'leaf', 'marks' => 5]]],
             ],
@@ -626,6 +736,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => $examTerm->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => json_decode($this->validGroupsJson(), true),
         ]);
 
@@ -646,6 +757,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $paper->course_id,
             'semester' => 5,
             'exam_term_id' => $paper->exam_term_id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => json_decode($this->validGroupsJson(), true),
         ]);
 
@@ -663,6 +775,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => [
                 [
                     'label' => 'Group A',
@@ -689,6 +802,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => [
                 [
                     'label' => 'Group A',
@@ -717,6 +831,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => [
                 [
                     'label' => 'Group A',
@@ -743,6 +858,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => [
                 [
                     'label' => 'Group A',
@@ -791,6 +907,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => json_decode($this->validGroupsJson(), true),
         ]);
 
@@ -809,6 +926,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => json_decode($this->validGroupsJson(), true),
         ]);
 
@@ -829,6 +947,7 @@ class QuestionPaperControllerTest extends TestCase
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
+            'department_ids' => [\App\Models\Department::factory()->create()->id],
             'groups' => json_decode($this->validGroupsJson(), true),
         ]);
 

@@ -24,6 +24,7 @@ import { useNotificationsStore } from '../stores/notifications'
 import { useToast } from '../composables/useToast'
 import FaceScanModal from '../components/FaceScanModal.vue'
 import RaiseIssueModal from '../components/evaluation/RaiseIssueModal.vue'
+import { typeSuffix } from '../utils/course'
 
 const router = useRouter()
 const toast = useToast()
@@ -36,7 +37,7 @@ const notificationsStore = useNotificationsStore()
 // evaluation (see MyPendingCourseController::startEvaluation()'s own
 // docblock) decides, server-side, whether this teacher needs a face scan
 // before evaluating this particular sheet: general_settings'
-// face_scan_applicable off skips it for everyone; on, it still defers to
+// is_face_scan_applicable off skips it for everyone; on, it still defers to
 // this teacher's own teacher_details.face_scan_applicable flag. Never
 // decided client-side — the API is the source of truth every time the
 // button's clicked, not just cached from the page's own initial load.
@@ -119,13 +120,9 @@ function isDraft(paper) {
 // disabling it here instead is the honest state, not a dead end dressed
 // up as a live button.
 function paperAction(paper) {
-  // An open Printing Issue means the physical sheet itself needs fixing
-  // (see NotificationController::resolvePrintingIssue()) — takes priority
-  // over the time-window state below since evaluating a sheet that can't
-  // even be read properly makes no sense regardless of the schedule. An
-  // open Timing Issue is deliberately *not* checked here — see
-  // AnswerSheetResource's own 'blocks_evaluation' docblock for why.
-  if (paper.blocks_evaluation) return { label: 'Printing Issue Pending', disabled: true }
+  // Sheets with an open issue are listed on Problem Course, not here, so
+  // this is only a safety net (e.g. a stale row right after raising one).
+  if (paper.blocks_evaluation) return { label: 'Issue Pending', disabled: true }
   const { state } = paperTimeStatus(paper)
   if (state === 'active') return { label: isDraft(paper) ? 'Continue Evaluate' : 'Start Evaluate', disabled: false }
   if (checkingEvaluationId.value === paper.id) return { label: 'Checking…', disabled: true }
@@ -203,7 +200,7 @@ const filteredPapers = computed(() => {
   })
 })
 
-async function loadCourses() {
+async function loadCourses(preferredCourseId = null) {
   coursesLoading.value = true
   coursesError.value = ''
   // Cleared up front, not just left alone when the new list turns out
@@ -225,8 +222,10 @@ async function loadCourses() {
     }
     const res = await api.get('/my-pending-courses', { params })
     courses.value = res.data.data
-    // First course auto-selected; user can pick another chip afterwards.
-    if (courses.value.length) selectCourse(courses.value[0])
+    // First course auto-selected (or the one the caller asked to stay on,
+    // if it's still there); user can pick another chip afterwards.
+    const preferred = courses.value.find((c) => c.course_id === preferredCourseId)
+    if (courses.value.length) selectCourse(preferred || courses.value[0])
   } catch (err) {
     coursesError.value = err.response?.data?.message || 'Could not load your pending courses.'
   } finally {
@@ -307,7 +306,9 @@ function onFaceScanCancel() {
 const issuePaper = ref(null) // paper currently showing the raise-issue modal, or null
 function onIssueRaised() {
   issuePaper.value = null
-  if (activeCourse.value) loadPapers(activeCourse.value)
+  // The sheet has moved to Problem Course — reload so it (and its count)
+  // drops off this page, staying on the same course if it still has any.
+  loadCourses(activeCourse.value?.course_id)
   notificationsStore.loadUnresolvedCount()
 }
 
@@ -393,7 +394,7 @@ watch(
           @click="selectCourse(course)"
         >
           <svg class="w-5 h-5 text-success shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
-          <span class="min-w-0 leading-tight break-words">{{ course.course_code }} - {{ course.course_name?.toUpperCase() }}</span>
+          <span class="min-w-0 leading-tight break-words">{{ course.course_code }} - {{ course.course_name?.toUpperCase() }}{{ typeSuffix(course.course_type).toUpperCase() }}</span>
         </button>
       </div>
     </section>
@@ -405,7 +406,7 @@ watch(
           <span class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
             <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
           </span>
-          <h2 class="text-white text-[16px] sm:text-lg font-medium truncate">{{ activeCourse.course_code }} - {{ activeCourse.course_name }}</h2>
+          <h2 class="text-white text-[16px] sm:text-lg font-medium truncate">{{ activeCourse.course_code }} - {{ activeCourse.course_name }}{{ typeSuffix(activeCourse.course_type) }}</h2>
         </div>
         <div class="flex flex-wrap items-center gap-2" @click.stop>
           <span class="inline-flex items-center rounded-[10px] bg-white/15 text-white text-[11px] sm:text-[12px] px-3.5 py-2">Pending : {{ activeCourse.pending_count }}</span>

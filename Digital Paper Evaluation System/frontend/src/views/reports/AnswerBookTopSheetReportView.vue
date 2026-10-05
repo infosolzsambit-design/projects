@@ -15,15 +15,21 @@ import api from '../../utils/api'
 import { useAuthStore } from '../../stores/auth'
 import { useToast } from '../../composables/useToast'
 import SearchableSelect from '../../components/common/SearchableSelect.vue'
+import { useProgramsStore } from '../../stores/programs'
+import { courseLabel } from '../../utils/course'
+import { ordinal } from '../../utils/ordinal'
 
 const toast = useToast()
 const authStore = useAuthStore()
 
 const SEMESTER_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1)
+// Same searchable dropdown as the other filters; shown as 1st, 2nd, …
+const semesterOptions = SEMESTER_OPTIONS.map((n) => ({ id: n, name: ordinal(n) }))
 
 const filters = reactive({
   program_name: '',
   course_id: '',
+  department_id: '', // optional — the packet's department
   exam_term_id: '',
   exam_type_id: '',
   semester: '',
@@ -65,11 +71,13 @@ function validateFilters() {
 // --- Dropdown sources — same endpoints/shape TeacherWiseEvaluationReportView.vue's own filter row already uses. ---
 const availablePrograms = ref([])
 const programsLoading = ref(true)
+const programsStore = useProgramsStore()
 async function loadPrograms() {
   programsLoading.value = true
   try {
-    const res = await api.get('/programs', { params: { status: 'all', is_active: 'yes', table_fields: ['name'] } })
-    availablePrograms.value = res.data.data.map((program) => ({ id: program.name, name: program.name }))
+    // Shown as "Name (Label)"; the value stays the plain program name.
+    await programsStore.load(true)
+    availablePrograms.value = programsStore.options()
   } catch {
     // Non-fatal — the dropdown just stays empty; the page itself doesn't depend on this succeeding to render.
   } finally {
@@ -82,15 +90,29 @@ const coursesLoading = ref(true)
 async function loadCourses() {
   coursesLoading.value = true
   try {
-    const res = await api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] } })
+    const res = await api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code', 'type'] } })
     availableCourses.value = res.data.data.map((course) => ({
       ...course,
-      name: course.code ? `${course.name} (${course.code})` : course.name,
+      name: courseLabel(course.name, course.code, course.type),
     }))
   } catch {
     // Same as loadPrograms() above.
   } finally {
     coursesLoading.value = false
+  }
+}
+
+const availableDepartments = ref([])
+const departmentsLoading = ref(true)
+async function loadDepartments() {
+  departmentsLoading.value = true
+  try {
+    const res = await api.get('/departments', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] } })
+    availableDepartments.value = res.data.data.map((d) => ({ ...d, name: d.code ? `${d.name} (${d.code})` : d.name }))
+  } catch {
+    // Same as loadPrograms() above.
+  } finally {
+    departmentsLoading.value = false
   }
 }
 
@@ -149,6 +171,7 @@ onMounted(async () => {
   if (!authStore.can('answer-book-report')) return
   loadPrograms()
   loadCourses()
+  loadDepartments()
   loadExamTerms()
   loadExamTypes()
   loadTeachers()
@@ -173,7 +196,7 @@ const filteredRows = computed(() => {
   const q = resultsSearch.value.trim().toLowerCase()
   if (!q) return rows.value
   return rows.value.filter((row) => {
-    const haystack = [row.roll_no, row.name, row.registration_no, row.packet_no, row.script_code, row.course_name, row.course_code]
+    const haystack = [row.roll_no, row.name, row.registration_no, row.packet_no, row.script_code, row.course_name, row.course_code, row.course_type, row.department_name, row.evaluated_by]
       .filter(Boolean)
       .join(' ')
       .toLowerCase()
@@ -184,6 +207,7 @@ const filteredRows = computed(() => {
 function exportParams() {
   const params = { ...filters }
   if (!params.teacher_id) delete params.teacher_id
+  if (!params.department_id) delete params.department_id
   return params
 }
 
@@ -233,6 +257,26 @@ async function viewTopSheet(row) {
   } finally {
     viewingId.value = null
   }
+}
+
+// --- Evaluated-by contact (hover title + click modal) ---------------------
+const contactRow = ref(null)
+function contactTitle(row) {
+  const c = row.evaluated_by_contact
+  if (!c) return ''
+  return [
+    c.name,
+    c.designation,
+    c.emp_code ? `Emp Code: ${c.emp_code}` : null,
+    c.phone_no ? `Phone: ${c.phone_no}` : null,
+    c.email ? `Email: ${c.email}` : null,
+  ].filter(Boolean).join('\n')
+}
+function openContactModal(row) {
+  if (row.evaluated_by_contact) contactRow.value = row.evaluated_by_contact
+}
+function closeContactModal() {
+  contactRow.value = null
 }
 
 // --- Download -----------------------------------------------------------
@@ -311,7 +355,9 @@ async function downloadReport() {
         <h3 class="text-[14px] sm:text-[15px] font-semibold text-gray-900">Select Exam Details</h3>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-2.5">
+      <!-- Row 1: Program · Course · Exam Type · Exam Term (same layout as
+           the other search panels — Program and Course wider). -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_1fr_1fr] gap-2.5">
         <div class="flex flex-col gap-1">
           <label for="abtsr_program" class="text-[12px] text-label">Program <span class="text-brand">*</span></label>
           <SearchableSelect
@@ -345,22 +391,6 @@ async function downloadReport() {
         </div>
 
         <div class="flex flex-col gap-1">
-          <label for="abtsr_exam_term" class="text-[12px] text-label">Exam Term <span class="text-brand">*</span></label>
-          <SearchableSelect
-            id="abtsr_exam_term"
-            :ref="(el) => (fieldRefs.exam_term_id.value = el)"
-            v-model="filters.exam_term_id"
-            :options="availableExamTerms"
-            :loading="examTermsLoading"
-            :error="!!fieldErrors.exam_term_id"
-            placeholder="Select"
-            search-placeholder="Search exam terms…"
-            @change="clearFieldError('exam_term_id')"
-          />
-          <p v-if="fieldErrors.exam_term_id" class="text-[11px] text-brand">{{ fieldErrors.exam_term_id }}</p>
-        </div>
-
-        <div class="flex flex-col gap-1">
           <label for="abtsr_exam_type" class="text-[12px] text-label">Exam Type <span class="text-brand">*</span></label>
           <SearchableSelect
             id="abtsr_exam_type"
@@ -377,18 +407,48 @@ async function downloadReport() {
         </div>
 
         <div class="flex flex-col gap-1">
+          <label for="abtsr_exam_term" class="text-[12px] text-label">Exam Term <span class="text-brand">*</span></label>
+          <SearchableSelect
+            id="abtsr_exam_term"
+            :ref="(el) => (fieldRefs.exam_term_id.value = el)"
+            v-model="filters.exam_term_id"
+            :options="availableExamTerms"
+            :loading="examTermsLoading"
+            :error="!!fieldErrors.exam_term_id"
+            placeholder="Select"
+            search-placeholder="Search exam terms…"
+            @change="clearFieldError('exam_term_id')"
+          />
+          <p v-if="fieldErrors.exam_term_id" class="text-[11px] text-brand">{{ fieldErrors.exam_term_id }}</p>
+        </div>
+      </div>
+
+      <!-- Row 2: Department · Semester · Exam Year · Teacher · Search -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1.4fr_auto] gap-2.5 mt-2.5">
+        <div class="flex flex-col gap-1 min-w-0">
+          <label for="abtsr_department" class="text-[12px] text-label">Department <span class="text-muted">(optional)</span></label>
+          <SearchableSelect
+            id="abtsr_department"
+            v-model="filters.department_id"
+            :options="availableDepartments"
+            :loading="departmentsLoading"
+            placeholder="All departments"
+            search-placeholder="Search departments…"
+          />
+        </div>
+
+        <div class="flex flex-col gap-1">
           <label for="abtsr_semester" class="text-[12px] text-label">Semester <span class="text-brand">*</span></label>
-          <select
+          <SearchableSelect
             id="abtsr_semester"
             :ref="(el) => (fieldRefs.semester.value = el)"
             v-model="filters.semester"
-            class="w-full h-10 px-3 rounded-xl bg-input-bg text-sm text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition cursor-pointer"
-            :class="fieldErrors.semester ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
+            :options="semesterOptions"
+            :error="!!fieldErrors.semester"
+            placeholder="Select"
+            search-placeholder="Search semesters…"
             @change="clearFieldError('semester')"
-          >
-            <option value="" disabled>Select</option>
-            <option v-for="option in SEMESTER_OPTIONS" :key="option" :value="option">{{ option }}</option>
-          </select>
+          />
           <p v-if="fieldErrors.semester" class="text-[11px] text-brand">{{ fieldErrors.semester }}</p>
         </div>
 
@@ -417,18 +477,19 @@ async function downloadReport() {
             search-placeholder="Search teachers…"
           />
         </div>
-      </div>
 
-      <div class="flex justify-end mt-3">
-        <button
-          type="button"
-          class="h-10 inline-flex items-center justify-center gap-2 rounded-xl bg-btn-gradient text-white text-[13px] font-semibold px-6 hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
-          :disabled="searching"
-          @click="runSearch"
-        >
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-          {{ searching ? 'Searching…' : 'Search' }}
-        </button>
+        <div class="flex flex-col gap-1">
+          <label class="text-[12px] text-label invisible" aria-hidden="true">Search</label>
+          <button
+            type="button"
+            class="h-10 inline-flex items-center justify-center gap-2 rounded-xl bg-btn-gradient text-white text-[13px] font-semibold px-6 hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed self-start"
+            :disabled="searching"
+            @click="runSearch"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            {{ searching ? 'Searching…' : 'Search' }}
+          </button>
+        </div>
       </div>
     </section>
 
@@ -470,30 +531,39 @@ async function downloadReport() {
       <p v-if="searchError" class="text-[13px] text-brand text-center py-8">{{ searchError }}</p>
 
       <div v-else class="overflow-x-auto">
-        <table class="w-full min-w-[860px] text-left">
+        <table class="w-full min-w-[1180px] text-left">
           <thead>
             <tr class="bg-subject-header text-white text-[12px] font-medium">
               <th class="px-3 py-2.5 rounded-tl-xl">QR Code</th>
               <th class="px-3 py-2.5">Packet No</th>
-              <th class="px-3 py-2.5">Subject</th>
-              <th class="px-3 py-2.5 text-center">Semester</th>
+              <th class="px-3 py-2.5">Student</th>
+              <th class="px-3 py-2.5">Course</th>
+              <th class="px-3 py-2.5 text-center">Sem</th>
               <th class="px-3 py-2.5 text-center">Marks</th>
               <th class="px-3 py-2.5 text-center">Status</th>
+              <th class="px-3 py-2.5">Evaluated By</th>
               <th class="px-3 py-2.5 text-center rounded-tr-xl">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
             <tr v-if="!filteredRows.length">
-              <td colspan="7" class="px-3 py-8 text-center text-sm text-muted">
+              <td colspan="9" class="px-3 py-8 text-center text-sm text-muted">
                 {{ rows.length ? 'No rows match this search.' : 'No answer sheets found for this search.' }}
               </td>
             </tr>
             <tr v-for="row in filteredRows" v-else :key="row.id" class="text-[12.5px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0">
               <td class="px-3 py-2.5 font-medium whitespace-nowrap">{{ row.script_code || '—' }}</td>
               <td class="px-3 py-2.5">{{ row.packet_no || '—' }}</td>
-              <td class="px-3 py-2.5">{{ row.course_name || '—' }}</td>
-              <td class="px-3 py-2.5 text-center">{{ row.semester }}</td>
-              <td class="px-3 py-2.5 text-center font-semibold">{{ row.marks ?? '—' }}</td>
+              <td class="px-3 py-2.5">
+                <div class="font-medium text-gray-900">{{ row.name || '—' }}</div>
+                <div class="text-[11.5px] text-muted">{{ row.registration_no || '—' }}</div>
+              </td>
+              <td class="px-3 py-2.5">
+                <div>{{ row.course_name ? courseLabel(row.course_name, row.course_code, row.course_type) : '—' }}</div>
+                <div class="text-[11.5px] text-muted">{{ row.department_name || '—' }}</div>
+              </td>
+              <td class="px-3 py-2.5 text-center whitespace-nowrap">{{ ordinal(row.semester) }}</td>
+              <td class="px-3 py-2.5 text-center font-semibold whitespace-nowrap">{{ row.marks ?? '—' }} / {{ row.full_marks ?? '—' }}</td>
               <td class="px-3 py-2.5 text-center">
                 <span
                   class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-medium"
@@ -501,6 +571,20 @@ async function downloadReport() {
                 >
                   {{ row.evaluated ? 'Evaluated' : 'Not evaluated yet' }}
                 </span>
+              </td>
+              <td class="px-3 py-2.5">
+                <template v-if="row.evaluated && row.evaluated_by">
+                  <button
+                    type="button"
+                    class="font-medium text-brand-blue hover:underline text-left"
+                    :title="contactTitle(row)"
+                    @click="openContactModal(row)"
+                  >
+                    {{ row.evaluated_by }}
+                  </button>
+                  <div class="text-[11.5px] text-muted">{{ row.evaluated_at || '—' }}</div>
+                </template>
+                <span v-else class="text-muted">—</span>
               </td>
               <td class="px-3 py-2.5 text-center">
                 <button
@@ -519,5 +603,26 @@ async function downloadReport() {
         </table>
       </div>
     </section>
+
+    <!-- Evaluated-by contact modal -->
+    <div v-if="contactRow" class="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4" @click.self="closeContactModal">
+      <div class="bg-white rounded-2xl shadow-card w-full max-w-sm overflow-hidden">
+        <div class="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-soft">
+          <h2 class="text-[15px] font-semibold text-gray-900">Evaluator Details</h2>
+          <button type="button" class="text-gray-400 hover:text-gray-700 transition-colors" aria-label="Close" @click="closeContactModal">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
+        </div>
+        <div class="px-5 py-4 space-y-2.5 text-[13px]">
+          <p class="text-[15px] font-semibold text-gray-900">{{ contactRow.name || '—' }}</p>
+          <p v-if="contactRow.designation" class="text-muted">{{ contactRow.designation }}</p>
+          <div class="pt-1 space-y-1.5">
+            <p><span class="text-label">Emp Code:</span> {{ contactRow.emp_code || '—' }}</p>
+            <p><span class="text-label">Phone:</span> {{ contactRow.phone_no || '—' }}</p>
+            <p><span class="text-label">Email:</span> {{ contactRow.email || '—' }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>

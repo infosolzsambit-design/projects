@@ -2,26 +2,32 @@
 import { reactive, ref } from 'vue'
 import api from '../../utils/api'
 
-// Upload-then-crop modal for the Profile page's e-signature field — same
-// modal chrome as FaceCaptureModal, but for a picked file instead of a
-// live camera: choose an image, pan/zoom it inside a fixed 2:1 frame (a
-// signature strip's natural shape), then POST the cropped PNG to whichever
-// `endpoint` the caller passes. This app has no dependency for cropping
-// (jQuery-free, minimal-dependency precedent — see SearchableSelect.vue),
-// so it's a small hand-rolled canvas cropper rather than a new package.
+// Upload-then-crop modal for the e-signature field (Profile page and the
+// admin Teacher form) — same modal chrome as FaceCaptureModal, but for a
+// picked file instead of a live camera: choose an image, see the WHOLE image
+// fitted in the stage, then drag / resize a free crop box over it (any shape
+// — a long, thin signature fits as well as a short one) and POST the cropped
+// PNG to whichever `endpoint` the caller passes. Hand-rolled (no cropping
+// dependency — minimal-dependency precedent, see SearchableSelect.vue).
 const props = defineProps({
   title: { type: String, default: 'Upload E-Signature' },
   endpoint: { type: String, required: true },
 })
 const emit = defineEmits(['saved', 'close'])
 
-// Fixed on-screen crop frame, CSS px — a wide, short strip matching a
-// signature's natural shape. Output is rendered at OUTPUT_SCALE× this for
-// a crisper saved image than the frame's own display size.
-const FRAME_W = 300
-const FRAME_H = 150
-const OUTPUT_SCALE = 2
-const MAX_ZOOM = 3
+// Stage the image is shown in (CSS px; narrower on small screens).
+const STAGE_MAX_W = 400
+const STAGE_H = 220
+// Margin around the fitted image, so the crop box's edge handles are never
+// half-hidden by the stage's own edge.
+const STAGE_PAD = 12
+// Smallest crop box, CSS px — keeps it grabbable and the result legible.
+const MIN_CROP_W = 40
+const MIN_CROP_H = 20
+// The saved PNG is scaled down to fit inside this (never up), so a huge
+// photo of a signature doesn't become a huge stored image.
+const MAX_OUT_W = 900
+const MAX_OUT_H = 300
 
 const state = reactive({
   // select | crop | processing | done | error
@@ -33,19 +39,16 @@ const fileInput = ref(null)
 const imageEl = ref(null)
 const outputCanvas = ref(null)
 
-const image = reactive({
-  src: '',
-  naturalWidth: 0,
-  naturalHeight: 0,
-  // Scale that makes the image "cover" the frame at zoom=1 (no gaps).
-  baseScale: 1,
-  zoom: 1,
-  // Displayed image's top-left offset within the frame, CSS px.
-  panX: 0,
-  panY: 0,
-})
+const stageW = ref(STAGE_MAX_W)
+// The image's natural size and where it sits in the stage ("contain" fit,
+// centred — the whole image is always visible).
+const image = reactive({ src: '', naturalWidth: 0, naturalHeight: 0, x: 0, y: 0, w: 0, h: 0 })
+// The crop box, stage px — always kept inside the image.
+const crop = reactive({ x: 0, y: 0, w: 0, h: 0 })
+// What's being dragged: 'move' or a handle ('n','s','e','w','ne','nw','se','sw').
+const drag = reactive({ mode: '', startX: 0, startY: 0, start: { x: 0, y: 0, w: 0, h: 0 } })
 
-const drag = reactive({ active: false, startX: 0, startY: 0, startPanX: 0, startPanY: 0 })
+const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
 
 function openFilePicker() {
   fileInput.value?.click()
@@ -70,12 +73,8 @@ function onFileChange(e) {
   const reader = new FileReader()
   reader.onload = () => {
     image.src = String(reader.result)
-    // The crop stage's own <img> (whose @load handler computes
-    // naturalWidth/baseScale/centering — see onImageLoad() below) only
-    // exists in the DOM once state.status is already 'crop', so this has
-    // to flip first — leaving it to onImageLoad() alone would mean that
-    // <img> never mounts in the first place and picking an image would
-    // silently do nothing.
+    // The crop stage's <img> (whose @load sets everything up — see
+    // onImageLoad()) only mounts once status is 'crop', so flip it first.
     state.status = 'crop'
   }
   reader.onerror = () => {
@@ -85,66 +84,71 @@ function onFileChange(e) {
   reader.readAsDataURL(file)
 }
 
-function displayedWidth() {
-  return image.naturalWidth * image.baseScale * image.zoom
-}
-function displayedHeight() {
-  return image.naturalHeight * image.baseScale * image.zoom
-}
-
-// Keeps the image covering the frame — no empty gaps at any pan position.
-function clampPan() {
-  const dispW = displayedWidth()
-  const dispH = displayedHeight()
-  image.panX = Math.min(0, Math.max(FRAME_W - dispW, image.panX))
-  image.panY = Math.min(0, Math.max(FRAME_H - dispH, image.panY))
-}
-
 function onImageLoad() {
   const el = imageEl.value
+  stageW.value = Math.min(STAGE_MAX_W, window.innerWidth - 72)
   image.naturalWidth = el.naturalWidth
   image.naturalHeight = el.naturalHeight
-  // "Cover" fit: the smaller of the two ratios would letterbox, so use the
-  // larger — the image then fully fills the frame with excess cropped.
-  image.baseScale = Math.max(FRAME_W / image.naturalWidth, FRAME_H / image.naturalHeight)
-  image.zoom = 1
-  // Centered by default.
-  image.panX = (FRAME_W - displayedWidth()) / 2
-  image.panY = (FRAME_H - displayedHeight()) / 2
+  // "Contain" fit: the whole image visible, centred in the stage (inside
+  // STAGE_PAD on every side). The stage's 1px border is outside the
+  // positioning area, hence the extra 2.
+  const scale = Math.min((stageW.value - 2 - 2 * STAGE_PAD) / el.naturalWidth, (STAGE_H - 2 - 2 * STAGE_PAD) / el.naturalHeight)
+  image.w = el.naturalWidth * scale
+  image.h = el.naturalHeight * scale
+  image.x = (stageW.value - 2 - image.w) / 2
+  image.y = (STAGE_H - 2 - image.h) / 2
+  // Start with the crop box over the whole image; the teacher trims it.
+  Object.assign(crop, { x: image.x, y: image.y, w: image.w, h: image.h })
   state.status = 'crop'
 }
 
-function onZoomInput(e) {
-  const newZoom = Number(e.target.value)
-  const oldZoom = image.zoom
-  // Anchor the zoom on the frame's center so zooming in/out feels like
-  // it's zooming toward what's already in view, not toward the image's
-  // top-left corner.
-  const cx = FRAME_W / 2
-  const cy = FRAME_H / 2
-  const ratio = newZoom / oldZoom
-  image.panX = cx - (cx - image.panX) * ratio
-  image.panY = cy - (cy - image.panY) * ratio
-  image.zoom = newZoom
-  clampPan()
-}
-
-function onPointerDown(e) {
-  drag.active = true
+function onPointerDown(e, mode) {
+  drag.mode = mode
   drag.startX = e.clientX
   drag.startY = e.clientY
-  drag.startPanX = image.panX
-  drag.startPanY = image.panY
+  drag.start = { ...crop }
   e.currentTarget.setPointerCapture(e.pointerId)
 }
+
 function onPointerMove(e) {
-  if (!drag.active) return
-  image.panX = drag.startPanX + (e.clientX - drag.startX)
-  image.panY = drag.startPanY + (e.clientY - drag.startY)
-  clampPan()
+  if (!drag.mode) return
+  const dx = e.clientX - drag.startX
+  const dy = e.clientY - drag.startY
+  const s = drag.start
+  const minX = image.x
+  const minY = image.y
+  const maxX = image.x + image.w
+  const maxY = image.y + image.h
+
+  if (drag.mode === 'move') {
+    crop.x = Math.min(Math.max(s.x + dx, minX), maxX - s.w)
+    crop.y = Math.min(Math.max(s.y + dy, minY), maxY - s.h)
+    return
+  }
+
+  let left = s.x
+  let top = s.y
+  let right = s.x + s.w
+  let bottom = s.y + s.h
+  const minW = Math.min(MIN_CROP_W, image.w)
+  const minH = Math.min(MIN_CROP_H, image.h)
+  if (drag.mode.includes('w')) left = Math.min(Math.max(s.x + dx, minX), right - minW)
+  if (drag.mode.includes('e')) right = Math.max(Math.min(s.x + s.w + dx, maxX), left + minW)
+  if (drag.mode.includes('n')) top = Math.min(Math.max(s.y + dy, minY), bottom - minH)
+  if (drag.mode.includes('s')) bottom = Math.max(Math.min(s.y + s.h + dy, maxY), top + minH)
+  Object.assign(crop, { x: left, y: top, w: right - left, h: bottom - top })
 }
+
 function onPointerUp() {
-  drag.active = false
+  drag.mode = ''
+}
+
+function handleStyle(handle) {
+  const pos = {}
+  pos.left = handle.includes('w') ? '0%' : handle.includes('e') ? '100%' : '50%'
+  pos.top = handle.includes('n') ? '0%' : handle.includes('s') ? '100%' : '50%'
+  const cursor = { n: 'ns', s: 'ns', e: 'ew', w: 'ew', ne: 'nesw', sw: 'nesw', nw: 'nwse', se: 'nwse' }[handle]
+  return { ...pos, cursor: `${cursor}-resize` }
 }
 
 function chooseDifferentImage() {
@@ -157,18 +161,17 @@ async function save() {
   state.errorMessage = ''
   try {
     const canvas = outputCanvas.value
-    canvas.width = FRAME_W * OUTPUT_SCALE
-    canvas.height = FRAME_H * OUTPUT_SCALE
+    // Stage px → natural image px.
+    const toNatural = image.naturalWidth / image.w
+    const sx = (crop.x - image.x) * toNatural
+    const sy = (crop.y - image.y) * toNatural
+    const sw = crop.w * toNatural
+    const sh = crop.h * toNatural
+    // Natural resolution, scaled down (never up) to fit MAX_OUT_W × MAX_OUT_H.
+    const fit = Math.min(1, MAX_OUT_W / sw, MAX_OUT_H / sh)
+    canvas.width = Math.max(1, Math.round(sw * fit))
+    canvas.height = Math.max(1, Math.round(sh * fit))
     const ctx = canvas.getContext('2d')
-
-    // Map the visible frame back to natural image pixels: the inverse of
-    // the display transform (translate panX/panY, scale baseScale*zoom).
-    const scaleDisplayToNatural = 1 / (image.baseScale * image.zoom)
-    const sx = -image.panX * scaleDisplayToNatural
-    const sy = -image.panY * scaleDisplayToNatural
-    const sw = FRAME_W * scaleDisplayToNatural
-    const sh = FRAME_H * scaleDisplayToNatural
-
     ctx.drawImage(imageEl.value, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
     const dataUrl = canvas.toDataURL('image/png')
 
@@ -220,9 +223,8 @@ function close() {
         <!-- Crop stage -->
         <template v-else-if="state.status === 'crop' || state.status === 'processing' || state.status === 'done'">
           <div
-            class="relative mx-auto rounded-2xl overflow-hidden bg-gray-100 border border-input-border touch-none select-none cursor-grab active:cursor-grabbing"
-            :style="{ width: FRAME_W + 'px', height: FRAME_H + 'px' }"
-            @pointerdown="onPointerDown"
+            class="relative mx-auto rounded-2xl overflow-hidden bg-gray-100 border border-input-border touch-none select-none"
+            :style="{ width: stageW + 'px', height: STAGE_H + 'px' }"
             @pointermove="onPointerMove"
             @pointerup="onPointerUp"
             @pointercancel="onPointerUp"
@@ -231,24 +233,31 @@ function close() {
               ref="imageEl"
               :src="image.src"
               alt="Signature to crop"
-              class="absolute top-0 left-0 max-w-none pointer-events-none"
-              :style="{
-                width: image.naturalWidth * image.baseScale * image.zoom + 'px',
-                height: image.naturalHeight * image.baseScale * image.zoom + 'px',
-                transform: `translate(${image.panX}px, ${image.panY}px)`,
-              }"
+              class="absolute max-w-none pointer-events-none"
+              :style="{ left: image.x + 'px', top: image.y + 'px', width: image.w + 'px', height: image.h + 'px' }"
               @load="onImageLoad"
             />
+            <!-- Crop box: drag inside to move, drag a handle to resize. The
+                 big shadow dims everything outside it. -->
+            <div
+              v-if="state.status === 'crop' && crop.w"
+              class="absolute border-2 border-brand-blue cursor-move"
+              :style="{ left: crop.x + 'px', top: crop.y + 'px', width: crop.w + 'px', height: crop.h + 'px', boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)' }"
+              @pointerdown.stop="onPointerDown($event, 'move')"
+            >
+              <span
+                v-for="handle in HANDLES"
+                :key="handle"
+                class="absolute w-3 h-3 -ml-1.5 -mt-1.5 rounded-sm bg-white border-2 border-brand-blue"
+                :style="handleStyle(handle)"
+                @pointerdown.stop="onPointerDown($event, handle)"
+              ></span>
+            </div>
             <div v-if="state.status === 'processing'" class="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-sm font-medium">Saving&hellip;</div>
             <div v-if="state.status === 'done'" class="absolute inset-0 bg-green-600/55 flex items-center justify-center text-white text-lg font-bold">&check; Saved</div>
           </div>
 
-          <div v-if="state.status === 'crop'" class="mt-4 flex items-center gap-3">
-            <svg class="w-4 h-4 text-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-            <input type="range" min="1" :max="MAX_ZOOM" step="0.01" :value="image.zoom" class="w-full accent-brand-blue" @input="onZoomInput" />
-            <svg class="w-5 h-5 text-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="8" y1="11" x2="14" y2="11" /><line x1="11" y1="8" x2="11" y2="14" /></svg>
-          </div>
-          <p v-if="state.status === 'crop'" class="mt-2 text-[12px] text-muted text-center">Drag to reposition, use the slider to zoom.</p>
+          <p v-if="state.status === 'crop'" class="mt-3 text-[12px] text-muted text-center">Drag the box to move it, drag its corners or edges to resize it around your signature.</p>
         </template>
 
         <p v-if="state.status === 'error'" class="mt-3 text-[13px] text-brand text-center">{{ state.errorMessage }}</p>

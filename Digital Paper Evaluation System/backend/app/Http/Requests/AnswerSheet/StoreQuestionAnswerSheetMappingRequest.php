@@ -2,8 +2,10 @@
 
 namespace App\Http\Requests\AnswerSheet;
 
+use App\Models\QuestionPaper;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 /**
  * Phase 1 of an answer-sheet upload — just the packet's own fields
@@ -35,6 +37,29 @@ class StoreQuestionAnswerSheetMappingRequest extends FormRequest
             'exam_type_id' => ['required', 'integer', Rule::exists('exam_types', 'id')->whereNull('deleted_at')],
             'program_name' => ['required', 'string', 'max:255', Rule::exists('programs', 'name')->whereNull('deleted_at')],
             'packet_code' => ['required', 'string', 'max:255'],
+            // One of the chosen question paper's departments (checked in after()).
+            'department_id' => ['required', 'integer', Rule::exists('departments', 'id')->whereNull('deleted_at')],
+        ];
+    }
+
+    /**
+     * The department must be one the question paper is tagged with — the
+     * upload page only offers those, this enforces it.
+     *
+     * @return array<int, callable>
+     */
+    public function after(): array
+    {
+        return [
+            function (Validator $validator): void {
+                if ($validator->errors()->hasAny(['question_paper_id', 'department_id'])) {
+                    return;
+                }
+                $paper = QuestionPaper::find($this->integer('question_paper_id'));
+                if (! $paper?->departments()->whereKey($this->integer('department_id'))->exists()) {
+                    $validator->errors()->add('department_id', 'Select one of the departments this question paper is tagged with.');
+                }
+            },
         ];
     }
 }

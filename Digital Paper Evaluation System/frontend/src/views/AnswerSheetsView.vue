@@ -6,13 +6,21 @@
 // AnswerSheetRowsModal.vue, which paginates that one packet's own rows
 // separately — a packet can hold thousands of them, so nothing here ever
 // asks for "all of them" at once.
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../utils/api'
 import { useAuthStore } from '../stores/auth'
 import Pagination from '../components/common/Pagination.vue'
 import RowActionMenu from '../components/common/RowActionMenu.vue'
 import AnswerSheetRowsModal from '../components/answerSheets/AnswerSheetRowsModal.vue'
+import { useProgramsStore } from '../stores/programs'
+import { courseLabel } from '../utils/course'
+import { ordinal } from '../utils/ordinal'
+import { formatDateTime } from '../utils/date'
+
+// Program names display as "Name (Label)" — see stores/programs.js.
+const programsStore = useProgramsStore()
+programsStore.load().catch(() => {})
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -24,10 +32,15 @@ const pagination = reactive({ current_page: 1, per_page: 20, total: 0, last_page
 
 const search = ref('')
 const courseFilter = ref('') // '' | course id
+const departmentFilter = ref('') // '' | department id
 const examTermFilter = ref('') // '' | exam term id
 const examTypeFilter = ref('') // '' | exam type id
 const semesterFilter = ref('') // '' | 1-12
 const statusFilter = ref('') // '' | 'uploaded' | 'empty'
+// Picks the right empty-state message ("nothing matches" vs "nothing yet").
+const hasActiveFilters = computed(() =>
+  !!(search.value || courseFilter.value || departmentFilter.value || examTermFilter.value || examTypeFilter.value || semesterFilter.value || statusFilter.value),
+)
 
 async function fetchMappings(page = 1) {
   loading.value = true
@@ -36,6 +49,7 @@ async function fetchMappings(page = 1) {
     const params = { page, per_page: pagination.per_page }
     if (search.value) params.search = search.value
     if (courseFilter.value) params.course_id = courseFilter.value
+    if (departmentFilter.value) params.department_id = departmentFilter.value
     if (examTermFilter.value) params.exam_term_id = examTermFilter.value
     if (examTypeFilter.value) params.exam_type_id = examTypeFilter.value
     if (semesterFilter.value) params.semester = semesterFilter.value
@@ -65,19 +79,22 @@ function goToPage(page) {
 const availableCourses = ref([])
 const availableExamTerms = ref([])
 const availableExamTypes = ref([])
+const availableDepartments = ref([])
 async function loadFilterOptions() {
   try {
-    const [coursesRes, examTermsRes, examTypesRes] = await Promise.all([
-      api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] } }),
+    const [coursesRes, examTermsRes, examTypesRes, departmentsRes] = await Promise.all([
+      api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code', 'type'] } }),
       api.get('/exam-terms', { params: { status: 'all', is_active: 'yes', table_fields: ['name'] } }),
       api.get('/exam-types', { params: { status: 'all', is_active: 'yes', table_fields: ['name'] } }),
+      api.get('/departments', { params: { status: 'all', table_fields: ['name', 'code'] } }),
     ])
     availableCourses.value = coursesRes.data.data.map((course) => ({
       ...course,
-      name: course.code ? `${course.name} (${course.code})` : course.name,
+      name: courseLabel(course.name, course.code, course.type),
     }))
     availableExamTerms.value = examTermsRes.data.data
     availableExamTypes.value = examTypesRes.data.data
+    availableDepartments.value = departmentsRes.data.data.map((d) => ({ ...d, name: d.code ? `${d.name} (${d.code})` : d.name }))
   } catch {
     // Non-fatal — the course/exam term/exam type filters just stay empty; search still works.
   }
@@ -99,6 +116,7 @@ function applyFilters() {
 }
 function resetFilters() {
   courseFilter.value = ''
+  departmentFilter.value = ''
   examTermFilter.value = ''
   examTypeFilter.value = ''
   semesterFilter.value = ''
@@ -222,6 +240,19 @@ onMounted(async () => {
                 </div>
               </div>
               <div class="flex flex-col gap-1">
+                <label class="text-[13px] text-label">Department</label>
+                <div class="relative">
+                  <select
+                    v-model="departmentFilter"
+                    class="appearance-none w-full h-8 pl-3 pr-9 rounded-xl bg-input-bg text-[13px] text-gray-800 outline-none border border-input-border focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 transition cursor-pointer"
+                  >
+                    <option value="">All Departments</option>
+                    <option v-for="department in availableDepartments" :key="department.id" :value="department.id">{{ department.name }}</option>
+                  </select>
+                  <svg class="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9" /></svg>
+                </div>
+              </div>
+              <div class="flex flex-col gap-1">
                 <label class="text-[13px] text-label">Exam Term</label>
                 <div class="relative">
                   <select
@@ -285,29 +316,28 @@ onMounted(async () => {
     <!-- Table -->
     <section class="overflow-hidden rounded-2xl shadow-panel">
       <div class="overflow-x-auto">
-        <table class="w-full min-w-[1280px] text-left">
+        <table class="w-full min-w-[1000px] text-left">
           <thead>
-            <tr class="bg-subject-header text-white text-[12px] font-medium">
+            <tr class="whitespace-nowrap bg-subject-header text-white text-[12px] font-medium">
               <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
-              <th class="px-4 py-1.5 font-medium">Program</th>
-              <th class="px-4 py-1.5 font-medium">Question Paper</th>
-              <th class="px-4 py-1.5 font-medium">Exam Term</th>
-              <th class="px-4 py-1.5 font-medium">Exam Type</th>
-              <th class="px-4 py-1.5 font-medium">Semester</th>
-              <th class="px-4 py-1.5 font-medium">Packet Code</th>
-              <th class="px-4 py-1.5 font-medium">Answer Sheets</th>
-              <th class="px-4 py-1.5 font-medium">Uploaded By</th>
+              <th class="px-4 py-1.5 font-medium" title="Program, Question Paper and Department">Program / Paper / Dept</th>
+              <th class="px-4 py-1.5 font-medium">Exam Term / Type</th>
+              <th class="px-4 py-1.5 font-medium" title="Semester">Sem</th>
+              <th class="px-4 py-1.5 font-medium whitespace-nowrap" title="Packet Code">Pkt Code</th>
+              <th class="px-4 py-1.5 font-medium">Ans Sheets</th>
+              <th class="px-4 py-1.5 font-medium whitespace-nowrap">Uploaded By / At</th>
               <th class="px-4 py-1.5 font-medium">Status</th>
               <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('answer-sheet-view')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
             <tr v-if="loading">
-              <td colspan="11" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
+              <td colspan="9" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
             </tr>
             <tr v-else-if="!mappings.length">
-              <td colspan="11" class="px-4 py-10 text-center text-sm text-muted">
-                No answer sheets uploaded yet. Click "Upload Answer Sheet" to get started.
+              <td colspan="9" class="px-4 py-10 text-center text-sm text-muted">
+                <template v-if="hasActiveFilters">No packets match your search or filters.</template>
+                <template v-else>No answer sheets uploaded yet. Click "Upload Answer Sheet" to get started.</template>
               </td>
             </tr>
             <tr
@@ -321,17 +351,38 @@ onMounted(async () => {
                   # {{ (pagination.current_page - 1) * pagination.per_page + index + 1 }}
                 </span>
               </td>
-              <td class="px-4 py-1">{{ mapping.program_name || '—' }}</td>
-              <td class="px-4 py-1">
-                {{ mapping.course_name || '—' }}
-                <span v-if="mapping.exam_year" class="text-muted">— {{ mapping.exam_year }}</span>
+              <!-- Program, Paper and Dept — each labelled, labels and values lined up. -->
+              <td class="px-4 py-1.5">
+                <div class="grid grid-cols-[auto_auto_minmax(0,1fr)] gap-x-1.5 gap-y-0.5 text-[12px] leading-snug">
+                  <span class="text-muted">Prog.</span><span class="text-muted">:</span>
+                  <span class="font-medium text-gray-900">{{ programsStore.display(mapping.program_name) || '—' }}</span>
+                  <span class="text-muted">Paper</span><span class="text-muted">:</span>
+                  <span>{{ mapping.course_name ? courseLabel(mapping.course_name, mapping.course_code, mapping.course_type) : '—' }}<span v-if="mapping.exam_year" class="text-muted"> — {{ mapping.exam_year }}</span></span>
+                  <span class="text-muted">Dept.</span><span class="text-muted">:</span>
+                  <span>{{ mapping.department_name || '—' }}</span>
+                </div>
               </td>
-              <td class="px-4 py-1">{{ mapping.exam_term_name || '—' }}</td>
-              <td class="px-4 py-1">{{ mapping.exam_type_name || '—' }}</td>
-              <td class="px-4 py-1">{{ mapping.semester }}</td>
+              <!-- Exam Term with the Exam Type below it. -->
+              <td class="px-4 py-1.5">
+                <p class="leading-snug">{{ mapping.exam_term_name || '—' }}</p>
+                <p class="mt-0.5 text-[11px] text-muted leading-snug">{{ mapping.exam_type_name || '—' }}</p>
+              </td>
+              <td class="px-4 py-1">{{ ordinal(mapping.semester) }}</td>
               <td class="px-4 py-1 font-semibold">{{ mapping.packet_code }}</td>
-              <td class="px-4 py-1">{{ mapping.answer_sheet_count }}</td>
-              <td class="px-4 py-1">{{ mapping.created_by_name || '—' }}</td>
+              <!-- Total sheets, with how many still wait to be assigned below. -->
+              <td class="px-4 py-1.5 whitespace-nowrap">
+                <div class="inline-grid grid-cols-[auto_auto_auto] gap-x-1.5 gap-y-0.5 text-[12px] leading-snug">
+                  <span class="text-muted">Total</span><span class="text-muted">:</span>
+                  <span class="font-semibold text-gray-900">{{ mapping.answer_sheet_count }}</span>
+                  <span class="text-muted">Pending to assign</span><span class="text-muted">:</span>
+                  <span class="font-semibold" :class="mapping.pending_answer_sheet_count > 0 ? 'text-amber-600' : 'text-gray-900'">{{ mapping.pending_answer_sheet_count ?? 0 }}</span>
+                </div>
+              </td>
+              <!-- Who uploaded the packet, with when below. -->
+              <td class="px-4 py-1.5 whitespace-nowrap">
+                <p class="leading-snug">{{ mapping.created_by_name || '—' }}</p>
+                <p class="mt-0.5 text-[11px] text-muted leading-snug">{{ formatDateTime(mapping.created_at) }}</p>
+              </td>
               <td class="px-4 py-1">
                 <span
                   class="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold"

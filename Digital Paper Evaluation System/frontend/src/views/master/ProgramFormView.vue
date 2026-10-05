@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import api from '../../utils/api'
 import SearchableSelect from '../../components/common/SearchableSelect.vue'
 import { useToast } from '../../composables/useToast'
+import { useProgramsStore } from '../../stores/programs'
 
 const route = useRoute()
 const router = useRouter()
@@ -14,6 +15,7 @@ const isEdit = computed(() => !!programId.value)
 
 const form = reactive({
   name: '',
+  label: '',
   department_id: '',
   code: '',
   course_ids: [],
@@ -81,7 +83,11 @@ function highlightMatch(text) {
 function courseLabelHtml(course) {
   const name = highlightMatch(course.name)
   const code = course.code ? ` <span class="text-muted">(${highlightMatch(course.code)})</span>` : ''
-  return name + code
+  // Type as a small badge so it's easy to spot next to the name and code.
+  const type = course.type
+    ? ` <span class="ml-1 inline-flex items-center rounded bg-soft text-brand-blue px-1.5 py-px text-[10.5px] font-semibold align-middle">${highlightMatch(course.type)}</span>`
+    : ''
+  return name + code + type
 }
 
 async function loadCourses() {
@@ -89,7 +95,7 @@ async function loadCourses() {
   coursesError.value = ''
   try {
     const res = await api.get('/courses', {
-      params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] },
+      params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code', 'type'] },
     })
     // ?status=all (+ ?table_fields=…) returns a flat array in `data`, not
     // the paginated { items, pagination } shape the default listing uses —
@@ -104,21 +110,33 @@ async function loadCourses() {
 
 const fieldErrors = reactive({
   name: '',
+  label: '',
   department_id: '',
   code: '',
   course_ids: '',
 })
 // Order matters — the first of these (in this order) that has an error is
 // the one that gets focused after a failed validate()/submit.
-const FIELD_ORDER = ['name', 'department_id', 'code', 'course_ids']
+const FIELD_ORDER = ['name', 'label', 'department_id', 'code', 'course_ids']
 const fieldRefs = {
   name: ref(null),
+  label: ref(null),
   department_id: ref(null),
   code: ref(null),
   course_ids: ref(null),
 }
 
+const COMBO_FIELDS = ['name', 'code', 'label']
+
 function clearFieldError(field) {
+  // Changing any of Name / Code / Label resolves a combined-duplicate error
+  // on all three at once.
+  const message = fieldErrors[field]
+  if (message && COMBO_FIELDS.includes(field)) {
+    COMBO_FIELDS.forEach((key) => {
+      if (fieldErrors[key] === message) fieldErrors[key] = ''
+    })
+  }
   fieldErrors[field] = ''
 }
 
@@ -140,6 +158,10 @@ async function loadProgram() {
     const res = await api.get(`/programs/${programId.value}`)
     const program = res.data.data
     form.name = program.name
+    form.label = program.label || ''
+    // Programs created before Label existed have none yet — it's required
+    // now, so point that out up front rather than only on Save.
+    if (!form.label) fieldErrors.label = 'This program has no label yet — please add one (e.g. UG, PG).'
     form.department_id = program.department_id || ''
     form.code = program.code || ''
     form.course_ids = (program.courses || []).map((c) => c.id)
@@ -167,6 +189,12 @@ onMounted(() => {
 // Applies the backend's per-field validation errors (422 → { errors: {
 // field: [messages] } }) the same way client-side validation does — under
 // the matching field, red border and all — instead of one generic banner.
+// The combined Name + Code + Label duplicate error comes back on all three
+// fields — show its text once (under Name) and just outline the other two.
+function showFieldMessage(field) {
+  return !!fieldErrors[field] && (field === 'name' || fieldErrors[field] !== fieldErrors.name)
+}
+
 function applyServerErrors(err) {
   const data = err.response?.data
   if (data?.errors) {
@@ -186,6 +214,8 @@ function applyServerErrors(err) {
 // instead of a browser validation bubble, like the rest of this app's forms.
 function validate() {
   if (!form.name.trim()) fieldErrors.name = 'Name is required.'
+  if (!form.label.trim()) fieldErrors.label = 'Label is required.'
+  else if (form.label.trim().length > 20) fieldErrors.label = 'Label may not be longer than 20 characters.'
   if (!form.department_id) fieldErrors.department_id = 'Department is required.'
   if (!form.code.trim()) fieldErrors.code = 'Code is required.'
   return FIELD_ORDER.every((key) => !fieldErrors[key])
@@ -210,6 +240,7 @@ async function submitForm() {
     }
     router.push({ name: 'master-programs' })
     toast.success(isEdit.value ? 'Program updated successfully.' : 'Program created successfully.')
+    useProgramsStore().loaded = false // other screens re-read program labels
   } catch (err) {
     applyServerErrors(err)
   } finally {
@@ -260,7 +291,9 @@ function cancel() {
       <form v-else class="space-y-4" @submit.prevent="submitForm">
         <section class="bg-white rounded-[28px] shadow-card p-4 sm:p-5">
           <h2 class="text-[16px] sm:text-[18px] font-semibold text-gray-900 mb-1">Program Details</h2>
-          <p class="text-[13px] text-muted mb-3">Name, Department and Code are required. Code must be unique.</p>
+          <p class="text-[13px] text-muted mb-3">
+            Name, Label, Department and Code are required. The combination of Name, Code and Label must be unique.
+          </p>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div class="flex flex-col gap-1.5">
@@ -277,6 +310,21 @@ function cancel() {
                 :class="fieldErrors.name ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
               />
               <p v-if="fieldErrors.name" class="text-[12px] text-brand">{{ fieldErrors.name }}</p>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label for="label" class="text-[13px] text-label">Label <span class="text-brand">*</span></label>
+              <input
+                id="label"
+                :ref="(el) => (fieldRefs.label.value = el)"
+                v-model="form.label"
+                type="text"
+                maxlength="20"
+                placeholder="e.g. UG, PG"
+                @input="clearFieldError('label')"
+                class="w-full h-10 px-3 rounded-xl bg-input-bg text-sm text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition"
+                :class="fieldErrors.label ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
+              />
+              <p v-if="showFieldMessage('label')" class="text-[12px] text-brand">{{ fieldErrors.label }}</p>
             </div>
             <div class="flex flex-col gap-1.5">
               <label for="department" class="text-[13px] text-label">Department <span class="text-brand">*</span></label>
@@ -306,7 +354,7 @@ function cancel() {
                 class="w-full h-10 px-3 rounded-xl bg-input-bg text-sm text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition"
                 :class="fieldErrors.code ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
               />
-              <p v-if="fieldErrors.code" class="text-[12px] text-brand">{{ fieldErrors.code }}</p>
+              <p v-if="showFieldMessage('code')" class="text-[12px] text-brand">{{ fieldErrors.code }}</p>
             </div>
           </div>
         </section>

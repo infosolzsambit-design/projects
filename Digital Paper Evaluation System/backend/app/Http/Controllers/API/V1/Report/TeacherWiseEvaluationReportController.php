@@ -12,8 +12,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 /**
@@ -56,7 +54,8 @@ class TeacherWiseEvaluationReportController extends Controller
 
         $html = view('reports.teacher-wise-evaluation', [
             'siteTitle' => $this->branding->resolve()['site_title'],
-            'logoDataUri' => $this->resolveLogoDataUri(),
+            'logoDataUri' => $this->branding->reportLogoDataUri(),
+            'organizationLogoDataUri' => $this->branding->organizationLogoDataUri(),
             'downloadedAt' => now()->format('d-m-Y h:i:s A'),
             'printedBy' => $request->user()->name,
             // Resolved once here rather than read off the first row —
@@ -91,49 +90,17 @@ class TeacherWiseEvaluationReportController extends Controller
         ]);
     }
 
-    /**
-     * The report's own header logo, inlined as a data: URI so the exported
-     * file is fully self-contained — an <img src="https://…"> would need
-     * the viewer to still be online (and CORS-friendly) at *open* time,
-     * which defeats the point of a downloaded report, and Excel's own
-     * HTML-as-.xls import doesn't reliably fetch remote images at all. A
-     * custom-uploaded logo lives on this same backend's own public disk
-     * (see MailBrandingService::resolve()'s own docblock on the two paths
-     * a logo_url can take) and is read straight off disk, no network
-     * round trip; the seeded default points at the *frontend's* own
-     * public/ folder instead, which this backend can't read directly, so
-     * that case falls back to the bundled copy at resources/images/
-     * report-logo.png — same image, just duplicated here for exactly
-     * this reason.
-     */
-    private function resolveLogoDataUri(): ?string
-    {
-        $logoPath = $this->branding->resolve()['logo_url'];
-
-        if ($logoPath && str_contains($logoPath, '/storage/')) {
-            $relative = Str::after($logoPath, '/storage/');
-            if (Storage::disk('public')->exists($relative)) {
-                $mime = Storage::disk('public')->mimeType($relative) ?: 'image/png';
-
-                return 'data:'.$mime.';base64,'.base64_encode(Storage::disk('public')->get($relative));
-            }
-        }
-
-        $fallback = resource_path('images/report-logo.png');
-
-        return is_file($fallback)
-            ? 'data:image/png;base64,'.base64_encode(file_get_contents($fallback))
-            : null;
-    }
 
     /**
-     * @return array{program_name: string, course_id: int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}
+     * @return array{program_name: string, course_id: int, department_id: ?int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}
      */
     private function validateFilters(Request $request): array
     {
         return $request->validate([
             'program_name' => ['required', 'string'],
             'course_id' => ['required', 'integer', Rule::exists('courses', 'id')->whereNull('deleted_at')],
+            // Optional — the packet's department (question_answer_sheet_mappings.department_id).
+            'department_id' => ['nullable', 'integer', Rule::exists('departments', 'id')->whereNull('deleted_at')],
             'exam_term_id' => ['required', 'integer', Rule::exists('exam_terms', 'id')->whereNull('deleted_at')],
             'exam_type_id' => ['required', 'integer', Rule::exists('exam_types', 'id')->whereNull('deleted_at')],
             'semester' => ['required', 'integer', 'min:1', 'max:12'],
@@ -146,7 +113,7 @@ class TeacherWiseEvaluationReportController extends Controller
     }
 
     /**
-     * @param  array{program_name: string, course_id: int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}  $filters
+     * @param  array{program_name: string, course_id: int, department_id: ?int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}  $filters
      * @return list<array<string, mixed>>
      */
     private function rows(array $filters): array
@@ -170,21 +137,26 @@ class TeacherWiseEvaluationReportController extends Controller
             ->where('m.semester', $filters['semester'])
             ->where('qp.exam_year', $filters['exam_year']);
 
+        if (! empty($filters['department_id'])) {
+            $query->where('m.department_id', $filters['department_id']);
+        }
+
         if (! empty($filters['teacher_id'])) {
             $query->where('answer_sheets.teacher_id', $filters['teacher_id']);
         }
 
         $rows = $query
-            ->groupBy('u.id', 'u.name', 'td.emp_code', 'u.phone_no', 'c.name', 'c.code', 'et.name', 'm.id', 'm.semester')
+            ->groupBy('u.id', 'u.name', 'td.emp_code', 'u.phone_no', 'c.name', 'c.code', 'c.type', 'et.name', 'm.id', 'm.semester', 'm.department_name')
             ->orderBy('u.name')
             ->selectRaw(
                 'u.name as teacher_name, td.emp_code as emp_code, u.phone_no as mobile_no, '.
                 'et.name as exam_type_name, '.
-                'c.name as subject_name, c.code as subject_code, m.semester as semester, COUNT(*) as allotted_script, '.
+                'c.name as subject_name, c.code as subject_code, c.type as subject_type, m.semester as semester, COUNT(*) as allotted_script, '.
+                'm.department_name as department_name, '.
                 'MIN(answer_sheets.assigned_at) as allocation_date, '.
                 'SUM(CASE WHEN answer_sheets.marks IS NOT NULL THEN 1 ELSE 0 END) as total_evaluated, '.
                 'SUM(CASE WHEN answer_sheets.issue_master_id IS NOT NULL THEN 1 ELSE 0 END) as total_problem_script, '.
-                'SUM(CASE WHEN answer_sheets.marks IS NULL THEN 1 ELSE 0 END) as total_pending, '.
+                'SUM(CASE WHEN '.AnswerSheet::pendingSql().' THEN 1 ELSE 0 END) as total_pending, '.
                 'MIN(answer_sheets.evaluation_start_date) as evaluation_start_date, '.
                 'MAX(answer_sheets.evaluation_end_date) as evaluation_end_date',
             )
@@ -199,6 +171,9 @@ class TeacherWiseEvaluationReportController extends Controller
             'exam_type_name' => $row->exam_type_name,
             'subject_name' => $row->subject_name,
             'subject_code' => $row->subject_code,
+            'subject_type' => $row->subject_type,
+            // The packet's own department (chosen on Answer Sheet Upload).
+            'department_name' => $row->department_name,
             'semester' => (int) $row->semester,
             'allotted_script' => (int) $row->allotted_script,
             'allocation_date' => $formatDate($row->allocation_date),

@@ -51,14 +51,15 @@ class MyCompletedCourseController extends Controller
             ->whereNotNull('answer_sheets.marks')
             ->whereNull('qasm.deleted_at')
             ->whereNull('courses.deleted_at')
-            ->selectRaw('courses.id as course_id, courses.code as course_code, courses.name as course_name, COUNT(*) as completed_count')
-            ->groupBy('courses.id', 'courses.code', 'courses.name')
+            ->selectRaw('courses.id as course_id, courses.code as course_code, courses.name as course_name, courses.type as course_type, COUNT(*) as completed_count')
+            ->groupBy('courses.id', 'courses.code', 'courses.name', 'courses.type')
             ->orderBy('courses.name')
             ->get()
             ->map(fn ($row) => [
                 'course_id' => (int) $row->course_id,
                 'course_code' => $row->course_code,
                 'course_name' => $row->course_name,
+                'course_type' => $row->course_type,
                 'completed_count' => (int) $row->completed_count,
             ]);
 
@@ -78,7 +79,7 @@ class MyCompletedCourseController extends Controller
         $examType = $this->examTypeScope($request);
 
         $sheets = AnswerSheet::query()
-            ->with('mapping.questionPaper')
+            ->with(['mapping.questionPaper', 'issueMaster'])
             ->whereHas('mapping', function ($q) use ($data, $examYear, $examType) {
                 $q->where('course_id', $data['course_id']);
                 if ($examYear !== null) {

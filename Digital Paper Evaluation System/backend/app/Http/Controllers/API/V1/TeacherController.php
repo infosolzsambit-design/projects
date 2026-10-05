@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\API\V1;
 
 use App\Http\Controllers\Controller;
+use App\Services\UserNotificationService;
 use App\Http\Requests\Teacher\StoreTeacherRequest;
 use App\Http\Requests\Teacher\UpdateTeacherRequest;
 use App\Http\Resources\TeacherResource;
@@ -99,6 +100,12 @@ class TeacherController extends Controller
             ->withCount(['assignedAnswerSheets as assigned_answer_sheets_completed_count' => function ($q) use ($scopeToExamYear) {
                 $scopeToExamYear($q);
                 $q->whereNotNull('marks');
+            }])
+            // Same pending rule as the allocation modal (AnswerSheet::pendingSql():
+            // not evaluated and no open problem — allocated − completed − problem).
+            ->withCount(['assignedAnswerSheets as assigned_answer_sheets_pending_count' => function ($q) use ($scopeToExamYear) {
+                $scopeToExamYear($q);
+                $q->whereRaw(AnswerSheet::pendingSql());
             }])
             ->addSelect(['assigned_courses_count' => $this->allocatedCoursesCountSubquery($assignmentsExamYear, $assignmentsExamType)]);
 
@@ -297,7 +304,8 @@ class TeacherController extends Controller
      * teacher has any sheets in, not one row per sheet — a teacher's
      * sheets for the same course/exam are one line with a count, not a
      * wall of individual rows) — and, within each packet's row, further
-     * into how many of its sheets are completed vs in-draft vs untouched.
+     * into how many of its sheets are completed vs problem vs pending
+     * (see AnswerSheet::pendingSql() — they always add up to the total).
      */
     public function assignments(User $teacher): JsonResponse
     {
@@ -308,14 +316,12 @@ class TeacherController extends Controller
         $counts = AnswerSheet::query()
             ->select('question_answer_sheet_mapping_id')
             ->selectRaw('COUNT(*) as sheet_count')
-            // completed = marks actually submitted (see
-            // MyPendingCourseController::submitMarks()'s own "Complete");
-            // in_draft = not yet submitted, but has at least one autosave
-            // (see saveDraft() — draft_marks gets set the first time that
-            // fires, even to 0). Anything in neither bucket simply hasn't
-            // been opened yet.
+            // completed = marks submitted; problem = open issue (see
+            // Problem Course); pending = everything else not yet evaluated,
+            // drafts included — completed + problem + pending = sheets.
             ->selectRaw('SUM(CASE WHEN marks IS NOT NULL THEN 1 ELSE 0 END) as completed_count')
-            ->selectRaw('SUM(CASE WHEN marks IS NULL AND draft_marks IS NOT NULL THEN 1 ELSE 0 END) as draft_count')
+            ->selectRaw('SUM(CASE WHEN '.AnswerSheet::problemSql().' THEN 1 ELSE 0 END) as problem_count')
+            ->selectRaw('SUM(CASE WHEN '.AnswerSheet::pendingSql().' THEN 1 ELSE 0 END) as pending_count')
             ->where('teacher_id', $teacher->id)
             ->groupBy('question_answer_sheet_mapping_id')
             ->get();
@@ -325,15 +331,33 @@ class TeacherController extends Controller
             ->get()
             ->keyBy('id');
 
+        // Latest-assigned sheet per packet for this teacher (its assigned_at
+        // and assigner) — one row per packet.
+        $latest = $counts->pluck('question_answer_sheet_mapping_id')->mapWithKeys(fn ($mappingId) => [
+            $mappingId => AnswerSheet::with('assigner:id,name')
+                ->where('teacher_id', $teacher->id)
+                ->where('question_answer_sheet_mapping_id', $mappingId)
+                ->whereNotNull('assigned_at')
+                ->orderByDesc('assigned_at')->orderByDesc('id')
+                ->first(['id', 'assigned_at', 'assigned_by']),
+        ]);
+
         $breakdown = $counts
-            ->map(function ($row) use ($mappings) {
+            ->map(function ($row) use ($mappings, $latest) {
                 $mapping = $mappings->get($row->question_answer_sheet_mapping_id);
 
                 return [
                     'mapping_id' => $row->question_answer_sheet_mapping_id,
                     'program_name' => $mapping?->program_name,
+                    // The packet's own department (chosen on Answer Sheet Upload).
+                    'department_name' => $mapping?->department_name,
+                    // The most recent assignment of this packet's sheets to
+                    // this teacher — when, and by whom.
+                    'assigned_at' => $latest[$row->question_answer_sheet_mapping_id]?->assigned_at?->format('Y-m-d H:i:s'),
+                    'assigned_by_name' => $latest[$row->question_answer_sheet_mapping_id]?->assigner?->name,
                     'course_name' => $mapping?->course?->name,
                     'course_code' => $mapping?->course?->code,
+                    'course_type' => $mapping?->course?->type,
                     'semester' => $mapping?->semester,
                     'exam_term_name' => $mapping?->examTerm?->name,
                     'exam_type_name' => $mapping?->examType?->name,
@@ -341,7 +365,8 @@ class TeacherController extends Controller
                     'packet_code' => $mapping?->packet_code,
                     'sheet_count' => (int) $row->sheet_count,
                     'completed_count' => (int) $row->completed_count,
-                    'draft_count' => (int) $row->draft_count,
+                    'pending_count' => (int) $row->pending_count,
+                    'problem_count' => (int) $row->problem_count,
                 ];
             })
             ->sortByDesc('sheet_count')
@@ -408,10 +433,10 @@ class TeacherController extends Controller
             ->leftJoin('exam_types', 'exam_types.id', '=', 'question_answer_sheet_mappings.exam_type_id')
             ->where('answer_sheets.teacher_id', $teacher->id)
             ->whereNull('question_answer_sheet_mappings.deleted_at')
-            ->groupBy('courses.id', 'courses.name', 'courses.code')
+            ->groupBy('courses.id', 'courses.name', 'courses.code', 'courses.type')
             ->orderBy('courses.name')
             ->selectRaw(
-                'courses.id as course_id, courses.name as course_name, courses.code as course_code, '.
+                'courses.id as course_id, courses.name as course_name, courses.code as course_code, courses.type as course_type, '.
                 'GROUP_CONCAT(DISTINCT exam_types.name ORDER BY exam_types.name SEPARATOR ", ") as exam_type_names, '.
                 'COUNT(*) as sheet_count, SUM(CASE WHEN answer_sheets.marks IS NOT NULL THEN 1 ELSE 0 END) as completed_count',
             )
@@ -420,6 +445,7 @@ class TeacherController extends Controller
                 'course_id' => (int) $row->course_id,
                 'course_name' => $row->course_name,
                 'course_code' => $row->course_code,
+                'course_type' => $row->course_type,
                 'exam_type_names' => $row->exam_type_names,
                 'sheet_count' => (int) $row->sheet_count,
                 'completed_count' => (int) $row->completed_count,
@@ -491,6 +517,9 @@ class TeacherController extends Controller
             tags: ['assign-teacher', 'answer-sheet', 'reassign'],
         );
 
+        // In-app bell notification for each teacher who received sheets.
+        App::make(UserNotificationService::class)->answerSheetsReassigned($result['summary'], (int) $data['mapping_id'], $teacher->name);
+
         // Sent after the HTTP response goes out, not queued — same
         // reasoning as AssignTeacherController::store()'s own dispatch.
         $senderId = $request->user()->id;
@@ -510,6 +539,90 @@ class TeacherController extends Controller
         })->afterResponse();
 
         return $this->success($result, "Reassigned {$totalReassigned} answer sheet(s) across ".count($result['summary']).' teacher(s).');
+    }
+
+    /**
+     * GET /teachers/{teacher}/assignments/{mapping}/time-span — the
+     * evaluation window(s) this teacher's sheets in one packet currently
+     * have, grouped. Usually a single row, but a resolved Timing Issue (see
+     * NotificationController::resolveTimingIssue()) moves just that one
+     * sheet to its own window, so more than one is possible.
+     */
+    public function timeSpan(User $teacher, int $mapping): JsonResponse
+    {
+        if (! $teacher->teacherDetail) {
+            return $this->notFound('No teacher found.');
+        }
+
+        $windows = AnswerSheet::query()
+            ->where('teacher_id', $teacher->id)
+            ->where('question_answer_sheet_mapping_id', $mapping)
+            ->select('evaluation_start_date', 'evaluation_end_date', 'evaluation_time_per_sheet')
+            ->selectRaw('COUNT(*) as sheet_count')
+            ->groupBy('evaluation_start_date', 'evaluation_end_date', 'evaluation_time_per_sheet')
+            ->orderByDesc('sheet_count')
+            ->get()
+            ->map(fn ($row) => [
+                'evaluation_start_date' => $row->evaluation_start_date?->format('Y-m-d H:i'),
+                'evaluation_end_date' => $row->evaluation_end_date?->format('Y-m-d H:i'),
+                'evaluation_time_per_sheet' => $row->evaluation_time_per_sheet,
+                'sheet_count' => (int) $row->sheet_count,
+            ]);
+
+        if ($windows->isEmpty()) {
+            return $this->notFound('This teacher has no answer sheets in this packet.');
+        }
+
+        return $this->success([
+            'total' => (int) $windows->sum('sheet_count'),
+            'windows' => $windows,
+        ], 'Evaluation time span fetched successfully.');
+    }
+
+    /**
+     * PUT /teachers/{teacher}/assignments/{mapping}/time-span — sets one
+     * new evaluation window (and optional per-sheet time limit) on every
+     * one of this teacher's sheets in the packet.
+     */
+    public function updateTimeSpan(Request $request, User $teacher, int $mapping): JsonResponse
+    {
+        if (! $teacher->teacherDetail) {
+            return $this->notFound('No teacher found.');
+        }
+
+        // Same rules as AssignTeacherController::store()'s own window.
+        $data = $request->validate([
+            'evaluation_start_date' => ['required', 'date'],
+            'evaluation_end_date' => ['required', 'date', 'after_or_equal:evaluation_start_date'],
+            'evaluation_time_per_sheet' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $sheets = AnswerSheet::query()
+            ->where('teacher_id', $teacher->id)
+            ->where('question_answer_sheet_mapping_id', $mapping);
+
+        $count = (clone $sheets)->count();
+        if ($count === 0) {
+            return $this->notFound('This teacher has no answer sheets in this packet.');
+        }
+
+        $sheets->update([
+            'evaluation_start_date' => $data['evaluation_start_date'],
+            'evaluation_end_date' => $data['evaluation_end_date'],
+            'evaluation_time_per_sheet' => $data['evaluation_time_per_sheet'] ?? null,
+            // A bulk query update skips HasUserstamps' model events.
+            'updated_by' => $request->user()->id,
+        ]);
+
+        $this->auditLog->log(
+            event: 'evaluation-time-span-updated',
+            module: 'Assign Teacher',
+            description: "Updated the evaluation time span of {$count} answer sheet(s) for {$teacher->name}.",
+            newValues: ['mapping_id' => $mapping, 'teacher_id' => $teacher->id] + $data,
+            tags: ['assign-teacher', 'answer-sheet', 'time-span'],
+        );
+
+        return $this->success(['updated_count' => $count], "Updated the time span of {$count} answer sheet(s).");
     }
 
     public function update(UpdateTeacherRequest $request, User $teacher): JsonResponse

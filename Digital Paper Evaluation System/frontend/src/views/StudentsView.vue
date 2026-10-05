@@ -7,6 +7,11 @@ import { useConfirm } from '../composables/useConfirm'
 import { useToast } from '../composables/useToast'
 import Pagination from '../components/common/Pagination.vue'
 import RowActionMenu from '../components/common/RowActionMenu.vue'
+import { useProgramsStore } from '../stores/programs'
+
+// Program names display as "Name (Label)" — see stores/programs.js.
+const programsStore = useProgramsStore()
+programsStore.load().catch(() => {})
 
 const router = useRouter()
 const { confirmDialog } = useConfirm()
@@ -290,7 +295,7 @@ onMounted(async () => {
               <td class="px-4 py-1 font-semibold">{{ student.name }}</td>
               <td class="px-4 py-1">{{ student.roll_no || '—' }}</td>
               <td class="px-4 py-1">{{ formatSemester(student.semester) }}</td>
-              <td class="px-4 py-1">{{ student.program_name || '—' }}</td>
+              <td class="px-4 py-1">{{ programsStore.display(student.program_name) || '—' }}</td>
               <td v-if="authStore.can('student-status-change')" class="px-4 py-1" @click.stop>
                 <button
                   type="button"

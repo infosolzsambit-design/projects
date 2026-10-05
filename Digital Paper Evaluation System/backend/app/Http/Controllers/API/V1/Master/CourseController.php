@@ -29,7 +29,7 @@ class CourseController extends Controller
      *      - ?table_fields=["name","code"]  → trims the SELECT to just those columns (+id)
      *      - ?is_active=yes|no    → filter by the course's own active/inactive flag
      *  - default                  → paginated, searchable listing
-     *      - ?search=, ?name=, ?code=, ?is_active=yes|no, ?sort_by=, ?sort_by_field=, ?per_page=
+     *      - ?search=, ?name=, ?code=, ?type=, ?is_active=yes|no, ?sort_by=, ?sort_by_field=, ?per_page=
      *      - ?table_fields=["name","code"]  → same column-trimming as the "all" branch
      */
     public function index(Request $request): JsonResponse
@@ -64,14 +64,15 @@ class CourseController extends Controller
         }
 
         // Searches every column the list actually shows (see
-        // CoursesView.vue's table: Name, Code, Status) — "Active"/
+        // CoursesView.vue's table: Name, Code, Type, Status) — "Active"/
         // "Inactive" match the boolean `status` column since that's how
         // it's displayed, not literal stored text.
         if ($request->filled('search')) {
             $search = $request->string('search')->toString();
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('code', 'like', "%{$search}%");
+                    ->orWhere('code', 'like', "%{$search}%")
+                    ->orWhere('type', 'like', "%{$search}%");
                 // Prefix match, not "contains" — "active" is itself a
                 // substring of "inactive" ("in-active"), so a naive
                 // stripos() on either word would make searching "active"
@@ -92,6 +93,10 @@ class CourseController extends Controller
 
         if ($request->filled('code')) {
             $query->where('code', 'like', '%'.$request->string('code')->toString().'%');
+        }
+
+        if ($request->filled('type')) {
+            $query->where('type', 'like', '%'.$request->string('type')->toString().'%');
         }
 
         // Trimming the SELECT is one of the cheapest wins for fetch speed —
@@ -155,7 +160,7 @@ class CourseController extends Controller
 
     private function applySorting(Builder $query, Request $request): void
     {
-        $sortField = in_array($request->input('sort_by_field'), ['id', 'name', 'code', 'status', 'created_at'], true)
+        $sortField = in_array($request->input('sort_by_field'), ['id', 'name', 'code', 'type', 'status', 'created_at'], true)
             ? $request->input('sort_by_field')
             : 'id';
         $sortDir = Str::lower((string) $request->input('sort_by')) === 'asc' ? 'asc' : 'desc';
@@ -203,6 +208,12 @@ class CourseController extends Controller
 
     public function restore(Course $course): JsonResponse
     {
+        // A new course may have taken the same name + code + type while
+        // this one was deleted — restoring it would make a duplicate.
+        if (Course::hasDuplicate($course->name, $course->code, $course->type, $course->id)) {
+            return $this->error('Cannot restore: an active course with the same Name, Code and Type already exists.', 422);
+        }
+
         $course->restore();
 
         return $this->success(new CourseResource($course), 'Course restored successfully.');

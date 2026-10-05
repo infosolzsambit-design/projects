@@ -76,21 +76,19 @@ class AnswerSheetResource extends JsonResource
             // shown as the "Resolved" flag's tooltip on MyPendingCoursesView.vue.
             'issue_admin_remarks' => $this->issue_admin_remarks,
             'issue_fixed_at' => $this->issue_fixed_at?->format('Y-m-d H:i'),
-            // MyPendingCoursesView.vue's own "Evaluate"/"Continue Evaluate"
-            // button reads this to decide whether to disable itself — an
-            // *open* Printing Issue means the physical sheet itself needs
-            // fixing before anyone can evaluate it, but an open Timing
-            // Issue doesn't block anything (the teacher can keep working
-            // against the existing schedule while an admin sorts the new
-            // one out). Resolved by id (config('issues.printing_issue_id')),
-            // never by matching a name string, and computed here so the
-            // frontend never needs to know either id itself.
-            'blocks_evaluation' => $this->issue_status === 'open'
-                && (int) $this->issue_master_id === (int) config('issues.printing_issue_id'),
+            // Any open issue (printing or timing) moves the sheet to the
+            // teacher's Problem Course list and blocks evaluation until an
+            // admin resolves it (see AnswerSheet::hasOpenIssue()).
+            'blocks_evaluation' => $this->resource->hasOpenIssue(),
             'branch_code' => $this->branch_code,
             'branch_name' => $this->branch_name,
             'subject_code' => $this->subject_code,
             'subject_name' => $this->subject_name,
+            // The packet's real course (name + code + type) — only when the
+            // caller loaded mapping.course (e.g. the evaluation screen).
+            'course_name' => $this->when($this->relationLoaded('mapping') && $this->mapping?->relationLoaded('course'), fn () => $this->mapping?->course?->name),
+            'course_code' => $this->when($this->relationLoaded('mapping') && $this->mapping?->relationLoaded('course'), fn () => $this->mapping?->course?->code),
+            'course_type' => $this->when($this->relationLoaded('mapping') && $this->mapping?->relationLoaded('course'), fn () => $this->mapping?->course?->type),
             'semester' => $this->semester,
             'subject_barcode' => $this->subject_barcode,
             'fi_code' => $this->fi_code,

@@ -13,7 +13,6 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
@@ -65,13 +64,18 @@ class AnswerBookTopSheetReportController extends Controller
         return $this->success(['rows' => $this->rows($filters)], 'Answer book / top sheet report fetched successfully.');
     }
 
-    public function view(AnswerSheet $answerSheet): Response
+    /**
+     * ?page_numbers=0 leaves off the "Page X of Y" footer — used when the top
+     * sheet is the cover page of Reset Evaluation's "Download Evaluated
+     * File", where it's merged in front of the answer sheet.
+     */
+    public function view(Request $request, AnswerSheet $answerSheet): Response
     {
         if ($answerSheet->marks === null) {
             abort(422, 'This answer sheet has not been evaluated yet — there is no top sheet to view.');
         }
 
-        $html = $this->renderSheets([$answerSheet]);
+        $html = $this->renderSheets([$answerSheet], pageNumbers: $request->boolean('page_numbers', true));
 
         return Pdf::loadHTML($html)->setPaper('a4', 'portrait')->setOption('isPhpEnabled', true)
             ->stream('top_sheet_'.($answerSheet->roll_no ?: $answerSheet->id).'.pdf');
@@ -134,47 +138,30 @@ class AnswerBookTopSheetReportController extends Controller
     /**
      * @param  list<AnswerSheet>  $sheets
      */
-    private function renderSheets(array $sheets): string
+    private function renderSheets(array $sheets, bool $pageNumbers = true): string
     {
         return view('reports.answer-book-top-sheet', [
+            'pageNumbers' => $pageNumbers,
+            // When this PDF was generated — printed on every sheet.
+            'printedAt' => now()->format('d-m-Y h:i A'),
             'siteTitle' => $this->branding->resolve()['site_title'],
-            'logoDataUri' => $this->resolveLogoDataUri(),
+            'logoDataUri' => $this->branding->reportLogoDataUri(),
+            'organizationLogoDataUri' => $this->branding->organizationLogoDataUri(),
             'sheets' => collect($sheets)->map(fn (AnswerSheet $sheet) => $this->sheetData($sheet))->all(),
         ])->render();
     }
 
-    /**
-     * Same reasoning/fallback chain as TeacherWiseEvaluationReportController's
-     * own resolveLogoDataUri() — see that method's docblock.
-     */
-    private function resolveLogoDataUri(): ?string
-    {
-        $logoPath = $this->branding->resolve()['logo_url'];
-
-        if ($logoPath && str_contains($logoPath, '/storage/')) {
-            $relative = Str::after($logoPath, '/storage/');
-            if (Storage::disk('public')->exists($relative)) {
-                $mime = Storage::disk('public')->mimeType($relative) ?: 'image/png';
-
-                return 'data:'.$mime.';base64,'.base64_encode(Storage::disk('public')->get($relative));
-            }
-        }
-
-        $fallback = resource_path('images/report-logo.png');
-
-        return is_file($fallback)
-            ? 'data:image/png;base64,'.base64_encode(file_get_contents($fallback))
-            : null;
-    }
 
     /**
-     * @return array{program_name: string, course_id: int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}
+     * @return array{program_name: string, course_id: int, department_id: ?int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}
      */
     private function validateFilters(Request $request): array
     {
         return $request->validate([
             'program_name' => ['required', 'string'],
             'course_id' => ['required', 'integer', Rule::exists('courses', 'id')->whereNull('deleted_at')],
+            // Optional — the packet's department (question_answer_sheet_mappings.department_id).
+            'department_id' => ['nullable', 'integer', Rule::exists('departments', 'id')->whereNull('deleted_at')],
             'exam_term_id' => ['required', 'integer', Rule::exists('exam_terms', 'id')->whereNull('deleted_at')],
             'exam_type_id' => ['required', 'integer', Rule::exists('exam_types', 'id')->whereNull('deleted_at')],
             'semester' => ['required', 'integer', 'min:1', 'max:12'],
@@ -184,7 +171,7 @@ class AnswerBookTopSheetReportController extends Controller
     }
 
     /**
-     * @param  array{program_name: string, course_id: int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}  $filters
+     * @param  array{program_name: string, course_id: int, department_id: ?int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}  $filters
      */
     private function baseQuery(array $filters): Builder
     {
@@ -199,6 +186,10 @@ class AnswerBookTopSheetReportController extends Controller
             ->where('m.semester', $filters['semester'])
             ->where('qp.exam_year', $filters['exam_year']);
 
+        if (! empty($filters['department_id'])) {
+            $query->where('m.department_id', $filters['department_id']);
+        }
+
         if (! empty($filters['teacher_id'])) {
             $query->where('answer_sheets.teacher_id', $filters['teacher_id']);
         }
@@ -207,14 +198,25 @@ class AnswerBookTopSheetReportController extends Controller
     }
 
     /**
-     * @param  array{program_name: string, course_id: int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}  $filters
+     * @param  array{program_name: string, course_id: int, department_id: ?int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}  $filters
      * @return list<array<string, mixed>>
      */
     private function rows(array $filters): array
     {
         $rows = $this->baseQuery($filters)
             ->leftJoin('courses as c', 'c.id', '=', 'm.course_id')
-            ->select('answer_sheets.*', 'c.name as course_name', 'c.code as course_code')
+            ->leftJoin('users as u', 'u.id', '=', 'answer_sheets.teacher_id')
+            ->leftJoin('teacher_details as td', function ($join) {
+                $join->on('td.user_id', '=', 'u.id')->whereNull('td.deleted_at');
+            })
+            ->select(
+                'answer_sheets.*',
+                'c.name as course_name', 'c.code as course_code', 'c.type as course_type',
+                'u.name as teacher_name', 'u.email as teacher_email', 'u.phone_no as teacher_phone',
+                'td.emp_code as teacher_emp_code', 'td.designation as teacher_designation',
+                'm.department_name as department_name',
+                'qp.full_marks as full_marks',
+            )
             ->orderBy('answer_sheets.roll_no')
             ->get();
 
@@ -227,45 +229,69 @@ class AnswerBookTopSheetReportController extends Controller
             'script_code' => $row->subject_barcode ?: $row->barcode,
             'course_name' => $row->course_name ?? $row->subject_name,
             'course_code' => $row->course_code ?? $row->subject_code,
+            'course_type' => $row->course_type ?? null,
+            'department_name' => $row->department_name,
             'semester' => (int) $row->semester,
+            'full_marks' => $row->full_marks !== null ? (float) $row->full_marks : null,
             'marks' => $row->marks !== null ? (float) $row->marks : null,
             'evaluated' => $row->marks !== null,
+            'evaluated_by' => $row->teacher_name,
+            'evaluated_by_contact' => $row->teacher_name ? [
+                'name' => $row->teacher_name,
+                'emp_code' => $row->teacher_emp_code,
+                'designation' => $row->teacher_designation,
+                'email' => $row->teacher_email,
+                'phone_no' => $row->teacher_phone,
+            ] : null,
             'evaluated_at' => $row->evaluated_at ? Carbon::parse($row->evaluated_at)->format('d-m-Y h:i A') : null,
         ])->values()->all();
     }
 
     /**
-     * @param  array{program_name: string, course_id: int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}  $filters
+     * @param  array{program_name: string, course_id: int, department_id: ?int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}  $filters
      */
     private function evaluatedSheetsQuery(array $filters): Builder
     {
         return $this->baseQuery($filters)
             ->whereNotNull('answer_sheets.marks')
-            ->with(['mapping.course', 'mapping.examType', 'mapping.questionPaper'])
+            ->with(['mapping.course', 'mapping.examType', 'mapping.questionPaper', 'teacher.teacherDetail'])
             ->select('answer_sheets.*')
             ->orderBy('answer_sheets.roll_no');
     }
 
     /**
-     * The printed top sheet is deliberately anonymized — no roll/name/
-     * registration/packet identifies the student at all, only the
-     * physical script's own QR/barcode (see AnswerBookTopSheetReportView
-     * .vue's own results list, which drops the same identifying columns
-     * in favour of a QR Code one) — so only what the "top" identity block
-     * and the question grid actually print is computed here.
+     * Everything the printed top sheet shows: the student and exam identity
+     * block at the top, the question grid, and the evaluator block at the
+     * bottom (who evaluated it, their e-signature, and when).
      *
      * @return array<string, mixed>
      */
     private function sheetData(AnswerSheet $sheet): array
     {
-        $sheet->loadMissing(['mapping.course', 'mapping.examType', 'mapping.questionPaper']);
+        $sheet->loadMissing(['mapping.course', 'mapping.examType', 'mapping.questionPaper', 'teacher.teacherDetail']);
         $mapping = $sheet->mapping;
         $paper = $mapping?->questionPaper;
+        // The teacher who submitted the marks (a completed sheet can't be
+        // reassigned, so teacher_id is still the evaluator).
+        $teacher = $sheet->teacher;
+        $esign = $teacher?->teacherDetail?->esign;
 
         return [
+            'student_name' => $sheet->name,
+            'registration_no' => $sheet->registration_no,
+            // The packet's own department (chosen on Answer Sheet Upload).
+            'department_name' => $mapping?->department_name,
+            'evaluated_by' => $teacher?->name,
+            'evaluator_designation' => $teacher?->teacherDetail?->designation,
+            'evaluator_emp_code' => $teacher?->teacherDetail?->emp_code,
+            // Only an inline PNG/JPEG data URI is embedded — dompdf renders
+            // it directly, and nothing else stored there ends up in the PDF.
+            'evaluator_esign' => is_string($esign) && preg_match('#^data:image/(png|jpe?g);base64,#', $esign) ? $esign : null,
+            'evaluated_at' => $sheet->evaluated_at?->format('d-m-Y h:i A'),
             'script_code' => $sheet->subject_barcode ?: $sheet->barcode,
             'course_name' => $mapping?->course?->name ?? $sheet->subject_name,
             'course_code' => $mapping?->course?->code ?? $sheet->subject_code,
+            'course_type' => $mapping?->course?->type,
             'exam_type' => $mapping?->examType?->name,
             'full_marks' => $paper?->full_marks,
             'total_marks' => $sheet->marks !== null ? (float) $sheet->marks : null,

@@ -74,12 +74,16 @@ onMounted(() => nextTick(updateMasterMaxHeight))
 // as sub-items.
 const evaluateCourseItems = [
   { to: '/my-pending-courses', label: 'Pending Course', permission: 'my-pending-course-list' },
+  // No permission yet — to be added later.
+  { to: '/my-problem-courses', label: 'Problem Course', permission: 'my-problem-course-list'  },
   { to: '/my-completed-courses', label: 'Completed Course', permission: 'my-completed-course-list' },
 ]
-const visibleEvaluateCourseItems = computed(() => evaluateCourseItems.filter((item) => authStore.can(item.permission)))
+const visibleEvaluateCourseItems = computed(() =>
+  evaluateCourseItems.filter((item) => !item.permission || authStore.can(item.permission)),
+)
 
 const evaluateCourseActive = computed(
-  () => route.path.startsWith('/my-pending-courses') || route.path.startsWith('/my-completed-courses'),
+  () => ['/my-pending-courses', '/my-problem-courses', '/my-completed-courses'].some((p) => route.path.startsWith(p)),
 )
 const evaluateCourseOpen = ref(evaluateCourseActive.value)
 watchEffect(() => {
@@ -133,6 +137,9 @@ onMounted(() => nextTick(updateAssignTeacherMaxHeight))
 const reportItems = [
   { to: '/reports/teacher-wise-evaluation', label: 'Teacher Wise Report', permission: 'teacher-wise-evaluation-report' },
   { to: '/reports/answer-book-top-sheet', label: 'Answer Book Report', permission: 'answer-book-report' },
+  // No permission yet — to be added later.
+  { to: '/reports/problem-report', label: 'Problem Report' , permission: 'problem-report' },
+  { to: '/reports/pending-report', label: 'Pending Report' , permission: 'pending-report' },
 ]
 const visibleReportItems = computed(() => reportItems.filter((item) => !item.permission || authStore.can(item.permission)))
 
@@ -272,9 +279,9 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
         <span class="sidebar-label">Students</span>
       </RouterLink>
 
-      <RouterLink v-if="authStore.can('notification-list')" to="/notifications"
+      <RouterLink v-if="authStore.can('problem-list')" to="/problems"
         class="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
-        :class="isActive('/notifications', false) ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'">
+        :class="isActive('/problems', false) ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'">
         <span class="relative shrink-0">
           <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -285,7 +292,7 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
                enough to say "something needs attention". -->
           <span v-if="notificationsStore.unresolvedCount > 0" class="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-brand ring-2 ring-white/20"></span>
         </span>
-        <span class="sidebar-label flex-1">Notifications</span>
+        <span class="sidebar-label flex-1">Problems</span>
         <span
           v-if="notificationsStore.unresolvedCount > 0"
           class="sidebar-label inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-brand text-white text-[10px] font-semibold leading-none"
@@ -294,7 +301,7 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
         </span>
       </RouterLink>
 
-      <button v-if="authStore.can('my-pending-course-list') || authStore.can('my-completed-course-list')" type="button" :aria-expanded="evaluateCourseOpen" aria-controls="evaluate-course-submenu"
+      <button v-if="visibleEvaluateCourseItems.length" type="button" :aria-expanded="evaluateCourseOpen" aria-controls="evaluate-course-submenu"
         class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
         :class="evaluateCourseActive ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'"
         @click="evaluateCourseOpen = !evaluateCourseOpen">
@@ -371,7 +378,32 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
         </div>
       </div>
 
-      <button v-if="authStore.can('teacher-wise-evaluation-report') || authStore.can('answer-book-report')" type="button" :aria-expanded="reportOpen" aria-controls="report-submenu"
+      <!-- No permission yet — to be added later. -->
+      <RouterLink v-if="authStore.can('reset-evaluation')" to="/reset-evaluation"
+        class="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
+        :class="isActive('/reset-evaluation', false) ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'">
+        <svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="1 4 1 10 7 10" />
+          <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+        </svg>
+        <span class="sidebar-label">Reset Evaluation</span>
+      </RouterLink>
+      
+
+      <!-- No permission yet — to be added later. -->
+      <RouterLink v-if="authStore.can('generate-marksheet')" to="/generate-marksheet"
+        class="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
+        :class="isActive('/generate-marksheet', false) ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'">
+        <svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="8" y1="13" x2="16" y2="13" />
+          <line x1="8" y1="17" x2="13" y2="17" />
+        </svg>
+        <span class="sidebar-label">Generate Marksheet</span>
+      </RouterLink>
+
+      <button v-if="visibleReportItems.length" type="button" :aria-expanded="reportOpen" aria-controls="report-submenu"
         class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
         :class="reportActive ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'"
         @click="reportOpen = !reportOpen">

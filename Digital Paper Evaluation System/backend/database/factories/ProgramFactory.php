@@ -19,6 +19,7 @@ class ProgramFactory extends Factory
     {
         return [
             'name' => fake()->unique()->words(3, true),
+            'label' => fake()->randomElement(['UG', 'PG']),
             'department' => fake()->randomElement(['Science', 'Arts', 'Commerce', 'Engineering']),
             'code' => strtoupper(fake()->unique()->bothify('??-###')),
             'status' => true,

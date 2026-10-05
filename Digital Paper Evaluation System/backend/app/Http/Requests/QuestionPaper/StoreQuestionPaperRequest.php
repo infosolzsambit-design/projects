@@ -48,6 +48,9 @@ class StoreQuestionPaperRequest extends FormRequest
         return [
             'exam_year' => ['required', 'integer', 'digits:4', 'min:2000'],
             'course_id' => ['required', 'integer', Rule::exists('courses', 'id')->whereNull('deleted_at')],
+            // The departments this paper is tagged with — one or more, active only.
+            'department_ids' => ['required', 'array', 'min:1'],
+            'department_ids.*' => ['integer', 'distinct', Rule::exists('departments', 'id')->whereNull('deleted_at')->where('status', true)],
             'semester' => ['required', 'integer', 'min:1', 'max:12'],
             'exam_term_id' => ['required', 'integer', Rule::exists('exam_terms', 'id')->whereNull('deleted_at')],
             'full_marks' => ['nullable', 'integer', 'min:1'],

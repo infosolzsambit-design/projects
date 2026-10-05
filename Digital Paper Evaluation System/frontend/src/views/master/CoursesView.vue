@@ -253,16 +253,17 @@ onMounted(async () => {
               <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
               <th class="px-4 py-1.5 font-medium">Name</th>
               <th class="px-4 py-1.5 font-medium">Code</th>
+              <th class="px-4 py-1.5 font-medium">Type</th>
               <th class="px-4 py-1.5 font-medium" v-if="authStore.can('course-status-change')">Status</th>
               <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('course-edit') || authStore.can('course-delete')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
             <tr v-if="loading">
-              <td colspan="5" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
+              <td colspan="6" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
             </tr>
             <tr v-else-if="!courses.length">
-              <td colspan="5" class="px-4 py-8 text-center text-sm text-muted">No courses found.</td>
+              <td colspan="6" class="px-4 py-8 text-center text-sm text-muted">No courses found.</td>
             </tr>
             <tr v-for="(course, index) in courses" v-else :key="course.id"
               class="text-[12px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0">
@@ -274,6 +275,10 @@ onMounted(async () => {
               </td>
               <td class="px-4 py-1 font-semibold">{{ course.name }}</td>
               <td class="px-4 py-1">{{ course.code || '—' }}</td>
+              <td class="px-4 py-1">
+                <span v-if="course.type" class="inline-flex items-center rounded-md bg-soft text-brand-blue px-2 py-0.5 text-[11px] font-semibold">{{ course.type }}</span>
+                <span v-else class="text-muted" title="No type yet — edit this course to add one">—</span>
+              </td>
               <td v-if="authStore.can('course-status-change')" class="px-4 py-1" @click.stop>
                 <button type="button" role="switch" :aria-checked="course.status" :disabled="togglingId === course.id"
                   :title="course.status ? 'Click to deactivate' : 'Click to activate'"

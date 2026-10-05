@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AnswerSheet;
 use App\Models\Course;
+use App\Models\Department;
 use App\Models\ExamTerm;
 use App\Models\ExamType;
 use App\Models\QuestionAnswerSheetMapping;
@@ -125,6 +126,28 @@ class AnswerBookTopSheetReportControllerTest extends TestCase
         $this->assertNull($pending['marks']);
     }
 
+    public function test_index_filters_by_the_packet_department(): void
+    {
+        $this->actingUser();
+        $physics = Department::factory()->create();
+        $chemistry = Department::factory()->create();
+        ['mapping' => $inPhysics, 'filters' => $filters] = $this->searchableMapping(['department_id' => $physics->id, 'department_name' => $physics->name]);
+        $inChemistry = QuestionAnswerSheetMapping::factory()->create(
+            $inPhysics->only(['program_name', 'course_id', 'exam_term_id', 'exam_type_id', 'semester', 'question_paper_id'])
+            + ['department_id' => $chemistry->id, 'department_name' => $chemistry->name],
+        );
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $inPhysics->id, 'roll_no' => 'P001']);
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $inChemistry->id, 'roll_no' => 'C001']);
+
+        $this->withApiKey()->getJson('/api/v1/reports/answer-book-top-sheet?'.http_build_query($filters))
+            ->assertOk()->assertJsonCount(2, 'data.rows');
+
+        $this->withApiKey()->getJson('/api/v1/reports/answer-book-top-sheet?'.http_build_query($filters + ['department_id' => $physics->id]))
+            ->assertOk()
+            ->assertJsonCount(1, 'data.rows')
+            ->assertJsonPath('data.rows.0.roll_no', 'P001');
+    }
+
     public function test_index_excludes_sheets_outside_the_searched_exam_offering(): void
     {
         $this->actingUser();
@@ -157,6 +180,28 @@ class AnswerBookTopSheetReportControllerTest extends TestCase
         $response->assertOk();
         $this->assertStringContainsString('application/pdf', $response->headers->get('Content-Type'));
         $this->assertStringContainsString('inline', $response->headers->get('Content-Disposition'));
+    }
+
+    public function test_page_number_footer_can_be_left_off(): void
+    {
+        $render = fn (bool $pageNumbers) => view('reports.answer-book-top-sheet', [
+            'pageNumbers' => $pageNumbers, 'siteTitle' => 'CJ Paper Check', 'logoDataUri' => null, 'sheets' => [],
+        ])->render();
+
+        // The footer always prints the time; only "Page X of Y" is switched.
+        $this->assertStringContainsString('$showPageNumbers = true;', $render(true));
+        $this->assertStringContainsString('$showPageNumbers = false;', $render(false));
+        $this->assertStringContainsString('Printed Date & Time:', $render(false));
+    }
+
+    public function test_view_without_page_numbers_still_returns_a_pdf(): void
+    {
+        $this->actingUser();
+        $sheet = \App\Models\AnswerSheet::factory()->create(['marks' => 30]);
+
+        $this->withApiKey()->get("/api/v1/reports/answer-book-top-sheet/{$sheet->id}/view?page_numbers=0")
+            ->assertOk()
+            ->assertHeader('Content-Type', 'application/pdf');
     }
 
     public function test_view_rejects_a_sheet_that_has_not_been_evaluated_yet(): void

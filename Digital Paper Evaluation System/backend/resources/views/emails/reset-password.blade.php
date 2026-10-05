@@ -33,24 +33,13 @@
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F0F3F8;">
   <tr>
     <td align="center" style="padding:40px 16px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="cjpc-container" style="max-width:560px;">
-        <!-- Brand accent bar -->
-        <tr>
-          <td style="height:6px; line-height:6px; font-size:0; background-color:#2F56C0; background-image:linear-gradient(90deg,#E81B26,#2F56C0); border-radius:20px 20px 0 0;">&nbsp;</td>
-        </tr>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="cjpc-container" style="max-width:560px; border-radius:20px; overflow:hidden;">
+        <!-- Header: CJ logo left, Organization Logo centred (shared with the other emails) -->
+        @include('emails.partials.header')
 
         <!-- Card -->
         <tr>
           <td class="cjpc-card" style="background-color:#ffffff; padding:40px 44px 34px; border-radius:0 0 20px 20px; box-shadow:0 18px 50px rgba(47,86,192,0.10);">
-
-            <!-- Logo -->
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-              <tr>
-                <td align="center" style="padding-bottom:26px;">
-                  <img src="{{ $logoUrl }}" width="64" alt="CJ Paper Check" style="display:block; height:auto; border:0; outline:none; text-decoration:none;">
-                </td>
-              </tr>
-            </table>
 
             <h1 style="margin:0 0 18px; font-family:'Segoe UI',Helvetica,Arial,sans-serif; font-size:21px; line-height:28px; font-weight:700; color:#17181A; text-align:center;">
               Reset Your Password

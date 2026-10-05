@@ -26,8 +26,8 @@ class CourseBulkUploadTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/courses/bulk/validate', [
             'rows' => [
-                ['name' => 'Physics', 'code' => 'PHY101'],
-                ['name' => 'Chemistry', 'code' => 'CHEM101'],
+                ['name' => 'Physics', 'code' => 'PHY101', 'type' => 'Theory'],
+                ['name' => 'Chemistry', 'code' => 'CHEM101', 'type' => 'Theory'],
             ],
         ]);
 
@@ -41,7 +41,7 @@ class CourseBulkUploadTest extends TestCase
         $this->actingAdmin();
 
         $response = $this->withApiKey()->postJson('/api/v1/courses/bulk/validate', [
-            'rows' => [['name' => '', 'code' => 'X101']],
+            'rows' => [['name' => '', 'code' => 'X101', 'type' => 'Theory']],
         ]);
 
         $response->assertOk()->assertJsonPath('data.all_valid', false);
@@ -53,40 +53,61 @@ class CourseBulkUploadTest extends TestCase
         $this->actingAdmin();
 
         $response = $this->withApiKey()->postJson('/api/v1/courses/bulk/validate', [
-            'rows' => [['name' => 'Some Course', 'code' => '']],
+            'rows' => [['name' => 'Some Course', 'code' => '', 'type' => 'Theory']],
         ]);
 
         $response->assertOk()->assertJsonPath('data.all_valid', false);
         $this->assertSame('Code is required.', $response->json('data.rows.0.errors.code'));
     }
 
-    public function test_validate_flags_duplicate_code_within_the_same_upload(): void
+    public function test_validate_flags_a_blank_type(): void
+    {
+        $this->actingAdmin();
+
+        $response = $this->withApiKey()->postJson('/api/v1/courses/bulk/validate', [
+            'rows' => [['name' => 'Some Course', 'code' => 'X9', 'type' => '']],
+        ]);
+
+        $response->assertOk();
+        $this->assertSame('Type is required.', $response->json('data.rows.0.errors.type'));
+    }
+
+    public function test_validate_flags_the_same_name_code_and_type_twice_within_the_upload(): void
     {
         $this->actingAdmin();
 
         $response = $this->withApiKey()->postJson('/api/v1/courses/bulk/validate', [
             'rows' => [
-                ['name' => 'Course A', 'code' => 'DUPE'],
-                ['name' => 'Course B', 'code' => 'dupe'],
+                ['name' => 'Course A', 'code' => 'DUPE', 'type' => 'Theory'],
+                ['name' => 'course a', 'code' => 'dupe', 'type' => 'THEORY'],
+                // Same name + code, different type → fine.
+                ['name' => 'Course A', 'code' => 'DUPE', 'type' => 'Practical'],
             ],
         ]);
 
-        $response->assertOk()->assertJsonPath('data.all_valid', false);
-        $this->assertSame('Duplicate code within this upload.', $response->json('data.rows.0.errors.code'));
-        $this->assertSame('Duplicate code within this upload.', $response->json('data.rows.1.errors.code'));
+        $response->assertOk();
+        $this->assertFalse($response->json('data.rows.0.valid'));
+        $this->assertFalse($response->json('data.rows.1.valid'));
+        $this->assertTrue($response->json('data.rows.2.valid'));
+        $this->assertStringContainsString('more than once', $response->json('data.rows.0.errors.code'));
     }
 
-    public function test_validate_flags_a_code_already_used_by_an_existing_course(): void
+    public function test_validate_flags_a_combination_already_used_by_an_existing_course(): void
     {
         $this->actingAdmin();
-        Course::factory()->create(['code' => 'TAKEN101']);
+        Course::factory()->create(['name' => 'New Course', 'code' => 'TAKEN101', 'type' => 'Theory']);
 
         $response = $this->withApiKey()->postJson('/api/v1/courses/bulk/validate', [
-            'rows' => [['name' => 'New Course', 'code' => 'TAKEN101']],
+            'rows' => [
+                ['name' => 'New Course', 'code' => 'TAKEN101', 'type' => 'Theory'],
+                ['name' => 'Other Course', 'code' => 'TAKEN101', 'type' => 'Theory'],
+            ],
         ]);
 
-        $response->assertOk()->assertJsonPath('data.all_valid', false);
-        $this->assertSame('This code is already in use.', $response->json('data.rows.0.errors.code'));
+        $response->assertOk();
+        $this->assertSame(Course::DUPLICATE_MESSAGE, $response->json('data.rows.0.errors.type'));
+        // Same code alone is no longer a duplicate.
+        $this->assertTrue($response->json('data.rows.1.valid'));
     }
 
     public function test_validate_allows_a_code_matching_a_soft_deleted_course(): void
@@ -96,7 +117,7 @@ class CourseBulkUploadTest extends TestCase
         $trashed->delete();
 
         $response = $this->withApiKey()->postJson('/api/v1/courses/bulk/validate', [
-            'rows' => [['name' => 'Fresh Course', 'code' => 'REUSE101']],
+            'rows' => [['name' => 'Fresh Course', 'code' => 'REUSE101', 'type' => 'Theory']],
         ]);
 
         $response->assertOk()->assertJsonPath('data.all_valid', true);
@@ -108,14 +129,14 @@ class CourseBulkUploadTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/courses/bulk/store', [
             'rows' => [
-                ['name' => 'Bulk Course One', 'code' => 'BC1'],
-                ['name' => 'Bulk Course Two', 'code' => 'BC2'],
+                ['name' => 'Bulk Course One', 'code' => 'BC1', 'type' => 'Theory'],
+                ['name' => 'Bulk Course Two', 'code' => 'BC2', 'type' => 'Theory'],
             ],
         ]);
 
         $response->assertStatus(201)->assertJsonPath('data.created_count', 2);
-        $this->assertDatabaseHas('courses', ['name' => 'Bulk Course One', 'code' => 'BC1']);
-        $this->assertDatabaseHas('courses', ['name' => 'Bulk Course Two', 'code' => 'BC2']);
+        $this->assertDatabaseHas('courses', ['name' => 'Bulk Course One', 'code' => 'BC1', 'type' => 'Theory']);
+        $this->assertDatabaseHas('courses', ['name' => 'Bulk Course Two', 'code' => 'BC2', 'type' => 'Theory']);
     }
 
     public function test_store_rejects_the_whole_batch_when_any_row_is_invalid(): void
@@ -124,8 +145,8 @@ class CourseBulkUploadTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/courses/bulk/store', [
             'rows' => [
-                ['name' => 'Valid Course', 'code' => 'OK1'],
-                ['name' => '', 'code' => 'OK2'],
+                ['name' => 'Valid Course', 'code' => 'OK1', 'type' => 'Theory'],
+                ['name' => '', 'code' => 'OK2', 'type' => 'Theory'],
             ],
         ]);
 

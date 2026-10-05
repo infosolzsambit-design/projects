@@ -85,7 +85,6 @@ class AppServiceProvider extends ServiceProvider
                     'name' => $notifiable->name,
                     'url' => $buildResetUrl($notifiable, $token),
                     'expireMinutes' => (int) config('auth.passwords.users.expire'),
-                    'logoUrl' => config('app.frontend_url').'/images/logo-image.png',
                 ]);
         });
     }

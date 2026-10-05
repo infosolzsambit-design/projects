@@ -161,10 +161,9 @@ class DashboardController extends Controller
 
     /**
      * Row 2 — evaluation-workflow counts, scoped to $sheetQuery's exam
-     * year. "Not Assigned" and "Pending Evaluation" are two different
-     * cuts of the same "not yet marked" pool — not assigned = teacher_id
-     * still null; pending evaluation = assigned but marks still null —
-     * see evaluationStatus() below for how these relate for the donut.
+     * year. Pending evaluation = assigned, not evaluated and no open
+     * issue (AnswerSheet::pendingSql() — sheets with an open issue are
+     * counted under pending_issues instead, never both).
      *
      * @param  Closure(): Builder<AnswerSheet>  $sheetQuery
      * @return array<string, int>
@@ -175,7 +174,7 @@ class DashboardController extends Controller
             'assigned' => $sheetQuery()->whereNotNull('teacher_id')->count(),
             'pending_assignment' => $sheetQuery()->whereNull('teacher_id')->count(),
             'evaluated' => $sheetQuery()->whereNotNull('marks')->count(),
-            'pending_evaluation' => $sheetQuery()->whereNotNull('teacher_id')->whereNull('marks')->count(),
+            'pending_evaluation' => $sheetQuery()->whereNotNull('teacher_id')->pendingEvaluation()->count(),
             'raised_issues' => $sheetQuery()->whereNotNull('issue_master_id')->count(),
             'pending_issues' => $sheetQuery()->where('issue_status', 'open')->count(),
         ];
@@ -213,26 +212,22 @@ class DashboardController extends Controller
     }
 
     /**
-     * "Evaluation Status" donut — evaluated + pending_evaluation always
-     * sum to total (every sheet is either marked or not); not_assigned is
-     * a breakdown *within* pending_evaluation (how many of the not-yet-
-     * marked sheets haven't even been handed to a teacher), not a third
-     * disjoint bucket — see AdminDashboardView.vue's own docblock on its
-     * donut arcs for how that's rendered.
+     * "Evaluation Status" donut — four disjoint buckets that always sum
+     * to total: evaluated; pending_evaluation (assigned, not evaluated, no
+     * open issue); problem (open issue); not_assigned (no teacher yet).
+     * Same rule as AnswerSheet::pendingSql().
      *
      * @param  Closure(): Builder<AnswerSheet>  $sheetQuery
      * @return array<string, int>
      */
     private function evaluationStatus(Closure $sheetQuery): array
     {
-        $total = $sheetQuery()->count();
-        $evaluated = $sheetQuery()->whereNotNull('marks')->count();
-
         return [
-            'total' => $total,
-            'evaluated' => $evaluated,
-            'pending_evaluation' => $total - $evaluated,
-            'not_assigned' => $sheetQuery()->whereNull('teacher_id')->count(),
+            'total' => $sheetQuery()->count(),
+            'evaluated' => $sheetQuery()->whereNotNull('marks')->count(),
+            'pending_evaluation' => $sheetQuery()->whereNotNull('teacher_id')->pendingEvaluation()->count(),
+            'problem' => $sheetQuery()->whereNull('marks')->withOpenIssue()->count(),
+            'not_assigned' => $sheetQuery()->whereNull('teacher_id')->pendingEvaluation()->count(),
         ];
     }
 
@@ -275,7 +270,8 @@ class DashboardController extends Controller
             ->selectRaw(
                 'departments.name as department_name, COUNT(*) as total, '.
                 'SUM(CASE WHEN answer_sheets.marks IS NOT NULL THEN 1 ELSE 0 END) as evaluated, '.
-                'SUM(CASE WHEN answer_sheets.marks IS NULL AND answer_sheets.teacher_id IS NOT NULL THEN 1 ELSE 0 END) as pending',
+                'SUM(CASE WHEN answer_sheets.teacher_id IS NOT NULL AND '.AnswerSheet::pendingSql().' THEN 1 ELSE 0 END) as pending, '.
+                'SUM(CASE WHEN '.AnswerSheet::problemSql().' THEN 1 ELSE 0 END) as problem',
             );
     }
 
@@ -290,13 +286,15 @@ class DashboardController extends Controller
             $total = max(1, (int) $row->total);
             $evaluatedPct = (int) round($row->evaluated / $total * 100);
             $pendingPct = (int) round($row->pending / $total * 100);
+            $problemPct = (int) round($row->problem / $total * 100);
 
             $mapped[] = [
                 'name' => $row->department_name,
                 'total' => (int) $row->total,
                 'evaluated_pct' => $evaluatedPct,
                 'pending_pct' => $pendingPct,
-                'not_assigned_pct' => max(0, 100 - $evaluatedPct - $pendingPct),
+                'problem_pct' => $problemPct,
+                'not_assigned_pct' => max(0, 100 - $evaluatedPct - $pendingPct - $problemPct),
             ];
         }
 
@@ -343,7 +341,7 @@ class DashboardController extends Controller
             ->selectRaw(
                 'users.name as teacher_name, teacher_details.emp_code as emp_code, COUNT(*) as assigned, '.
                 'SUM(CASE WHEN answer_sheets.marks IS NOT NULL THEN 1 ELSE 0 END) as evaluated, '.
-                'SUM(CASE WHEN answer_sheets.marks IS NULL THEN 1 ELSE 0 END) as pending, '.
+                'SUM(CASE WHEN '.AnswerSheet::pendingSql().' THEN 1 ELSE 0 END) as pending, '.
                 'SUM(CASE WHEN answer_sheets.issue_master_id IS NOT NULL THEN 1 ELSE 0 END) as issues',
             );
     }
@@ -371,9 +369,9 @@ class DashboardController extends Controller
 
     /**
      * "Course Wise Pending Evaluation" — every course with something
-     * still pending (marks still null — regardless of assignment, unlike
-     * workflow()'s own narrower "assigned but unmarked" pending_evaluation;
-     * this table is about total unfinished workload per course), most
+     * still pending (AnswerSheet::pendingSql() — regardless of assignment,
+     * unlike workflow()'s own assigned-only pending_evaluation; this table
+     * is about total unfinished workload per course), most
      * pending first. Courses with nothing pending are excluded outright
      * rather than shown at 0%.
      *
@@ -397,12 +395,12 @@ class DashboardController extends Controller
         }
 
         return $query
-            ->groupBy('courses.id', 'courses.name', 'courses.code')
-            ->havingRaw('SUM(CASE WHEN answer_sheets.marks IS NULL THEN 1 ELSE 0 END) > 0')
-            ->orderByRaw('SUM(CASE WHEN answer_sheets.marks IS NULL THEN 1 ELSE 0 END) DESC')
+            ->groupBy('courses.id', 'courses.name', 'courses.code', 'courses.type')
+            ->havingRaw('SUM(CASE WHEN '.AnswerSheet::pendingSql().' THEN 1 ELSE 0 END) > 0')
+            ->orderByRaw('SUM(CASE WHEN '.AnswerSheet::pendingSql().' THEN 1 ELSE 0 END) DESC')
             ->selectRaw(
-                'courses.name as course_name, courses.code as course_code, COUNT(*) as total, '.
-                'SUM(CASE WHEN answer_sheets.marks IS NULL THEN 1 ELSE 0 END) as pending',
+                'courses.name as course_name, courses.code as course_code, courses.type as course_type, COUNT(*) as total, '.
+                'SUM(CASE WHEN '.AnswerSheet::pendingSql().' THEN 1 ELSE 0 END) as pending',
             );
     }
 
@@ -418,6 +416,7 @@ class DashboardController extends Controller
             $mapped[] = [
                 'name' => $row->course_name,
                 'code' => $row->course_code,
+                'type' => $row->course_type,
                 'pending' => (int) $row->pending,
                 'total' => (int) $row->total,
                 'pending_pct' => (int) round($row->pending / $total * 100),

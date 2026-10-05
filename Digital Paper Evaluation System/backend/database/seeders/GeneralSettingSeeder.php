@@ -132,17 +132,15 @@ class GeneralSettingSeeder extends Seeder
         // defers to that per-teacher flag instead of forcing it for
         // everyone. See MyPendingCoursesView.vue's "Start Evaluate" flow.
         [
-            'field_name' => 'face_scan_applicable',
+            'field_name' => 'is_face_scan_applicable',
             'label' => 'Is Face Scan Applicable',
-            'group_name' => 'Evaluation',
             'type' => 'radio',
             'value' => 'yes',
             'options' => [
                 ['label' => 'Yes', 'value' => 'yes', 'has_extra' => false],
                 ['label' => 'No', 'value' => 'no', 'has_extra' => false],
             ],
-            'help_text' => 'When enabled, teachers whose own "Face Scan Applicable" flag is Yes must pass a face scan before starting evaluation of an answer sheet.',
-            'sort_order' => 17,
+            'sort_order' => 6,
         ],
 
         // "Branding & Icons" group — the app's own chrome (favicon, login

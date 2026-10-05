@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx'
 import api from '../../utils/api'
 import SearchableSelect from '../../components/common/SearchableSelect.vue'
 import { useToast } from '../../composables/useToast'
+import { useProgramsStore } from '../../stores/programs'
 
 const router = useRouter()
 const toast = useToast()
@@ -39,6 +40,7 @@ function downloadTemplate() {
   const sample = [
     {
       Name: 'Demo Program',
+      Label: 'UG',
       Department: availableDepartments.value[0]?.name || 'Computer Science Engineering',
       Code: 'DEMO101',
     },
@@ -60,6 +62,7 @@ function findColumn(keys, needle) {
 function makeRow(raw) {
   const keys = Object.keys(raw)
   const nameKey = findColumn(keys, 'name')
+  const labelKey = findColumn(keys, 'label')
   const departmentKey = findColumn(keys, 'department')
   const codeKey = findColumn(keys, 'code')
 
@@ -71,6 +74,7 @@ function makeRow(raw) {
 
   return reactive({
     name: nameKey ? String(raw[nameKey] ?? '').trim() : '',
+    label: labelKey ? String(raw[labelKey] ?? '').trim() : '',
     department_id: matched ? matched.id : '',
     code: codeKey ? String(raw[codeKey] ?? '').trim() : '',
     errors: {},
@@ -124,7 +128,14 @@ function setFieldRef(index, field, el) {
   if (!fieldRefs[index]) fieldRefs[index] = {}
   fieldRefs[index][field] = el
 }
-const ROW_FIELD_ORDER = ['name', 'department_id', 'code']
+const ROW_FIELD_ORDER = ['name', 'label', 'department_id', 'code']
+const COMBO_FIELDS = ['name', 'code', 'label']
+
+// A combined Name + Code + Label duplicate comes back on all three cells —
+// show the text once (under Name) and just outline the other two.
+function showRowMessage(row, field) {
+  return !!row.errors[field] && (field === 'name' || row.errors[field] !== row.errors.name)
+}
 
 function focusFirstError() {
   const rowIndex = rows.value.findIndex((r) => r.valid === false)
@@ -134,6 +145,12 @@ function focusFirstError() {
 }
 
 function markEdited(row, field) {
+  if (field && COMBO_FIELDS.includes(field) && row.errors[field]) {
+    const message = row.errors[field]
+    COMBO_FIELDS.forEach((key) => {
+      if (row.errors[key] === message) row.errors[key] = ''
+    })
+  }
   if (field) row.errors[field] = ''
   row.valid = null
   allValid.value = false
@@ -146,7 +163,7 @@ function removeRow(index) {
 }
 
 function toPayload() {
-  return rows.value.map((r) => ({ name: r.name, department_id: r.department_id || null, code: r.code }))
+  return rows.value.map((r) => ({ name: r.name, label: r.label, department_id: r.department_id || null, code: r.code }))
 }
 
 function applyResults(results) {
@@ -181,6 +198,7 @@ async function submitRows() {
     await api.post('/programs/bulk/store', { rows: toPayload() })
     router.push({ name: 'master-programs' })
     toast.success(`${count} program${count === 1 ? '' : 's'} imported successfully.`)
+    useProgramsStore().loaded = false // other screens re-read program labels
   } catch (err) {
     const data = err.response?.data
     if (data?.errors?.rows) {
@@ -241,7 +259,8 @@ function cancel() {
         <section class="bg-white rounded-[28px] shadow-card p-4 sm:p-5">
           <h2 class="text-[16px] sm:text-[18px] font-semibold text-gray-900 mb-1">1. Download the CSV template</h2>
           <p class="text-[13px] text-muted mb-3">
-            Columns: <span class="font-medium text-gray-700">Name, Department, Code</span>. All three are required — Code must be unique, and
+            Columns: <span class="font-medium text-gray-700">Name, Label, Department, Code</span>. All four are required. Label is the
+            program level, e.g. UG or PG (max 20 characters). The combination of Name, Code and Label must be unique, and
             Department must match an existing department's name (it will be auto-selected in the review step if it does).
             Courses aren't part of this upload — map them afterward from each program's edit page.
           </p>
@@ -278,7 +297,7 @@ function cancel() {
 
     <!-- Review modal -->
     <div v-if="modalOpen" class="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4" @click.self="closeModal">
-      <div class="bg-white rounded-[24px] shadow-card w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden">
+      <div class="bg-white rounded-[24px] shadow-card w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden">
         <div class="flex items-start justify-between gap-3 px-5 pt-5 pb-3 border-b border-soft">
           <div>
             <h2 class="text-lg font-bold text-black">Review Uploaded Programs</h2>
@@ -295,11 +314,12 @@ function cancel() {
 
         <div class="flex-1 overflow-y-auto overflow-x-hidden px-5 py-3">
           <div class="overflow-x-auto">
-            <table class="w-full min-w-[620px] text-left border-separate border-spacing-0">
+            <table class="w-full min-w-[720px] text-left border-separate border-spacing-0">
               <thead>
                 <tr class="bg-subject-header text-white text-[11px] font-medium">
                   <th class="px-2 py-1.5 rounded-tl-xl">#</th>
                   <th class="px-2 py-1.5 min-w-[180px]">Name</th>
+                  <th class="px-2 py-1.5 min-w-[90px]">Label</th>
                   <th class="px-2 py-1.5 min-w-[200px]">Department</th>
                   <th class="px-2 py-1.5 min-w-[120px]">Code</th>
                   <th class="px-2 py-1.5 text-center min-w-[80px]">Status</th>
@@ -319,6 +339,19 @@ function cancel() {
                       @input="markEdited(row, 'name')"
                     />
                     <p v-if="row.errors.name" class="text-[10px] text-brand mt-0.5">{{ row.errors.name }}</p>
+                  </td>
+                  <td class="px-2 py-1.5">
+                    <input
+                      :ref="(el) => setFieldRef(index, 'label', el)"
+                      v-model="row.label"
+                      type="text"
+                      maxlength="20"
+                      placeholder="UG / PG"
+                      class="w-full h-8 px-2 rounded-lg bg-input-bg text-[12px] outline-none border"
+                      :class="row.errors.label ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
+                      @input="markEdited(row, 'label')"
+                    />
+                    <p v-if="showRowMessage(row, 'label')" class="text-[10px] text-brand mt-0.5">{{ row.errors.label }}</p>
                   </td>
                   <td class="px-2 py-1.5">
                     <SearchableSelect
@@ -343,7 +376,7 @@ function cancel() {
                       :class="row.errors.code ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
                       @input="markEdited(row, 'code')"
                     />
-                    <p v-if="row.errors.code" class="text-[10px] text-brand mt-0.5">{{ row.errors.code }}</p>
+                    <p v-if="showRowMessage(row, 'code')" class="text-[10px] text-brand mt-0.5">{{ row.errors.code }}</p>
                   </td>
                   <td class="px-2 py-1.5 text-center">
                     <span v-if="row.valid === true" class="inline-flex items-center gap-1 text-[10px] font-medium text-green-700 bg-green-100 rounded-full px-1.5 py-0.5">

@@ -14,6 +14,7 @@ import { useExamTypeStore } from '../../stores/examType'
 import DepartmentProgressModal from './DepartmentProgressModal.vue'
 import TeacherWorkloadModal from './TeacherWorkloadModal.vue'
 import CoursePendingModal from './CoursePendingModal.vue'
+import { courseLabel, typeSuffix } from '../../utils/course'
 
 const examYearStore = useExamYearStore()
 const examTypeStore = useExamTypeStore()
@@ -110,15 +111,13 @@ const donutSegments = computed(() => {
   return [
     { label: 'Evaluated', value: s?.evaluated ?? 0, displayPct: pct(s?.evaluated ?? 0), color: '#22c55e' },
     { label: 'Pending Evaluation', value: s?.pending_evaluation ?? 0, displayPct: pct(s?.pending_evaluation ?? 0), color: '#f9a228' },
+    { label: 'Problem', value: s?.problem ?? 0, displayPct: pct(s?.problem ?? 0), color: '#f43f5e' },
     { label: 'Not Assigned', value: s?.not_assigned ?? 0, displayPct: pct(s?.not_assigned ?? 0), color: '#2f56c0' },
   ]
 })
-// Arc shares are normalised across the three segments so the ring always
-// completes a full circle — the *displayed* percentages above are each
-// segment's own share of totalAnswerSheets (as the design shows), which
-// doesn't sum to 100 since "Not Assigned" is really a breakdown within
-// "Pending Evaluation", not a fourth disjoint bucket; the ring itself is a
-// visual approximation of that, not a literal encoding of the legend math.
+// Four disjoint buckets (DashboardController::evaluationStatus()) —
+// evaluated + pending + problem + not assigned = total, so both the legend
+// percentages and the ring add up to 100%.
 const donutRadius = 70
 const donutCircumference = 2 * Math.PI * donutRadius
 const donutArcs = computed(() => {
@@ -142,6 +141,7 @@ const departments = computed(() => (summary.value?.department_progress ?? []).ma
   name: d.name,
   evaluated: d.evaluated_pct,
   pending: d.pending_pct,
+  problem: d.problem_pct ?? 0,
   notAssigned: d.not_assigned_pct,
 })))
 const departmentsHasMore = computed(() => summary.value?.department_progress_has_more ?? false)
@@ -288,15 +288,17 @@ const showCoursePendingModal = ref(false)
             <div class="flex-1 max-w-[110px] h-2.5 rounded-full overflow-hidden bg-gray-100 flex">
               <span class="h-full bg-emerald-500" :style="{ width: dept.evaluated + '%' }"></span>
               <span class="h-full bg-amber-400" :style="{ width: dept.pending + '%' }"></span>
+              <span class="h-full bg-rose-500" :style="{ width: dept.problem + '%' }"></span>
               <span class="h-full bg-gray-300" :style="{ width: dept.notAssigned + '%' }"></span>
             </div>
             <span class="w-9 shrink-0 text-right text-[12px] font-semibold text-gray-800">{{ dept.evaluated }}%</span>
           </div>
         </div>
         <div class="flex items-center justify-between gap-3 mt-3.5">
-          <div class="flex items-center gap-4 text-[11px] text-gray-600">
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-gray-600">
             <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>Evaluated</span>
             <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>Pending</span>
+            <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>Problem</span>
             <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-gray-300"></span>Not Assigned</span>
           </div>
           <button v-if="departmentsHasMore" type="button" class="shrink-0 text-[11.5px] font-semibold text-brand-blue hover:underline" @click="showDepartmentsModal = true">
@@ -317,7 +319,7 @@ const showCoursePendingModal = ref(false)
           <RouterLink
             v-for="stat in issueSummary"
             :key="stat.label"
-            :to="{ name: 'notifications' }"
+            :to="{ name: 'problems' }"
             class="rounded-2xl p-3 text-center transition-transform hover:-translate-y-0.5"
             :class="stat.tint"
           >
@@ -398,7 +400,7 @@ const showCoursePendingModal = ref(false)
               </tr>
               <tr v-for="(row, i) in coursePending" :key="row.name" class="border-t border-gray-100">
                 <td class="px-1 py-1.5 text-gray-500">{{ i + 1 }}</td>
-                <td :title="row.code" class="px-1 py-1.5 font-medium text-gray-800 whitespace-nowrap cursor-default">{{ row.name }}</td>
+                <td :title="courseLabel(row.name, row.code, row.type)" class="px-1 py-1.5 font-medium text-gray-800 whitespace-nowrap cursor-default">{{ row.name }}{{ typeSuffix(row.type) }}</td>
                 <td class="px-1 py-1.5 text-center text-gray-700">{{ row.pending }}</td>
                 <td class="px-1 py-1.5 text-center text-gray-700">{{ row.total }}</td>
                 <td class="px-1 py-1.5 text-center">

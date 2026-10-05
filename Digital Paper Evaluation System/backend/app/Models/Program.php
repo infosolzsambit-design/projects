@@ -26,6 +26,7 @@ class Program extends Model implements AuditableContract
      */
     protected $fillable = [
         'name',
+        'label',
         'department',
         'department_id',
         'code',
@@ -40,6 +41,29 @@ class Program extends Model implements AuditableContract
         return [
             'status' => 'boolean',
         ];
+    }
+
+    public const DUPLICATE_MESSAGE = 'A program with this Name, Code and Label already exists.';
+
+    /**
+     * A program is unique by the combination name + code + label among
+     * non-deleted programs (so "B.Sc / BSC / UG" and "B.Sc / BSC / PG" can
+     * both exist). Case-insensitive and trailing-space-insensitive via the
+     * column collation — "ug" and "UG" are the same label. Used by the
+     * create/edit form, bulk upload and restore so all three agree.
+     */
+    public static function hasDuplicate(string $name, string $code, ?string $label, ?int $ignoreId = null): bool
+    {
+        return static::query()
+            ->where('name', trim($name))
+            ->where('code', trim($code))
+            ->when(
+                $label === null || trim($label) === '',
+                fn ($q) => $q->where(fn ($w) => $w->whereNull('label')->orWhere('label', '')),
+                fn ($q) => $q->where('label', trim($label)),
+            )
+            ->when($ignoreId !== null, fn ($q) => $q->whereKeyNot($ignoreId))
+            ->exists();
     }
 
     public function courses(): BelongsToMany

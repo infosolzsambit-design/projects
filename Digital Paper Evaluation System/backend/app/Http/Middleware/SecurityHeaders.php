@@ -21,7 +21,14 @@ class SecurityHeaders
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('X-Frame-Options', 'DENY');
         $response->headers->set('Referrer-Policy', 'no-referrer');
-        $response->headers->set('Cross-Origin-Resource-Policy', 'same-origin');
+        // storage/* (question paper / answer sheet PDFs, branding images) is
+        // deliberately fetched cross-origin by the frontend's own domain —
+        // see routes/web.php's storage route — so it needs 'cross-origin'
+        // here or the browser blocks the fetch regardless of any CORS header.
+        $response->headers->set(
+            'Cross-Origin-Resource-Policy',
+            $request->is('storage/*') ? 'cross-origin' : 'same-origin'
+        );
         // Every response here is per-user/authenticated JSON — never worth
         // letting a browser or intermediate proxy cache it.
         $response->headers->set('Cache-Control', 'no-store, private');

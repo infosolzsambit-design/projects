@@ -28,6 +28,7 @@ class CourseManagementTest extends TestCase
         $response = $this->withApiKey()->postJson('/api/v1/courses', [
             'name' => 'Bachelor of Computer Applications',
             'code' => 'BCA-01',
+            'type' => 'Theory',
         ]);
 
         $response->assertStatus(201)
@@ -37,17 +38,57 @@ class CourseManagementTest extends TestCase
         $this->assertDatabaseHas('courses', ['code' => 'BCA-01']);
     }
 
-    public function test_course_code_must_be_unique(): void
+    public function test_type_is_required_and_max_50_characters(): void
     {
         $this->actingAdmin();
-        Course::factory()->create(['code' => 'DUPE-01']);
+        $payload = ['name' => 'Physics', 'code' => 'PHY101'];
 
-        $response = $this->withApiKey()->postJson('/api/v1/courses', [
-            'name' => 'Another Course',
-            'code' => 'DUPE-01',
-        ]);
+        $this->withApiKey()->postJson('/api/v1/courses', $payload)
+            ->assertStatus(422)->assertJsonValidationErrors('type');
+        $this->withApiKey()->postJson('/api/v1/courses', $payload + ['type' => str_repeat('X', 51)])
+            ->assertStatus(422)->assertJsonValidationErrors('type');
+        $this->withApiKey()->postJson('/api/v1/courses', $payload + ['type' => 'T'])
+            ->assertStatus(201)->assertJsonPath('data.type', 'T');
+    }
 
-        $response->assertStatus(422)->assertJsonValidationErrors('code');
+    public function test_name_code_and_type_must_be_unique_together(): void
+    {
+        $this->actingAdmin();
+        Course::factory()->create(['name' => 'Physics', 'code' => 'PHY101', 'type' => 'Theory']);
+
+        // Exact same combination (case-insensitive) → rejected on all three fields.
+        $this->withApiKey()->postJson('/api/v1/courses', ['name' => 'physics', 'code' => 'phy101', 'type' => 'theory'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['name', 'code', 'type'])
+            ->assertJsonPath('errors.code.0', Course::DUPLICATE_MESSAGE);
+
+        // Any one of the three different → allowed (same code is fine now).
+        $this->withApiKey()->postJson('/api/v1/courses', ['name' => 'Physics', 'code' => 'PHY101', 'type' => 'Practical'])->assertStatus(201);
+        $this->withApiKey()->postJson('/api/v1/courses', ['name' => 'Physics', 'code' => 'PHY102', 'type' => 'Theory'])->assertStatus(201);
+        $this->withApiKey()->postJson('/api/v1/courses', ['name' => 'Applied Physics', 'code' => 'PHY101', 'type' => 'Theory'])->assertStatus(201);
+    }
+
+    public function test_update_checks_the_combination_but_ignores_the_course_itself(): void
+    {
+        $this->actingAdmin();
+        Course::factory()->create(['name' => 'Physics', 'code' => 'PHY101', 'type' => 'Theory']);
+        $practical = Course::factory()->create(['name' => 'Physics', 'code' => 'PHY101', 'type' => 'Practical']);
+
+        $this->withApiKey()->putJson("/api/v1/courses/{$practical->id}", ['name' => 'Physics', 'code' => 'PHY101', 'type' => 'Practical'])->assertOk();
+        $this->withApiKey()->putJson("/api/v1/courses/{$practical->id}", ['type' => 'Theory'])
+            ->assertStatus(422)->assertJsonValidationErrors(['name', 'code', 'type']);
+        $this->assertSame('Practical', $practical->fresh()->type);
+    }
+
+    public function test_restore_is_blocked_when_an_active_course_has_the_same_combination(): void
+    {
+        $this->actingAdmin();
+        $old = Course::factory()->create(['name' => 'Chemistry', 'code' => 'CHE101', 'type' => 'P']);
+        $old->delete();
+        Course::factory()->create(['name' => 'Chemistry', 'code' => 'CHE101', 'type' => 'P']);
+
+        $this->withApiKey()->postJson("/api/v1/courses/{$old->id}/restore")->assertStatus(422);
+        $this->assertSoftDeleted('courses', ['id' => $old->id]);
     }
 
     public function test_a_soft_deleted_courses_code_can_be_reused(): void
@@ -59,6 +100,7 @@ class CourseManagementTest extends TestCase
         $response = $this->withApiKey()->postJson('/api/v1/courses', [
             'name' => 'Fresh Course',
             'code' => 'REUSE-01',
+            'type' => 'Theory',
         ]);
 
         $response->assertStatus(201)->assertJsonPath('data.code', 'REUSE-01');

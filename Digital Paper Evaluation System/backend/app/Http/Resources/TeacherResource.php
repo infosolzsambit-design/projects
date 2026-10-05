@@ -55,6 +55,10 @@ class TeacherResource extends JsonResource
             // Only meaningful alongside allocated_answer_sheet_count (same
             // has_assignments=yes listing); falls back to 0 like it does.
             'completed_answer_sheet_count' => $this->assigned_answer_sheets_completed_count ?? 0,
+            // Third alias on the same query — not evaluated and no open
+            // problem (AnswerSheet::pendingSql()), same as the allocation
+            // modal's Pending column.
+            'pending_answer_sheet_count' => $this->assigned_answer_sheets_pending_count ?? 0,
             // Set via ->addSelect()'s correlated subquery on the same
             // query — the number of *distinct* courses those allocated
             // sheets span. AssignedTeachersView.vue's own "Courses" column;

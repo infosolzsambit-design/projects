@@ -2,7 +2,10 @@
 
 namespace App\Http\Controllers\API\V1;
 
+use App\Helpers\CourseLabel;
+use App\Helpers\PublicStorage;
 use App\Http\Controllers\Controller;
+use App\Services\UserNotificationService;
 use App\Http\Resources\NotificationResource;
 use App\Models\AnswerSheet;
 use App\Services\AuditLogService;
@@ -218,6 +221,7 @@ class NotificationController extends Controller
         }
 
         $stored = $request->file('pdf')->store("answer-sheets/{$answerSheet->question_answer_sheet_mapping_id}", 'public');
+        PublicStorage::openFolder(dirname($stored));
 
         $answerSheet->update([
             'pdf_name' => basename($stored),
@@ -238,6 +242,15 @@ class NotificationController extends Controller
         );
 
         $this->sendResolvedEmail($request, $answerSheet, $data['remarks'] ?? null);
+
+        // New scan — clear the old student-ID reading so the Generate
+        // Marksheet page reads this sheet again on its next search.
+        AnswerSheet::whereKey($answerSheet->id)->whereNull('student_id_verified_by')->update([
+            'roll_no_check_status' => null,
+            'student_id_read' => null,
+            'student_id_crop_path' => null,
+            'roll_no_checked_at' => null,
+        ]);
 
         return $this->success(new NotificationResource($answerSheet->fresh(['issueMaster', 'issueRaisedBy', 'issueFixedBy', 'mapping.course'])), 'Printing issue resolved successfully.');
     }
@@ -267,13 +280,16 @@ class NotificationController extends Controller
         $isPrintingIssue = (int) $answerSheet->issue_master_id === (int) config('issues.printing_issue_id');
         $issueTypeName = $answerSheet->issueMaster?->name ?? 'Issue';
         $courseName = $answerSheet->mapping?->course
-            ? "{$answerSheet->mapping->course->name} ({$answerSheet->mapping->course->code})"
+            ? CourseLabel::of($answerSheet->mapping->course)
             : 'the course';
         $barcode = $answerSheet->subject_barcode;
         $resolvedAt = $answerSheet->issue_fixed_at->format('d-m-Y h:i A');
         $newStart = isset($newWindow['evaluation_start_date']) ? Carbon::parse($newWindow['evaluation_start_date'])->format('d-m-Y h:i A') : null;
         $newEnd = isset($newWindow['evaluation_end_date']) ? Carbon::parse($newWindow['evaluation_end_date'])->format('d-m-Y h:i A') : null;
         $evaluationTimePerSheet = $answerSheet->evaluation_time_per_sheet;
+
+        // In-app bell notification for the teacher who raised it.
+        App::make(UserNotificationService::class)->issueResolved((int) $teacherId, $answerSheet->id, $issueTypeName, $courseName, $barcode);
 
         dispatch(function () use ($adminId, $teacherId, $isPrintingIssue, $issueTypeName, $courseName, $barcode, $adminRemarks, $adminName, $resolvedAt, $newStart, $newEnd, $evaluationTimePerSheet) {
             App::make(IssueResolvedMailService::class)->sendIssueResolvedEmail(

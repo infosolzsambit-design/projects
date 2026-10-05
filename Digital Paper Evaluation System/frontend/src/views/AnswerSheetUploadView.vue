@@ -29,6 +29,8 @@ import { useLoading } from '../composables/useLoading'
 import { extractQrFromPdfFirstPage } from '../utils/qr'
 import SearchableSelect from '../components/common/SearchableSelect.vue'
 import QuestionNodeViewer from '../components/questionPapers/QuestionNodeViewer.vue'
+import { useProgramsStore } from '../stores/programs'
+import { courseLabel } from '../utils/course'
 
 const router = useRouter()
 const toast = useToast()
@@ -49,13 +51,16 @@ async function loadQuestionPapers() {
     const res = await api.get('/question-papers', { params: { status: 'ready', per_page: 200 } })
     questionPapers.value = res.data.data.items.map((paper) => ({
       id: paper.id,
-      name: `${paper.course_name || 'Unknown course'} — ${paper.exam_year}, Sem ${paper.semester}`,
+      name: `${paper.course_name ? courseLabel(paper.course_name, paper.course_code, paper.course_type) : 'Unknown course'} — ${paper.exam_year}, Sem ${paper.semester}`,
       course_id: paper.course_id,
       // Nullable on the paper itself — a paper set up before this field
       // existed simply has nothing to auto-fill from yet (see
       // onQuestionPaperChange() below).
       exam_term_id: paper.exam_term_id || '',
       semester: paper.semester,
+      // The departments this paper is tagged with — the Department dropdown
+      // below only offers these.
+      departments: paper.departments || [],
     }))
   } catch (err) {
     questionPapersError.value = err.response?.data?.message || 'Could not load question papers.'
@@ -85,6 +90,7 @@ async function loadSelectedPaper(id) {
 
 const form = reactive({
   question_paper_id: '',
+  department_id: '',
   course_id: '',
   exam_term_id: '',
   exam_type_id: '',
@@ -92,15 +98,16 @@ const form = reactive({
   program_name: '',
   packet_code: '',
 })
-const fieldErrors = reactive({ question_paper_id: '', course_id: '', exam_term_id: '', exam_type_id: '', semester: '', program_name: '', packet_code: '' })
+const fieldErrors = reactive({ question_paper_id: '', department_id: '', course_id: '', exam_term_id: '', exam_type_id: '', semester: '', program_name: '', packet_code: '' })
 // Order matters — matches the form's own top-to-bottom field order, so the
 // first of these (in this order) that has an error is the one that gets
 // focused after a failed check.
-const FIELD_ORDER = ['program_name', 'packet_code', 'question_paper_id', 'exam_type_id', 'course_id', 'exam_term_id', 'semester']
+const FIELD_ORDER = ['program_name', 'packet_code', 'exam_type_id', 'question_paper_id', 'department_id', 'course_id', 'exam_term_id', 'semester']
 const fieldRefs = {
   program_name: ref(null),
   packet_code: ref(null),
   question_paper_id: ref(null),
+  department_id: ref(null),
   course_id: ref(null),
   exam_term_id: ref(null),
   exam_type_id: ref(null),
@@ -116,10 +123,20 @@ function focusFirstError() {
   fieldRefs[field]?.value?.focus()
 }
 
+// Department dropdown — only the selected question paper's departments.
+const paperDepartmentOptions = computed(() => {
+  const picked = questionPapers.value.find((p) => String(p.id) === String(form.question_paper_id))
+  return (picked?.departments || []).map((d) => ({ id: d.id, name: d.code ? `${d.name} (${d.code})` : d.name }))
+})
+
 function onQuestionPaperChange(id) {
   clearFieldError('question_paper_id')
   loadSelectedPaper(id)
   const picked = questionPapers.value.find((p) => String(p.id) === String(id))
+  // A different paper has different departments — pick again (or take the
+  // only one automatically).
+  form.department_id = picked?.departments?.length === 1 ? picked.departments[0].id : ''
+  clearFieldError('department_id')
   if (picked) {
     form.course_id = picked.course_id
     form.exam_term_id = picked.exam_term_id
@@ -138,13 +155,13 @@ async function loadCourses() {
   coursesLoading.value = true
   coursesError.value = ''
   try {
-    const res = await api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] } })
+    const res = await api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code', 'type'] } })
     // SearchableSelect just renders each option's own `name` — appending
     // the code here (rather than changing SearchableSelect itself) keeps
     // this specific to this one dropdown.
     availableCourses.value = res.data.data.map((course) => ({
       ...course,
-      name: course.code ? `${course.name} (${course.code})` : course.name,
+      name: courseLabel(course.name, course.code, course.type),
     }))
   } catch (err) {
     coursesError.value = err.response?.data?.message || 'Could not load courses.'
@@ -159,12 +176,14 @@ async function loadCourses() {
 const availablePrograms = ref([])
 const programsLoading = ref(true)
 const programsError = ref('')
+const programsStore = useProgramsStore()
 async function loadPrograms() {
   programsLoading.value = true
   programsError.value = ''
   try {
-    const res = await api.get('/programs', { params: { status: 'all', is_active: 'yes', table_fields: ['name'] } })
-    availablePrograms.value = res.data.data.map((program) => ({ id: program.name, name: program.name }))
+    // Shown as "Name (Label)"; the value stays the plain program name.
+    await programsStore.load(true)
+    availablePrograms.value = programsStore.options()
   } catch (err) {
     programsError.value = err.response?.data?.message || 'Could not load programs.'
   } finally {
@@ -441,6 +460,7 @@ async function submitToServer() {
 
     const createResponse = await api.post('/answer-sheet-mappings', {
       question_paper_id: form.question_paper_id,
+      department_id: form.department_id,
       course_id: form.course_id,
       exam_term_id: form.exam_term_id,
       exam_type_id: form.exam_type_id,
@@ -783,8 +803,9 @@ function cancel() {
           <section class="bg-white rounded-[28px] shadow-card p-4 sm:p-5">
             <h2 class="text-[16px] sm:text-[18px] font-semibold text-gray-900 mb-1">Packet Details</h2>
             <p class="text-[13px] text-muted mb-3">Course and Semester are filled in from the question paper you pick — change them if this packet is different.</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div class="flex flex-col gap-1.5">
+            <!-- Row 1: Program · Packet Code · Exam Type -->
+            <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 mb-3">
+              <div class="flex flex-col gap-1.5 min-w-0">
                 <label for="program" class="text-[13px] text-label">Program <span class="text-brand">*</span></label>
                 <SearchableSelect
                   id="program"
@@ -800,8 +821,7 @@ function cancel() {
                 <p v-if="programsError" class="text-[12px] text-brand">{{ programsError }}</p>
                 <p v-else-if="fieldErrors.program_name" class="text-[12px] text-brand">{{ fieldErrors.program_name }}</p>
               </div>
-
-              <div class="flex flex-col gap-1.5">
+              <div class="flex flex-col gap-1.5 min-w-0">
                 <label for="packet_code" class="text-[13px] text-label">Packet Code <span class="text-brand">*</span></label>
                 <input
                   id="packet_code"
@@ -815,26 +835,7 @@ function cancel() {
                 />
                 <p v-if="fieldErrors.packet_code" class="text-[12px] text-brand">{{ fieldErrors.packet_code }}</p>
               </div>
-            </div>
-            <div class="grid grid-cols-1 sm:grid-cols-[1.6fr_1fr] gap-3 mb-3">
-              <div class="flex flex-col gap-1.5">
-                <label for="question_paper" class="text-[13px] text-label">Question Paper <span class="text-brand">*</span></label>
-                <SearchableSelect
-                  id="question_paper"
-                  :ref="(el) => (fieldRefs.question_paper_id.value = el)"
-                  v-model="form.question_paper_id"
-                  :options="questionPapers"
-                  :loading="questionPapersLoading"
-                  :error="!!fieldErrors.question_paper_id"
-                  placeholder="Select question paper"
-                  search-placeholder="Search question papers…"
-                  @change="onQuestionPaperChange"
-                />
-                <p v-if="questionPapersError" class="text-[12px] text-brand">{{ questionPapersError }}</p>
-                <p v-else-if="fieldErrors.question_paper_id" class="text-[12px] text-brand">{{ fieldErrors.question_paper_id }}</p>
-              </div>
-
-              <div class="flex flex-col gap-1.5">
+              <div class="flex flex-col gap-1.5 min-w-0">
                 <label for="exam_type" class="text-[13px] text-label">Exam Type <span class="text-brand">*</span></label>
                 <SearchableSelect
                   id="exam_type"
@@ -851,9 +852,48 @@ function cancel() {
                 <p v-else-if="fieldErrors.exam_type_id" class="text-[12px] text-brand">{{ fieldErrors.exam_type_id }}</p>
               </div>
             </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-[1.4fr_1.2fr_0.7fr] gap-3 mb-3">
-              <div class="flex flex-col gap-1.5">
+            <!-- Row 2: Question Paper · Department (Department appears once a
+                 paper is picked; until then Question Paper uses the full row). -->
+            <div class="grid grid-cols-1 gap-3 mb-3" :class="form.question_paper_id ? 'sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]' : ''">
+              <div class="flex flex-col gap-1.5 min-w-0">
+                <label for="question_paper" class="text-[13px] text-label">Question Paper <span class="text-brand">*</span></label>
+                <SearchableSelect
+                  id="question_paper"
+                  :ref="(el) => (fieldRefs.question_paper_id.value = el)"
+                  v-model="form.question_paper_id"
+                  :options="questionPapers"
+                  :loading="questionPapersLoading"
+                  :error="!!fieldErrors.question_paper_id"
+                  placeholder="Select question paper"
+                  search-placeholder="Search question papers…"
+                  @change="onQuestionPaperChange"
+                />
+                <p v-if="questionPapersError" class="text-[12px] text-brand">{{ questionPapersError }}</p>
+                <p v-else-if="fieldErrors.question_paper_id" class="text-[12px] text-brand">{{ fieldErrors.question_paper_id }}</p>
+              </div>
+              <!-- Department — appears once a question paper is chosen, and only
+                   offers that paper's own departments. -->
+              <div v-if="form.question_paper_id" class="flex flex-col gap-1.5 min-w-0">
+                <label for="department" class="text-[13px] text-label">Department <span class="text-brand">*</span></label>
+                <SearchableSelect
+                  id="department"
+                  :ref="(el) => (fieldRefs.department_id.value = el)"
+                  v-model="form.department_id"
+                  :options="paperDepartmentOptions"
+                  :disabled="!paperDepartmentOptions.length"
+                  :error="!!fieldErrors.department_id"
+                  :placeholder="paperDepartmentOptions.length ? 'Select department' : 'No departments on this question paper'"
+                  search-placeholder="Search departments…"
+                  @change="clearFieldError('department_id')"
+                />
+                <p v-if="!paperDepartmentOptions.length" class="text-[12px] text-amber-600">
+                  This question paper isn't tagged with any department yet — set its departments on the Question Papers page (Configure) first.
+                </p>
+                <p v-else-if="fieldErrors.department_id" class="text-[12px] text-brand">{{ fieldErrors.department_id }}</p>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_minmax(0,0.7fr)] gap-3 mb-3">
+              <div class="flex flex-col gap-1.5 min-w-0">
                 <label for="course" class="text-[13px] text-label">Course <span class="text-brand">*</span></label>
                 <SearchableSelect
                   id="course"
@@ -870,7 +910,7 @@ function cancel() {
                 <p v-else-if="fieldErrors.course_id" class="text-[12px] text-brand">{{ fieldErrors.course_id }}</p>
               </div>
 
-              <div class="flex flex-col gap-1.5">
+              <div class="flex flex-col gap-1.5 min-w-0">
                 <label for="exam_term" class="text-[13px] text-label">Exam Term <span class="text-brand">*</span></label>
                 <SearchableSelect
                   id="exam_term"
@@ -887,7 +927,7 @@ function cancel() {
                 <p v-else-if="fieldErrors.exam_term_id" class="text-[12px] text-brand">{{ fieldErrors.exam_term_id }}</p>
               </div>
 
-              <div class="flex flex-col gap-1.5">
+              <div class="flex flex-col gap-1.5 min-w-0">
                 <label for="semester" class="text-[13px] text-label">Semester <span class="text-brand">*</span></label>
                 <input
                   id="semester"

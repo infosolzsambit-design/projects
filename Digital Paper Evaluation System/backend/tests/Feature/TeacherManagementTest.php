@@ -706,6 +706,26 @@ class TeacherManagementTest extends TestCase
         $response->assertJsonPath('data.completed_answer_sheet_count', 3);
     }
 
+    public function test_index_includes_the_pending_count_excluding_completed_and_problem_sheets(): void
+    {
+        $this->actingAdmin();
+        $detail = TeacherDetail::factory()->create();
+        $base = ['teacher_id' => $detail->user_id];
+        // 6 allocated: 2 evaluated, 1 open problem → 3 pending (a resolved
+        // problem counts as pending again).
+        AnswerSheet::factory()->count(2)->create($base + ['marks' => 20]);
+        AnswerSheet::factory()->create($base + ['marks' => null, 'issue_status' => 'open']);
+        AnswerSheet::factory()->create($base + ['marks' => null, 'issue_status' => 'resolved']);
+        AnswerSheet::factory()->count(2)->create($base + ['marks' => null]);
+
+        $response = $this->withApiKey()->getJson("/api/v1/teachers?id={$detail->user_id}");
+
+        $response->assertOk();
+        $response->assertJsonPath('data.allocated_answer_sheet_count', 6);
+        $response->assertJsonPath('data.completed_answer_sheet_count', 2);
+        $response->assertJsonPath('data.pending_answer_sheet_count', 3);
+    }
+
     public function test_admin_can_restore_a_soft_deleted_teacher(): void
     {
         $this->actingAdmin();
@@ -774,7 +794,32 @@ class TeacherManagementTest extends TestCase
         );
     }
 
-    public function test_assignments_breaks_each_packets_count_down_by_completed_draft_and_untouched(): void
+    public function test_assignments_returns_the_packet_department_and_the_latest_assigner(): void
+    {
+        $this->actingAdmin();
+        $detail = TeacherDetail::factory()->create();
+        $earlier = User::factory()->create(['name' => 'Earlier Admin']);
+        $later = User::factory()->create(['name' => 'Later Admin']);
+
+        $mapping = QuestionAnswerSheetMapping::factory()->create(['department_name' => 'Physics']);
+        AnswerSheet::factory()->create([
+            'teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $mapping->id,
+            'assigned_at' => '2026-09-01 10:00:00', 'assigned_by' => $earlier->id,
+        ]);
+        AnswerSheet::factory()->create([
+            'teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $mapping->id,
+            'assigned_at' => '2026-09-05 15:30:00', 'assigned_by' => $later->id,
+        ]);
+
+        $row = $this->withApiKey()->getJson("/api/v1/teachers/{$detail->user_id}/assignments")
+            ->assertOk()->json('data.breakdown.0');
+
+        $this->assertSame('Physics', $row['department_name']);
+        $this->assertSame('2026-09-05 15:30:00', $row['assigned_at']);
+        $this->assertSame('Later Admin', $row['assigned_by_name']);
+    }
+
+    public function test_assignments_counts_drafts_and_untouched_sheets_as_pending(): void
     {
         $this->actingAdmin();
         $detail = TeacherDetail::factory()->create();
@@ -790,7 +835,116 @@ class TeacherManagementTest extends TestCase
         $row = $response->json('data.breakdown.0');
         $this->assertSame(5, $row['sheet_count']);
         $this->assertSame(1, $row['completed_count']);
-        $this->assertSame(1, $row['draft_count']);
+        $this->assertSame(4, $row['pending_count']);
+        $this->assertSame(0, $row['problem_count']);
+    }
+
+    public function test_assignments_counts_open_issue_sheets_as_problem_not_pending(): void
+    {
+        $this->actingAdmin();
+        $detail = TeacherDetail::factory()->create();
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        $base = ['teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $mapping->id, 'marks' => null];
+
+        // Open timing issue keeps its draft — must count as Problem only.
+        AnswerSheet::factory()->create($base + ['draft_marks' => 4, 'issue_status' => 'open']);
+        AnswerSheet::factory()->create($base + ['draft_marks' => null, 'issue_status' => 'open']);
+        AnswerSheet::factory()->create($base + ['draft_marks' => 2, 'issue_status' => 'resolved']);
+        AnswerSheet::factory()->create($base + ['draft_marks' => null]);
+
+        $response = $this->withApiKey()->getJson("/api/v1/teachers/{$detail->user_id}/assignments");
+
+        $response->assertOk();
+        $row = $response->json('data.breakdown.0');
+        $this->assertSame(4, $row['sheet_count']);
+        $this->assertSame(2, $row['problem_count']);
+        // The resolved one is back in pending.
+        $this->assertSame(2, $row['pending_count']);
+    }
+
+    public function test_assignments_pending_is_sheets_minus_completed_minus_problem(): void
+    {
+        $this->actingAdmin();
+        $detail = TeacherDetail::factory()->create();
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        $base = ['teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $mapping->id];
+
+        // 6 sheets: 2 evaluated, 1 with a raised issue → 3 pending.
+        AnswerSheet::factory()->count(2)->create($base + ['marks' => 20]);
+        AnswerSheet::factory()->create($base + ['marks' => null, 'issue_status' => 'open']);
+        AnswerSheet::factory()->create($base + ['marks' => null, 'draft_marks' => 5]);
+        AnswerSheet::factory()->count(2)->create($base + ['marks' => null, 'draft_marks' => null]);
+
+        $row = $this->withApiKey()->getJson("/api/v1/teachers/{$detail->user_id}/assignments")->assertOk()->json('data.breakdown.0');
+
+        $this->assertSame(6, $row['sheet_count']);
+        $this->assertSame(2, $row['completed_count']);
+        $this->assertSame(1, $row['problem_count']);
+        $this->assertSame(3, $row['pending_count']);
+        $this->assertArrayNotHasKey('draft_count', $row);
+    }
+
+    public function test_time_span_groups_the_current_windows_for_one_packet(): void
+    {
+        $this->actingAdmin();
+        $detail = TeacherDetail::factory()->create();
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        $base = ['teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $mapping->id];
+
+        AnswerSheet::factory()->count(3)->create($base + ['evaluation_start_date' => '2026-10-01 10:00:00', 'evaluation_end_date' => '2026-10-05 18:00:00', 'evaluation_time_per_sheet' => 20]);
+        AnswerSheet::factory()->create($base + ['evaluation_start_date' => '2026-10-02 10:00:00', 'evaluation_end_date' => '2026-10-07 18:00:00', 'evaluation_time_per_sheet' => 20]);
+
+        $this->withApiKey()->getJson("/api/v1/teachers/{$detail->user_id}/assignments/{$mapping->id}/time-span")
+            ->assertOk()
+            ->assertJsonPath('data.total', 4)
+            ->assertJsonCount(2, 'data.windows')
+            ->assertJsonPath('data.windows.0.sheet_count', 3)
+            ->assertJsonPath('data.windows.0.evaluation_start_date', '2026-10-01 10:00')
+            ->assertJsonPath('data.windows.0.evaluation_end_date', '2026-10-05 18:00')
+            ->assertJsonPath('data.windows.0.evaluation_time_per_sheet', 20);
+    }
+
+    public function test_update_time_span_sets_one_window_on_every_sheet_in_that_packet_only(): void
+    {
+        $this->actingAdmin();
+        $detail = TeacherDetail::factory()->create();
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        $otherMapping = QuestionAnswerSheetMapping::factory()->create();
+        $old = ['evaluation_start_date' => '2026-10-01 10:00:00', 'evaluation_end_date' => '2026-10-05 18:00:00', 'evaluation_time_per_sheet' => 20];
+
+        $inPacket = AnswerSheet::factory()->count(2)->create(['teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $mapping->id] + $old);
+        $completed = AnswerSheet::factory()->create(['teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $mapping->id, 'marks' => 10] + $old);
+        $otherPacket = AnswerSheet::factory()->create(['teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $otherMapping->id] + $old);
+        $otherTeacher = AnswerSheet::factory()->create(['teacher_id' => TeacherDetail::factory()->create()->user_id, 'question_answer_sheet_mapping_id' => $mapping->id] + $old);
+
+        $this->withApiKey()->putJson("/api/v1/teachers/{$detail->user_id}/assignments/{$mapping->id}/time-span", [
+            'evaluation_start_date' => '2026-11-01 09:00',
+            'evaluation_end_date' => '2026-11-10 17:30',
+            'evaluation_time_per_sheet' => 45,
+        ])->assertOk()->assertJsonPath('data.updated_count', 3);
+
+        foreach ([...$inPacket, $completed] as $sheet) {
+            $sheet->refresh();
+            $this->assertSame('2026-11-01 09:00', $sheet->evaluation_start_date->format('Y-m-d H:i'));
+            $this->assertSame('2026-11-10 17:30', $sheet->evaluation_end_date->format('Y-m-d H:i'));
+            $this->assertSame(45, $sheet->evaluation_time_per_sheet);
+        }
+        foreach ([$otherPacket, $otherTeacher] as $sheet) {
+            $this->assertSame('2026-10-01 10:00', $sheet->fresh()->evaluation_start_date->format('Y-m-d H:i'));
+        }
+    }
+
+    public function test_update_time_span_rejects_an_end_before_the_start(): void
+    {
+        $this->actingAdmin();
+        $detail = TeacherDetail::factory()->create();
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        AnswerSheet::factory()->create(['teacher_id' => $detail->user_id, 'question_answer_sheet_mapping_id' => $mapping->id]);
+
+        $this->withApiKey()->putJson("/api/v1/teachers/{$detail->user_id}/assignments/{$mapping->id}/time-span", [
+            'evaluation_start_date' => '2026-11-10 09:00',
+            'evaluation_end_date' => '2026-11-01 09:00',
+        ])->assertStatus(422);
     }
 
     public function test_assignments_returns_not_found_for_a_non_teacher(): void
@@ -879,7 +1033,7 @@ class TeacherManagementTest extends TestCase
 
     public function test_reassign_moves_sheets_from_one_teacher_to_another(): void
     {
-        $this->actingAdmin();
+        $admin = $this->actingAdmin();
         $from = TeacherDetail::factory()->create();
         $to = TeacherDetail::factory()->create();
         $mapping = QuestionAnswerSheetMapping::factory()->create();
@@ -900,6 +1054,12 @@ class TeacherManagementTest extends TestCase
         $response->assertJsonPath('data.summary.0.reassigned_count', 3);
         $this->assertSame(2, AnswerSheet::where('teacher_id', $from->user_id)->count());
         $this->assertSame(3, AnswerSheet::where('teacher_id', $to->user_id)->count());
+        // The moved sheets record who reassigned them.
+        $this->assertSame(3, AnswerSheet::where('teacher_id', $to->user_id)->where('assigned_by', $admin->id)->count());
+
+        // Only the receiving teacher is notified.
+        $this->assertDatabaseHas('user_notifications', ['user_id' => $to->user_id, 'type' => 'answer_sheets_reassigned', 'link' => '/my-pending-courses']);
+        $this->assertDatabaseMissing('user_notifications', ['user_id' => $from->user_id]);
     }
 
     /**

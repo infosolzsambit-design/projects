@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Helpers\CourseLabel;
 use App\Mail\AnswerSheetAssignedMail;
 use App\Models\Course;
 use App\Models\EmailLog;
@@ -39,7 +40,7 @@ class TeacherAssignmentMailService
         ?int $evaluationTimePerSheet = null,
     ): void {
         $course = Course::find($courseId);
-        $courseName = $course ? "{$course->name} ({$course->code})" : 'the course';
+        $courseName = CourseLabel::of($course);
         ['site_title' => $siteTitle, 'logo_url' => $logoUrl] = $this->branding->resolve();
         // Matches utils/date.js's formatDateTime() so the emailed dates
         // read the same as everywhere else in the app.

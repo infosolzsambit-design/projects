@@ -24,6 +24,7 @@ export const useBrandingStore = defineStore('branding', {
     headerLogoFull: null,
     headerLogoIcon: null,
     footerLogo: null,
+    organizationLogo: null,
     siteTitle: null,
     loaded: false,
   }),
@@ -33,6 +34,9 @@ export const useBrandingStore = defineStore('branding', {
     headerLogoFullUrl: (state) => state.headerLogoFull || '/images/header_logo.png',
     headerLogoIconUrl: (state) => state.headerLogoIcon || '/images/logo-icon.png',
     footerLogoUrl: (state) => state.footerLogo || '/images/footer_logo.png',
+    // No bundled default — the header simply shows nothing when none is set
+    // (or its General Settings switch is off).
+    organizationLogoUrl: (state) => state.organizationLogo || null,
     siteTitleValue: (state) => state.siteTitle || 'Paper Check',
   },
   actions: {
@@ -45,6 +49,7 @@ export const useBrandingStore = defineStore('branding', {
         this.headerLogoFull = resolveStorageUrl(data.header_logo_full)
         this.headerLogoIcon = resolveStorageUrl(data.header_logo_icon)
         this.footerLogo = resolveStorageUrl(data.footer_logo)
+        this.organizationLogo = resolveStorageUrl(data.organization_logo)
         this.siteTitle = data.site_title
       } catch {
         // Network hiccup or the endpoint being unreachable just means every

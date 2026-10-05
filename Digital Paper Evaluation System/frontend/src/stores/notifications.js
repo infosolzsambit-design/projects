@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import api from '../utils/api'
 
-// The sidebar's own badge next to "Notifications" (see AppSidebar.vue) —
+// The sidebar's own badge next to "Problems" (see AppSidebar.vue) —
 // shared app-wide since it's shown on every page, not just
 // NotificationsView.vue itself. Backed by its own lightweight endpoint
 // (GET /notifications/unresolved-count) rather than loading the full

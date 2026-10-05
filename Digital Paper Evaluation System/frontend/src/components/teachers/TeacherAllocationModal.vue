@@ -1,6 +1,14 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import api from '../../utils/api'
+import { useProgramsStore } from '../../stores/programs'
+import { courseLabel } from '../../utils/course'
+import { formatDateTime } from '../../utils/date'
+import { ordinal } from '../../utils/ordinal'
+
+// Program names display as "Name (Label)" — see stores/programs.js.
+const programsStore = useProgramsStore()
+programsStore.load().catch(() => {})
 
 // Opened by clicking a teacher's "Already Allocated" number in
 // AssignTeacherView.vue / AssignedTeachersView.vue's tables — GET
@@ -13,6 +21,9 @@ import api from '../../utils/api'
 // deliberately, not as a side door off this summary view.
 const props = defineProps({
   teacher: { type: Object, required: true }, // { id, name } — enough to title the modal
+  // Opened from the Pending count instead: same table, only the packets
+  // that still have pending sheets, totals counted in pending sheets.
+  pendingOnly: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close'])
 
@@ -35,6 +46,9 @@ async function fetchAssignments() {
   }
 }
 
+const rows = computed(() => (props.pendingOnly ? breakdown.value.filter((row) => (row.pending_count ?? 0) > 0) : breakdown.value))
+const sheetTotal = computed(() => (props.pendingOnly ? rows.value.reduce((sum, row) => sum + (row.pending_count ?? 0), 0) : total.value))
+
 function close() {
   emit('close')
 }
@@ -44,12 +58,12 @@ onMounted(fetchAssignments)
 
 <template>
   <div class="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4" @click.self="close">
-    <div class="bg-white rounded-[24px] shadow-card w-full max-w-6xl max-h-[85vh] flex flex-col overflow-hidden">
+    <div class="bg-white rounded-[24px] shadow-card w-full max-w-[1400px] max-h-[85vh] flex flex-col overflow-hidden">
       <div class="flex items-start justify-between gap-3 px-5 pt-5 pb-3 border-b border-soft">
         <div>
-          <h2 class="text-lg font-bold text-black">Allocated Answer Sheets — {{ teacher.name }}</h2>
+          <h2 class="text-lg font-bold text-black">{{ pendingOnly ? 'Pending' : 'Allocated' }} Answer Sheets — {{ teacher.name }}</h2>
           <p class="text-[13px] text-muted mt-0.5">
-            {{ total }} answer sheet{{ total === 1 ? '' : 's' }} allocated across {{ breakdown.length }} course{{ breakdown.length === 1 ? '' : 's' }}.
+            {{ sheetTotal }} {{ pendingOnly ? 'pending ' : '' }}answer sheet{{ sheetTotal === 1 ? '' : 's' }} {{ pendingOnly ? '' : 'allocated ' }}across {{ rows.length }} course{{ rows.length === 1 ? '' : 's' }}.
           </p>
         </div>
         <button type="button" class="text-gray-400 hover:text-gray-700 transition-colors" aria-label="Close" @click="close">
@@ -62,47 +76,74 @@ onMounted(fetchAssignments)
 
         <template v-else>
           <div class="overflow-x-auto">
-            <table class="w-full min-w-[920px] text-left border-separate border-spacing-0">
+            <table class="w-full min-w-[1200px] text-left border-separate border-spacing-0">
               <thead>
-                <tr class="bg-subject-header text-white text-[11px] font-medium">
-                  <th class="px-2.5 py-2 rounded-tl-xl">Program</th>
-                  <th class="px-2.5 py-2">Course</th>
-                  <th class="px-2.5 py-2">Exam Term</th>
-                  <th class="px-2.5 py-2">Exam Type</th>
-                  <th class="px-2.5 py-2 text-center">Semester</th>
-                  <th class="px-2.5 py-2 text-center">Exam Year</th>
-                  <th class="px-2.5 py-2">Packet Code</th>
-                  <th class="px-2.5 py-2 text-center">Sheets</th>
-                  <th class="px-2.5 py-2 text-center">Completed</th>
-                  <th class="px-2.5 py-2 text-center rounded-tr-xl">In Draft</th>
+                <tr class="bg-subject-header text-white text-[11px] font-medium whitespace-nowrap">
+                  <th class="px-2.5 py-2 rounded-tl-xl">Program / Course</th>
+                  <th class="px-2.5 py-2">Department</th>
+                  <th class="px-2.5 py-2">Exam Term / Type</th>
+                  <th class="px-2.5 py-2 text-center">Sem</th>
+                  <!-- <th class="px-2.5 py-2 text-center">Exam Year</th> -->
+                  <th class="px-2.5 py-2">Pkt. Code</th>
+                  <th class="px-2.5 py-2 whitespace-nowrap">Assigned By / At</th>
+                  <th class="px-2.5 py-2">Sheets</th>
+                  <th class="px-2.5 py-2 rounded-tr-xl whitespace-nowrap">Pending / Problem</th>
                 </tr>
               </thead>
               <tbody class="bg-white">
                 <tr v-if="loading">
-                  <td colspan="10" class="px-2.5 py-10 text-center text-[13px] text-muted">Loading&hellip;</td>
+                  <td colspan="8" class="px-2.5 py-10 text-center text-[13px] text-muted">Loading&hellip;</td>
                 </tr>
-                <tr v-else-if="!breakdown.length">
-                  <td colspan="10" class="px-2.5 py-10 text-center text-[13px] text-muted">No answer sheets allocated to this teacher yet.</td>
+                <tr v-else-if="!rows.length">
+                  <td colspan="8" class="px-2.5 py-10 text-center text-[13px] text-muted">
+                    {{ pendingOnly ? 'No pending answer sheets for this teacher.' : 'No answer sheets allocated to this teacher yet.' }}
+                  </td>
                 </tr>
                 <tr
-                  v-for="row in breakdown"
+                  v-for="row in rows"
                   v-else
                   :key="row.mapping_id"
                   class="text-[12.5px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0 align-top"
                 >
-                  <td class="px-2.5 py-2.5">{{ row.program_name || '—' }}</td>
-                  <td class="px-2.5 py-2.5">
-                    {{ row.course_name || '—' }}
-                    <span v-if="row.course_code" class="text-muted">({{ row.course_code }})</span>
+                  <!-- Program and Course — labelled, labels and values lined up. -->
+                  <td class="px-2.5 py-2.5 min-w-[320px]">
+                    <div class="grid grid-cols-[auto_auto_minmax(0,1fr)] gap-x-1.5 gap-y-0.5 leading-snug">
+                      <span class="text-muted">Prog.</span><span class="text-muted">:</span>
+                      <span class="font-medium text-gray-900">{{ programsStore.display(row.program_name) || '—' }}</span>
+                      <span class="text-muted">Course</span><span class="text-muted">:</span>
+                      <span>{{ row.course_name ? courseLabel(row.course_name, row.course_code, row.course_type) : '—' }}</span>
+                    </div>
                   </td>
-                  <td class="px-2.5 py-2.5">{{ row.exam_term_name || '—' }}</td>
-                  <td class="px-2.5 py-2.5">{{ row.exam_type_name || '—' }}</td>
-                  <td class="px-2.5 py-2.5 text-center">{{ row.semester ?? '—' }}</td>
-                  <td class="px-2.5 py-2.5 text-center">{{ row.exam_year ?? '—' }}</td>
-                  <td class="px-2.5 py-2.5 font-medium">{{ row.packet_code || '—' }}</td>
-                  <td class="px-2.5 py-2.5 text-center font-semibold">{{ row.sheet_count }}</td>
-                  <td class="px-2.5 py-2.5 text-center text-success font-semibold">{{ row.completed_count }}</td>
-                  <td class="px-2.5 py-2.5 text-center text-brand font-semibold">{{ row.draft_count }}</td>
+                  <!-- The packet's own department (chosen on Answer Sheet Upload). -->
+                  <td class="px-2.5 py-2.5 min-w-[220px]">{{ row.department_name || '—' }}</td>
+                  <!-- Exam Term with the Exam Type below it. -->
+                  <td class="px-2.5 py-2.5 whitespace-nowrap">
+                    <p class="leading-snug">{{ row.exam_term_name || '—' }}</p>
+                    <p class="mt-0.5 text-[11px] text-muted leading-snug">{{ row.exam_type_name || '—' }}</p>
+                  </td>
+                  <td class="px-2.5 py-2.5 text-center whitespace-nowrap">{{ ordinal(row.semester) }}</td>
+                  <!-- <td class="px-2.5 py-2.5 text-center">{{ row.exam_year ?? '—' }}</td> -->
+                  <td class="px-2.5 py-2.5 font-medium whitespace-nowrap">{{ row.packet_code || '—' }}</td>
+                  <!-- Who assigned these sheets to the teacher, with when below
+                       (the latest assignment, if done in more than one go). -->
+                  <td class="px-2.5 py-2.5 whitespace-nowrap">
+                    <p class="leading-snug">{{ row.assigned_by_name || '—' }}</p>
+                    <p class="mt-0.5 text-[11px] text-muted leading-snug">{{ formatDateTime(row.assigned_at) }}</p>
+                  </td>
+                  <!-- Total with Completed below; Pending with Problem below —
+                       same label : value style as Generate Marksheet. -->
+                  <td class="px-2.5 py-2.5">
+                    <div class="inline-grid grid-cols-[auto_auto_auto] gap-x-1.5 gap-y-0.5 leading-snug whitespace-nowrap">
+                      <span class="text-muted">Total</span><span class="text-muted">:</span><span class="font-semibold text-gray-900">{{ row.sheet_count }}</span>
+                      <span class="text-muted">Completed</span><span class="text-muted">:</span><span class="font-semibold text-success">{{ row.completed_count }}</span>
+                    </div>
+                  </td>
+                  <td class="px-2.5 py-2.5">
+                    <div class="inline-grid grid-cols-[auto_auto_auto] gap-x-1.5 gap-y-0.5 leading-snug whitespace-nowrap">
+                      <span class="text-muted">Pending</span><span class="text-muted">:</span><span class="font-semibold text-brand">{{ row.pending_count ?? 0 }}</span>
+                      <span class="text-muted">Problem</span><span class="text-muted">:</span><span class="font-semibold text-amber-600">{{ row.problem_count ?? 0 }}</span>
+                    </div>
+                  </td>
                 </tr>
               </tbody>
             </table>

@@ -34,7 +34,7 @@ class ProgramController extends Controller
      *      - ?table_fields=["name","code"]  → trims the SELECT to just those columns (+id)
      *      - ?is_active=yes|no    → filter by the program's own active/inactive flag
      *  - default                  → paginated, searchable listing
-     *      - ?search=, ?name=, ?department=, ?code=, ?is_active=yes|no, ?sort_by=, ?sort_by_field=, ?per_page=
+     *      - ?search=, ?name=, ?label=, ?department=, ?code=, ?is_active=yes|no, ?sort_by=, ?sort_by_field=, ?per_page=
      *      - ?table_fields=["name","code"]  → same column-trimming as the "all" branch
      */
     public function index(Request $request): JsonResponse
@@ -60,7 +60,7 @@ class ProgramController extends Controller
             if ($fieldsRequested) {
                 $this->applyFieldSelection($query, $request);
             } else {
-                $query->with('courses:id,name,code');
+                $query->with('courses:id,name,code,type');
             }
 
             $this->applyActiveFilter($query, $request);
@@ -72,7 +72,7 @@ class ProgramController extends Controller
         }
 
         // Searches every column the list actually shows (see
-        // ProgramsView.vue's table: Name, Department, Code, Courses,
+        // ProgramsView.vue's table: Name, Label, Department, Code, Courses,
         // Status) rather than just name/department/code — "Active"/
         // "Inactive" match the boolean `status` column since that's how
         // it's displayed, and a mapped course's name/code match too.
@@ -80,6 +80,7 @@ class ProgramController extends Controller
             $search = $request->string('search')->toString();
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('label', 'like', "%{$search}%")
                     ->orWhere('department', 'like', "%{$search}%")
                     ->orWhere('code', 'like', "%{$search}%")
                     ->orWhereHas('courses', function ($cq) use ($search) {
@@ -103,6 +104,10 @@ class ProgramController extends Controller
             $query->where('name', 'like', '%'.$request->string('name')->toString().'%');
         }
 
+        if ($request->filled('label')) {
+            $query->where('label', 'like', '%'.$request->string('label')->toString().'%');
+        }
+
         if ($request->filled('department')) {
             $query->where('department', 'like', '%'.$request->string('department')->toString().'%');
         }
@@ -115,7 +120,7 @@ class ProgramController extends Controller
         if ($fieldsRequested) {
             $this->applyFieldSelection($query, $request);
         } else {
-            $query->with('courses:id,name,code');
+            $query->with('courses:id,name,code,type');
         }
 
         $this->applyActiveFilter($query, $request);
@@ -169,7 +174,7 @@ class ProgramController extends Controller
 
     private function applySorting(Builder $query, Request $request): void
     {
-        $sortField = in_array($request->input('sort_by_field'), ['id', 'name', 'department', 'code', 'status', 'created_at'], true)
+        $sortField = in_array($request->input('sort_by_field'), ['id', 'name', 'label', 'department', 'code', 'status', 'created_at'], true)
             ? $request->input('sort_by_field')
             : 'id';
         $sortDir = Str::lower((string) $request->input('sort_by')) === 'asc' ? 'asc' : 'desc';
@@ -266,6 +271,12 @@ class ProgramController extends Controller
 
     public function restore(Program $program): JsonResponse
     {
+        // A new program may have taken the same name + code + label while
+        // this one was deleted — restoring it would make a duplicate.
+        if (Program::hasDuplicate($program->name, $program->code, $program->label, $program->id)) {
+            return $this->error('Cannot restore: an active program with the same Name, Code and Label already exists.', 422);
+        }
+
         $program->restore();
 
         return $this->success(new ProgramResource($program), 'Program restored successfully.');

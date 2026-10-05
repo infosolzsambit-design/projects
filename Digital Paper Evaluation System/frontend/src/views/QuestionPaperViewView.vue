@@ -14,6 +14,7 @@ import api, { resolveStorageUrl } from '../utils/api'
 import { loadPdf, renderPageToCanvas } from '../utils/pdf'
 import QuestionNodeViewer from '../components/questionPapers/QuestionNodeViewer.vue'
 import { useAuthStore } from '../stores/auth'
+import { typeSuffix } from '../utils/course'
 
 const route = useRoute()
 const router = useRouter()
@@ -144,14 +145,18 @@ function goToConfigure() {
 
       <template v-else>
         <!-- Paper details strip -->
-        <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-3.5 mb-4 grid grid-cols-2 sm:grid-cols-5 gap-3 text-[13px]">
+        <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-3.5 mb-4 grid grid-cols-2 sm:grid-cols-6 gap-3 text-[13px]">
           <div>
             <p class="text-muted text-[11px] mb-0.5">Exam Year</p>
             <p class="font-semibold text-gray-800">{{ paper.exam_year }}</p>
           </div>
           <div>
+            <p class="text-muted text-[11px] mb-0.5">Departments</p>
+            <p class="font-semibold text-gray-800">{{ (paper.departments || []).map((d) => d.name).join(', ') || '—' }}</p>
+          </div>
+          <div>
             <p class="text-muted text-[11px] mb-0.5">Course</p>
-            <p class="font-semibold text-gray-800">{{ paper.course_name || '—' }}<span v-if="paper.course_code" class="text-muted font-normal"> ({{ paper.course_code }})</span></p>
+            <p class="font-semibold text-gray-800">{{ paper.course_name || '—' }}<span v-if="paper.course_code" class="text-muted font-normal"> ({{ paper.course_code }})</span><span v-if="paper.course_type" class="text-muted font-normal">{{ typeSuffix(paper.course_type) }}</span></p>
           </div>
           <div>
             <p class="text-muted text-[11px] mb-0.5">Semester</p>

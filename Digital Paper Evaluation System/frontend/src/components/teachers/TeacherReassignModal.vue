@@ -5,6 +5,12 @@ import { useToast } from '../../composables/useToast'
 import { useBrandingStore } from '../../stores/branding'
 import TeacherAllocationModal from './TeacherAllocationModal.vue'
 import SendAssignmentEmailModal from './SendAssignmentEmailModal.vue'
+import { useProgramsStore } from '../../stores/programs'
+import { courseLabel, typeSuffix } from '../../utils/course'
+
+// Program names display as "Name (Label)" — see stores/programs.js.
+const programsStore = useProgramsStore()
+programsStore.load().catch(() => {})
 
 // Opened from AssignedTeachersView.vue's row action menu ("Reassign") —
 // the "this teacher is on leave, split their pending work across the rest
@@ -228,7 +234,7 @@ function onReassigned(resData) {
 
 <template>
   <div class="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4" @click.self="close">
-    <div class="bg-white rounded-[24px] shadow-card w-full max-w-4xl max-h-[88vh] flex flex-col overflow-hidden">
+    <div class="bg-white rounded-[24px] shadow-card w-full max-w-5xl max-h-[88vh] flex flex-col overflow-hidden">
       <div class="flex items-start justify-between gap-3 px-5 pt-5 pb-3 border-b border-soft">
         <div>
           <h2 class="text-lg font-bold text-black">
@@ -269,10 +275,10 @@ function onReassigned(resData) {
               <div class="min-w-0">
                 <p class="text-[13px] font-semibold text-gray-900 truncate">
                   {{ row.course_name || 'Untitled course' }}
-                  <span v-if="row.course_code" class="text-muted font-normal">({{ row.course_code }})</span>
+                  <span v-if="row.course_code" class="text-muted font-normal">({{ row.course_code }})</span><span v-if="row.course_type" class="text-muted font-normal">{{ typeSuffix(row.course_type) }}</span>
                 </p>
                 <p class="text-[11.5px] text-muted mt-0.5 truncate">
-                  {{ row.program_name || '—' }} · {{ row.exam_term_name || '—' }} · {{ row.exam_type_name || '—' }} · Sem {{ row.semester ?? '—' }} · {{ row.exam_year ?? '—' }}
+                  {{ programsStore.display(row.program_name) || '—' }}<span v-if="row.department_name"> · {{ row.department_name }}</span> · {{ row.exam_term_name || '—' }} · {{ row.exam_type_name || '—' }} · Sem {{ row.semester ?? '—' }} · {{ row.exam_year ?? '—' }}
                   <span v-if="row.packet_code"> · {{ row.packet_code }}</span>
                 </p>
               </div>
@@ -300,7 +306,7 @@ function onReassigned(resData) {
               <div class="min-w-0">
                 <p class="text-[15px] font-bold text-gray-900 truncate">
                   {{ selectedRow?.course_name || 'This course' }}
-                  <span v-if="selectedRow?.course_code" class="text-muted font-medium">({{ selectedRow.course_code }})</span>
+                  <span v-if="selectedRow?.course_code" class="text-muted font-medium">({{ selectedRow.course_code }})</span><span v-if="selectedRow?.course_type" class="text-muted font-medium">{{ typeSuffix(selectedRow?.course_type) }}</span>
                 </p>
                 <p class="text-[12px] text-muted mt-0.5">
                   Split {{ selectedRow?.reassignable_count }} sheet{{ selectedRow?.reassignable_count === 1 ? '' : 's' }} across one or more other teachers.
@@ -308,7 +314,9 @@ function onReassigned(resData) {
               </div>
             </div>
             <div class="flex flex-wrap gap-1.5 mt-3">
-              <span class="inline-flex items-center rounded-full bg-white border border-input-border px-2.5 py-1 text-[11px] font-medium text-gray-700">{{ selectedRow?.program_name || '—' }}</span>
+              <span class="inline-flex items-center rounded-full bg-white border border-input-border px-2.5 py-1 text-[11px] font-medium text-gray-700">{{ programsStore.display(selectedRow?.program_name) || '—' }}</span>
+              <!-- The packet's own department (chosen on Answer Sheet Upload). -->
+              <span v-if="selectedRow?.department_name" class="inline-flex items-center rounded-full bg-white border border-input-border px-2.5 py-1 text-[11px] font-medium text-gray-700">{{ selectedRow.department_name }}</span>
               <span class="inline-flex items-center rounded-full bg-white border border-input-border px-2.5 py-1 text-[11px] font-medium text-gray-700">{{ selectedRow?.exam_term_name || '—' }}</span>
               <span class="inline-flex items-center rounded-full bg-white border border-input-border px-2.5 py-1 text-[11px] font-medium text-gray-700">{{ selectedRow?.exam_type_name || '—' }}</span>
               <span class="inline-flex items-center rounded-full bg-white border border-input-border px-2.5 py-1 text-[11px] font-medium text-gray-700">Semester {{ selectedRow?.semester ?? '—' }}</span>
@@ -459,7 +467,7 @@ function onReassigned(resData) {
     :endpoint="`/teachers/${teacher.id}/assignments/reassign`"
     action-word="Reassign"
     :payload="pendingReassignPayload"
-    :course-name="selectedRow?.course_name ? `${selectedRow.course_name}${selectedRow.course_code ? ` (${selectedRow.course_code})` : ''}` : ''"
+    :course-name="selectedRow?.course_name ? courseLabel(selectedRow.course_name, selectedRow.course_code, selectedRow.course_type) : ''"
     :site-title="brandingStore.siteTitleValue"
     @close="showSendMailModal = false"
     @assigned="onReassigned"

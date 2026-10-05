@@ -30,6 +30,7 @@ class ProgramManagementTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/programs', [
             'name' => 'Bachelor of Technology',
+            'label' => 'UG',
             'department_id' => $department->id,
             'code' => 'BTECH-01',
             'course_ids' => [$course->id],
@@ -53,6 +54,7 @@ class ProgramManagementTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/programs', [
             'name' => 'No Department Program',
+            'label' => 'UG',
             'code' => 'NODEPT-01',
         ]);
 
@@ -67,6 +69,7 @@ class ProgramManagementTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/programs', [
             'name' => 'Bad Department Program',
+            'label' => 'UG',
             'department_id' => $trashedDepartment->id,
             'code' => 'BADDEPT-01',
         ]);
@@ -81,6 +84,7 @@ class ProgramManagementTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/programs', [
             'name' => 'No Courses Program',
+            'label' => 'UG',
             'department_id' => $department->id,
             'code' => 'NOCOURSE-01',
         ]);
@@ -97,6 +101,7 @@ class ProgramManagementTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/programs', [
             'name' => 'Bad Course Program',
+            'label' => 'UG',
             'department_id' => $department->id,
             'code' => 'BADCOURSE-01',
             'course_ids' => [999999],
@@ -114,6 +119,7 @@ class ProgramManagementTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/programs', [
             'name' => 'Trashed Course Program',
+            'label' => 'UG',
             'department_id' => $department->id,
             'code' => 'TRASHCOURSE-01',
             'course_ids' => [$trashedCourse->id],
@@ -175,19 +181,61 @@ class ProgramManagementTest extends TestCase
         $this->assertDatabaseHas('programs', ['id' => $program->id, 'department' => 'Arts', 'department_id' => $arts->id]);
     }
 
-    public function test_program_code_must_be_unique(): void
+    public function test_label_is_required_and_max_20_characters(): void
     {
         $this->actingAdmin();
-        Program::factory()->create(['code' => 'DUPE-01']);
         $department = Department::factory()->create();
+        $payload = ['name' => 'B.Sc', 'department_id' => $department->id, 'code' => 'BSC'];
 
-        $response = $this->withApiKey()->postJson('/api/v1/programs', [
-            'name' => 'Another Program',
-            'department_id' => $department->id,
-            'code' => 'DUPE-01',
-        ]);
+        $this->withApiKey()->postJson('/api/v1/programs', $payload)
+            ->assertStatus(422)->assertJsonValidationErrors('label');
+        $this->withApiKey()->postJson('/api/v1/programs', $payload + ['label' => str_repeat('X', 21)])
+            ->assertStatus(422)->assertJsonValidationErrors('label');
+        $this->withApiKey()->postJson('/api/v1/programs', $payload + ['label' => 'UG'])
+            ->assertStatus(201)->assertJsonPath('data.label', 'UG');
+    }
 
-        $response->assertStatus(422)->assertJsonValidationErrors('code');
+    public function test_name_code_and_label_must_be_unique_together(): void
+    {
+        $this->actingAdmin();
+        $department = Department::factory()->create();
+        Program::factory()->create(['name' => 'B.Sc', 'code' => 'BSC', 'label' => 'UG']);
+
+        // Exact same combination (case-insensitive) → rejected on all three fields.
+        $this->withApiKey()->postJson('/api/v1/programs', ['name' => 'b.sc', 'label' => 'ug', 'code' => 'bsc', 'department_id' => $department->id])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['name', 'code', 'label'])
+            ->assertJsonPath('errors.code.0', Program::DUPLICATE_MESSAGE);
+
+        // Any one of the three different → allowed.
+        $this->withApiKey()->postJson('/api/v1/programs', ['name' => 'B.Sc', 'label' => 'PG', 'code' => 'BSC', 'department_id' => $department->id])->assertStatus(201);
+        $this->withApiKey()->postJson('/api/v1/programs', ['name' => 'B.Sc', 'label' => 'UG', 'code' => 'BSC-2', 'department_id' => $department->id])->assertStatus(201);
+        $this->withApiKey()->postJson('/api/v1/programs', ['name' => 'B.Sc Hons', 'label' => 'UG', 'code' => 'BSC', 'department_id' => $department->id])->assertStatus(201);
+    }
+
+    public function test_update_checks_the_combination_but_ignores_the_program_itself(): void
+    {
+        $this->actingAdmin();
+        Program::factory()->create(['name' => 'B.Sc', 'code' => 'BSC', 'label' => 'UG']);
+        $pg = Program::factory()->create(['name' => 'B.Sc', 'code' => 'BSC', 'label' => 'PG']);
+
+        // Saving it unchanged is fine.
+        $this->withApiKey()->putJson("/api/v1/programs/{$pg->id}", ['name' => 'B.Sc', 'code' => 'BSC', 'label' => 'PG'])->assertOk();
+        // Changing only its label onto the other one's → duplicate.
+        $this->withApiKey()->putJson("/api/v1/programs/{$pg->id}", ['label' => 'UG'])
+            ->assertStatus(422)->assertJsonValidationErrors(['name', 'code', 'label']);
+        $this->assertSame('PG', $pg->fresh()->label);
+    }
+
+    public function test_restore_is_blocked_when_an_active_program_has_the_same_combination(): void
+    {
+        $this->actingAdmin();
+        $old = Program::factory()->create(['name' => 'M.Sc', 'code' => 'MSC', 'label' => 'PG']);
+        $old->delete();
+        Program::factory()->create(['name' => 'M.Sc', 'code' => 'MSC', 'label' => 'PG']);
+
+        $this->withApiKey()->postJson("/api/v1/programs/{$old->id}/restore")->assertStatus(422);
+        $this->assertSoftDeleted('programs', ['id' => $old->id]);
     }
 
     public function test_a_soft_deleted_programs_code_can_be_reused(): void
@@ -200,6 +248,7 @@ class ProgramManagementTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/programs', [
             'name' => 'Fresh Program',
+            'label' => 'UG',
             'department_id' => $department->id,
             'code' => 'REUSE-01',
             'course_ids' => [$course->id],

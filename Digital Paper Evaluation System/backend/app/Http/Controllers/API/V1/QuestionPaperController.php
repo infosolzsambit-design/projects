@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API\V1;
 
+use App\Helpers\PublicStorage;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\QuestionPaper\StoreQuestionPaperRequest;
 use App\Http\Requests\QuestionPaper\UpdateQuestionPaperPdfRequest;
@@ -17,6 +18,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 /**
  * Setup flow (see QuestionPapersView.vue — the list page has no "Add"
@@ -55,7 +57,7 @@ class QuestionPaperController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = QuestionPaper::with(['course', 'examTerm'])
+        $query = QuestionPaper::with(['course', 'departments', 'examTerm', 'creator:id,name'])
             ->addSelect(['evaluation_started' => $this->evaluationStartedSubquery()])
             ->latest('id');
 
@@ -65,6 +67,7 @@ class QuestionPaperController extends Controller
                 $q->whereHas('course', function ($cq) use ($search) {
                     $cq->where('name', 'like', "%{$search}%")->orWhere('code', 'like', "%{$search}%");
                 })
+                    ->orWhereHas('departments', fn ($dq) => $dq->where('name', 'like', "%{$search}%"))
                     ->orWhere('exam_year', 'like', "%{$search}%")
                     ->orWhere('semester', 'like', "%{$search}%")
                     ->orWhere('full_marks', 'like', "%{$search}%")
@@ -98,6 +101,10 @@ class QuestionPaperController extends Controller
             $query->where('exam_term_id', $request->integer('exam_term_id'));
         }
 
+        if ($request->filled('department_id')) {
+            $query->whereHas('departments', fn ($dq) => $dq->whereKey($request->integer('department_id')));
+        }
+
         if ($request->filled('status')) {
             $query->where('status', $request->string('status')->toString());
         }
@@ -124,6 +131,7 @@ class QuestionPaperController extends Controller
         $data = $request->validated();
 
         $pdfPath = '/storage/'.$request->file('pdf')->store('question-papers', 'public');
+        PublicStorage::openFolder('question-papers');
 
         $paper = DB::transaction(function () use ($data, $pdfPath) {
             $paper = QuestionPaper::create([
@@ -136,6 +144,7 @@ class QuestionPaperController extends Controller
                 'time_allotted' => $data['time_allotted'] ?? null,
                 'status' => 'ready',
             ]);
+            $paper->departments()->sync($data['department_ids']);
 
             $this->createNodes($paper, $data['groups'], null);
 
@@ -150,7 +159,7 @@ class QuestionPaperController extends Controller
         );
 
         return $this->success(
-            new QuestionPaperResource($paper->load(['course', 'examTerm', 'groups'])),
+            new QuestionPaperResource($paper->load(['course', 'departments', 'examTerm', 'groups'])),
             'Question paper created successfully.',
             201,
         );
@@ -161,8 +170,39 @@ class QuestionPaperController extends Controller
         $questionPaper->setAttribute('evaluation_started', $this->hasStartedEvaluation($questionPaper));
 
         return $this->success(
-            new QuestionPaperResource($questionPaper->load(['course', 'examTerm', 'groups'])),
+            new QuestionPaperResource($questionPaper->load(['course', 'departments', 'examTerm', 'groups'])),
             'Question paper retrieved successfully.',
+        );
+    }
+
+    /**
+     * PATCH /question-papers/{id}/departments — change only the department
+     * tags. Allowed even once evaluation has started (when the structure
+     * itself is locked — see hasStartedEvaluation()), since they're just
+     * labels and don't touch the question tree, marks or PDF. This is how
+     * papers set up before Department existed get theirs.
+     */
+    public function updateDepartments(Request $request, QuestionPaper $questionPaper): JsonResponse
+    {
+        $data = $request->validate([
+            'department_ids' => ['required', 'array', 'min:1'],
+            'department_ids.*' => ['integer', 'distinct', Rule::exists('departments', 'id')->whereNull('deleted_at')->where('status', true)],
+        ]);
+        $old = $questionPaper->departments()->pluck('departments.id')->all();
+        $questionPaper->departments()->sync($data['department_ids']);
+
+        $this->auditLog->log(
+            event: 'question-paper-departments-updated',
+            module: 'Question Papers',
+            description: "Changed the departments of question paper #{$questionPaper->id}.",
+            auditable: $questionPaper,
+            oldValues: ['department_ids' => $old],
+            newValues: ['department_ids' => array_map('intval', $data['department_ids'])],
+        );
+
+        return $this->success(
+            new QuestionPaperResource($questionPaper->fresh()->load(['course', 'departments', 'examTerm'])),
+            'Departments updated successfully.',
         );
     }
 
@@ -194,6 +234,7 @@ class QuestionPaperController extends Controller
                 'time_allotted' => $data['time_allotted'] ?? null,
                 'status' => 'ready',
             ]);
+            $questionPaper->departments()->sync($data['department_ids']);
 
             QuestionPaperNode::where('question_paper_id', $questionPaper->id)->delete();
 
@@ -208,7 +249,7 @@ class QuestionPaperController extends Controller
         );
 
         return $this->success(
-            new QuestionPaperResource($questionPaper->fresh()->load(['course', 'examTerm', 'groups'])),
+            new QuestionPaperResource($questionPaper->fresh()->load(['course', 'departments', 'examTerm', 'groups'])),
             'Question paper setup saved successfully.',
         );
     }
@@ -228,6 +269,7 @@ class QuestionPaperController extends Controller
     {
         $oldPath = $questionPaper->pdf_path;
         $newPath = '/storage/'.$request->file('pdf')->store('question-papers', 'public');
+        PublicStorage::openFolder('question-papers');
 
         $questionPaper->update(['pdf_path' => $newPath]);
 
@@ -243,7 +285,7 @@ class QuestionPaperController extends Controller
         );
 
         return $this->success(
-            new QuestionPaperResource($questionPaper->fresh()->load(['course', 'examTerm'])),
+            new QuestionPaperResource($questionPaper->fresh()->load(['course', 'departments', 'examTerm'])),
             'Question paper PDF replaced successfully.',
         );
     }

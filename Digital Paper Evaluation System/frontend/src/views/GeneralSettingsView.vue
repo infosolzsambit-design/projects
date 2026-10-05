@@ -138,7 +138,8 @@ async function submit() {
   fields.value.forEach((field) => { fieldErrors[field.field_name] = '' })
 
   const payload = new FormData()
-  fields.value.forEach((field) => {
+  // Settings that are off aren't validated or saved (see toggleStatus()).
+  fields.value.filter((field) => field.status).forEach((field) => {
     const name = field.field_name
     if (field.type === 'file') {
       if (pendingFiles[name]) payload.append(name, pendingFiles[name])
@@ -185,6 +186,29 @@ async function submit() {
   }
 }
 
+// Per-field On/Off switch — takes effect right away (separate from the
+// Update Settings button). Off means the app stops using that setting and
+// falls back to its own default; the stored value is kept for when it's
+// switched back on.
+const togglingField = ref(null)
+const BRANDING_FIELDS = ['favicon', 'login_logo', 'header_logo_full', 'header_logo_icon', 'footer_logo', 'site_title', 'organization_logo']
+
+async function toggleStatus(field) {
+  const next = !field.status
+  togglingField.value = field.field_name
+  try {
+    const res = await api.patch(`/general-settings/${field.id}/status`, { status: next }, { skipLoader: true })
+    field.status = res.data.data.status
+    if (!field.status) fieldErrors[field.field_name] = ''
+    toast.success(`"${field.label || field.field_name}" turned ${field.status ? 'on' : 'off'}.`)
+    if (BRANDING_FIELDS.includes(field.field_name)) branding.load()
+  } catch (err) {
+    toast.error(err.response?.data?.message || 'Could not change the setting status.')
+  } finally {
+    togglingField.value = null
+  }
+}
+
 onMounted(loadSettings)
 </script>
 
@@ -203,7 +227,7 @@ onMounted(loadSettings)
         </span>
         <div>
           <h1 class="text-[20px] sm:text-[24px] font-semibold text-brand leading-tight">General Settings</h1>
-          <p class="mt-1 text-[13px] sm:text-sm text-muted">Site-wide configuration used across the app.</p>
+          <p class="mt-1 text-[13px] sm:text-sm text-muted">Site-wide configuration used across the app. Use the On/Off switch on any setting to turn it on or off — changes apply immediately.</p>
         </div>
       </div>
 
@@ -228,10 +252,33 @@ onMounted(loadSettings)
                 class="flex flex-col gap-1.5"
                 :class="['textarea', 'radio', 'checkbox'].includes(field.type) ? 'md:col-span-2' : ''"
               >
-                <label :for="field.field_name" class="text-[13px] text-label">
-                  {{ field.label || field.field_name }}
-                  <span v-if="field.is_required" class="text-brand">*</span>
-                </label>
+                <div class="flex items-center justify-between gap-3">
+                  <label :for="field.field_name" class="text-[13px] text-label">
+                    {{ field.label || field.field_name }}
+                    <span v-if="field.is_required && field.status" class="text-brand">*</span>
+                  </label>
+                  <!-- On/Off: whether the app uses this setting at all. -->
+                  <button
+                    type="button"
+                    role="switch"
+                    :aria-checked="field.status"
+                    :aria-label="`${field.label || field.field_name}: ${field.status ? 'on' : 'off'}`"
+                    :disabled="togglingField === field.field_name"
+                    :title="field.status ? 'On — click to turn off' : 'Off — click to turn on'"
+                    class="relative shrink-0 inline-flex items-center w-14 h-6 rounded-full text-[10px] font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    :class="field.status ? 'bg-btn-gradient text-white justify-start pl-2.5 pr-6' : 'bg-gray-300 text-gray-600 justify-end pl-6 pr-2.5'"
+                    @click="toggleStatus(field)"
+                  >
+                    <span>{{ field.status ? 'On' : 'Off' }}</span>
+                    <span
+                      class="absolute top-[5px] left-[5px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform duration-200"
+                      :class="field.status ? 'translate-x-[32px]' : 'translate-x-0'"
+                    ></span>
+                  </button>
+                </div>
+
+                <!-- Everything below is locked and greyed out while the setting is off. -->
+                <fieldset :disabled="!field.status" class="min-w-0 m-0 p-0 border-0 flex flex-col gap-1.5 transition-opacity" :class="field.status ? '' : 'opacity-45'">
 
                 <!-- text / number / email / url / date -->
                 <input
@@ -342,6 +389,8 @@ onMounted(loadSettings)
 
                 <p v-if="field.help_text" class="text-[12px] text-muted">{{ field.help_text }}</p>
                 <p v-if="fieldErrors[field.field_name]" class="text-[12px] text-brand">{{ fieldErrors[field.field_name] }}</p>
+                </fieldset>
+                <p v-if="!field.status" class="text-[11.5px] text-muted">Off — not used in the app (it uses its default instead). Turn it on to edit.</p>
               </div>
             </template>
           </div>

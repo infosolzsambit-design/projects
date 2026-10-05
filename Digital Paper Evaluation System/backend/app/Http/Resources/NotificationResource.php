@@ -57,6 +57,7 @@ class NotificationResource extends JsonResource
             'fixed_at' => $this->issue_fixed_at?->format('Y-m-d H:i'),
             'course_name' => $this->whenLoaded('mapping', fn () => $this->mapping?->course?->name),
             'course_code' => $this->whenLoaded('mapping', fn () => $this->mapping?->course?->code),
+            'course_type' => $this->whenLoaded('mapping', fn () => $this->mapping?->course?->type),
         ];
     }
 }

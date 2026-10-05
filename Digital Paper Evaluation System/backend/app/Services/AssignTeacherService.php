@@ -33,7 +33,8 @@ use Illuminate\Validation\ValidationException;
 class AssignTeacherService
 {
     /**
-     * @param  array{program_name:string,exam_term_id:int,exam_type_id:int,course_id:int,semester:int,exam_year:int}  $filters
+     * @param  array{program_name:string,exam_term_id:int,exam_type_id:int,course_id:int,semester:int,exam_year:int,department_id?:int|null}  $filters
+     *   department_id (optional) — only packets uploaded under that department.
      * @param  list<array{teacher_id:int,quantity:int}>  $assignments
      * @return list<array{teacher_id:int,assigned_count:int}>
      *
@@ -54,6 +55,7 @@ class AssignTeacherService
                 ->where('course_id', $filters['course_id'])
                 ->where('semester', $filters['semester'])
                 ->whereHas('questionPaper', fn ($q) => $q->where('exam_year', $filters['exam_year']))
+                ->when(! empty($filters['department_id']), fn ($q) => $q->where('department_id', $filters['department_id']))
                 ->pluck('id');
 
             if ($mappingIds->isEmpty()) {
@@ -99,6 +101,7 @@ class AssignTeacherService
                     $sheet->update([
                         'teacher_id' => $assignment['teacher_id'],
                         'assigned_at' => now(),
+                        'assigned_by' => auth()->id(),
                         'evaluation_start_date' => $evaluationStartDate,
                         'evaluation_end_date' => $evaluationEndDate,
                         'evaluation_time_per_sheet' => $evaluationTimePerSheet,
@@ -178,6 +181,7 @@ class AssignTeacherService
                     $sheet->update([
                         'teacher_id' => $reassignment['teacher_id'],
                         'assigned_at' => now(),
+                        'assigned_by' => auth()->id(),
                         'draft_marks' => null,
                         'draft_marks_breakdown' => null,
                         'draft_annotations' => null,

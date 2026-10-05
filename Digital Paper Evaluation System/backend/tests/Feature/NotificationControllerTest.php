@@ -184,8 +184,10 @@ class NotificationControllerTest extends TestCase
     public function test_resolve_timing_issue_updates_the_schedule_and_marks_it_resolved(): void
     {
         $admin = $this->actingUser();
+        $raisedBy = User::factory()->create();
         $sheet = AnswerSheet::factory()->create([
             'issue_master_id' => (int) config('issues.timing_issue_id'),
+            'issue_raised_by' => $raisedBy->id,
             'issue_status' => 'open',
             'evaluation_start_date' => '2026-09-10 09:00:00',
             'evaluation_end_date' => '2026-09-10 18:00:00',
@@ -208,6 +210,10 @@ class NotificationControllerTest extends TestCase
         $this->assertSame($admin->id, $fresh->issue_fixed_by);
         $this->assertNotNull($fresh->issue_fixed_at);
         $this->assertSame('Extended the window.', $fresh->issue_admin_remarks);
+
+        // The teacher who raised it is notified, linking back to Pending Course.
+        $this->assertDatabaseHas('user_notifications', ['user_id' => $raisedBy->id, 'type' => 'issue_resolved', 'link' => '/my-pending-courses']);
+        $this->assertDatabaseMissing('user_notifications', ['user_id' => $admin->id]);
     }
 
     /**

@@ -14,11 +14,13 @@ import { useToast } from '../../composables/useToast'
 import { useConfirm } from '../../composables/useConfirm'
 import api from '../../utils/api'
 import SearchableSelect from '../common/SearchableSelect.vue'
+import SearchableMultiSelect from '../common/SearchableMultiSelect.vue'
 import QuestionNodeEditor from './QuestionNodeEditor.vue'
 import draggable from 'vuedraggable'
 import { loadPdf, renderPageToCanvas } from '../../utils/pdf'
 import { autoFillFromPdf } from '../../utils/questionPaperParser'
 import { clearErrors, createBranch, createLeaf, mapNodeFromData, nodeToPayload, sumMarks, validateNode } from '../../utils/questionPaperNode'
+import { courseOption } from '../../utils/course'
 
 const props = defineProps({
   // A URL string (existing paper, fetched from the server) or a pdf.js
@@ -28,7 +30,7 @@ const props = defineProps({
   pdfSource: { type: [String, Object], required: true },
   initialForm: {
     type: Object,
-    default: () => ({ exam_year: '', course_id: '', exam_term_id: '', semester: '', full_marks: '', time_allotted: '' }),
+    default: () => ({ exam_year: '', department_ids: [], course_id: '', exam_term_id: '', semester: '', full_marks: '', time_allotted: '' }),
   },
   // Raw server-shape groups (from an already-saved paper) — left empty for
   // a brand new one, which triggers the auto-fill-from-PDF guess below.
@@ -51,16 +53,17 @@ const saving = ref(false)
 const formError = ref('')
 
 const form = reactive({ ...props.initialForm })
-const fieldErrors = reactive({ exam_year: '', course_id: '', exam_term_id: '', semester: '', full_marks: '', time_allotted: '' })
+const fieldErrors = reactive({ exam_year: '', department_ids: [], course_id: '', exam_term_id: '', semester: '', full_marks: '', time_allotted: '' })
 // Order matters — matches the form's own top-to-bottom field order, so the
 // first of these (in this order) that has an error is the one that gets
 // focused after a failed save. Scoped to these flat packet-detail fields
 // only — a group/question validation error (see validateNode()) already
 // shows inline on the affected node itself, deep inside the recursive
 // QuestionNodeEditor.vue tree, which has no single "first field" to focus.
-const FIELD_ORDER = ['exam_year', 'course_id', 'exam_term_id', 'semester', 'time_allotted', 'full_marks']
+const FIELD_ORDER = ['exam_year', 'department_ids', 'course_id', 'exam_term_id', 'semester', 'time_allotted', 'full_marks']
 const fieldRefs = {
   exam_year: ref(null),
+  department_ids: ref(null),
   course_id: ref(null),
   exam_term_id: ref(null),
   semester: ref(null),
@@ -79,12 +82,28 @@ async function loadCourses() {
   coursesLoading.value = true
   coursesError.value = ''
   try {
-    const res = await api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] } })
-    availableCourses.value = res.data.data
+    const res = await api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code', 'type'] } })
+    availableCourses.value = res.data.data.map(courseOption)
   } catch (err) {
     coursesError.value = err.response?.data?.message || 'Could not load courses.'
   } finally {
     coursesLoading.value = false
+  }
+}
+
+const availableDepartments = ref([])
+const departmentsLoading = ref(true)
+const departmentsError = ref('')
+async function loadDepartments() {
+  departmentsLoading.value = true
+  departmentsError.value = ''
+  try {
+    const res = await api.get('/departments', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] } })
+    availableDepartments.value = res.data.data.map((d) => ({ ...d, name: d.code ? `${d.name} (${d.code})` : d.name }))
+  } catch (err) {
+    departmentsError.value = err.response?.data?.message || 'Could not load departments.'
+  } finally {
+    departmentsLoading.value = false
   }
 }
 
@@ -206,6 +225,7 @@ async function rescanPdf() {
 
 onMounted(async () => {
   loadCourses()
+  loadDepartments()
   loadExamTerms()
   loading.value = true
   loadError.value = ''
@@ -268,6 +288,10 @@ function validate() {
   let ok = true
   if (!form.exam_year || String(form.exam_year).length !== 4) {
     fieldErrors.exam_year = 'Enter a valid 4-digit exam year.'
+    ok = false
+  }
+  if (!form.department_ids?.length) {
+    fieldErrors.department_ids = 'Select at least one department.'
     ok = false
   }
   if (!form.course_id) {
@@ -343,6 +367,7 @@ async function submitForm() {
   try {
     const result = await props.submitFn({
       exam_year: Number(form.exam_year),
+      department_ids: [...(form.department_ids || [])],
       course_id: form.course_id,
       exam_term_id: form.exam_term_id,
       semester: Number(form.semester),
@@ -425,6 +450,22 @@ async function submitForm() {
                   :class="fieldErrors.exam_year ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
                 />
                 <p v-if="fieldErrors.exam_year" class="text-[12px] text-brand">{{ fieldErrors.exam_year }}</p>
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label for="department" class="text-[13px] text-label">Departments <span class="text-brand">*</span></label>
+                <SearchableMultiSelect
+                  id="department"
+                  :ref="(el) => (fieldRefs.department_ids.value = el)"
+                  v-model="form.department_ids"
+                  :options="availableDepartments"
+                  :loading="departmentsLoading"
+                  :error="!!fieldErrors.department_ids"
+                  placeholder="Select one or more departments"
+                  search-placeholder="Search departments…"
+                  @change="clearFieldError('department_ids')"
+                />
+                <p v-if="departmentsError" class="text-[12px] text-brand">{{ departmentsError }}</p>
+                <p v-else-if="fieldErrors.department_ids" class="text-[12px] text-brand">{{ fieldErrors.department_ids }}</p>
               </div>
               <div class="flex flex-col gap-1.5">
                 <label for="course" class="text-[13px] text-label">Course <span class="text-brand">*</span></label>

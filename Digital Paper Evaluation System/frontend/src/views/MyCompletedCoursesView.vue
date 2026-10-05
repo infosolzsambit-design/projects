@@ -13,6 +13,7 @@ import { useExamYearStore } from '../stores/examYear'
 import { useExamTypeStore } from '../stores/examType'
 import { formatDateTime } from '../utils/date'
 import DatePicker from '../components/common/DatePicker.vue'
+import { typeSuffix } from '../utils/course'
 
 const authStore = useAuthStore()
 const examYearStore = useExamYearStore()
@@ -185,7 +186,7 @@ watch(
           @click="selectCourse(course)"
         >
           <svg class="w-5 h-5 text-success shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
-          <span class="min-w-0 leading-tight break-words">{{ course.course_code }} - {{ course.course_name?.toUpperCase() }}</span>
+          <span class="min-w-0 leading-tight break-words">{{ course.course_code }} - {{ course.course_name?.toUpperCase() }}{{ typeSuffix(course.course_type).toUpperCase() }}</span>
         </button>
       </div>
     </section>
@@ -197,7 +198,7 @@ watch(
           <span class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
             <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
           </span>
-          <h2 class="text-white text-[16px] sm:text-lg font-medium truncate">{{ activeCourse.course_code }} - {{ activeCourse.course_name }}</h2>
+          <h2 class="text-white text-[16px] sm:text-lg font-medium truncate">{{ activeCourse.course_code }} - {{ activeCourse.course_name }}{{ typeSuffix(activeCourse.course_type) }}</h2>
         </div>
         <div class="flex flex-wrap items-center gap-2" @click.stop>
           <span class="inline-flex items-center rounded-[10px] bg-white/15 text-white text-[11px] sm:text-[12px] px-3.5 py-2">Completed : {{ activeCourse.completed_count }}</span>
@@ -278,13 +279,23 @@ watch(
                 <td class="px-4 py-1.5">
                   <span class="inline-flex items-center justify-center min-w-[40px] rounded-md status-gradient-border px-2 py-0.5 text-[11px] font-medium"># {{ index + 1 }}</span>
                 </td>
-                <td class="px-4 py-1.5 font-semibold">{{ paper.barcode || paper.subject_barcode || paper.roll_no || '—' }}</td>
+                <td class="px-4 py-1.5 font-semibold">
+                  {{ paper.barcode || paper.subject_barcode || paper.roll_no || '—' }}
+                  <span
+                    v-if="paper.issue_master_name && paper.issue_status === 'resolved'"
+                    class="ml-1.5 inline-flex items-center gap-1 rounded-full bg-success/10 text-success text-[11px] font-medium px-2 py-0.5 align-middle whitespace-nowrap"
+                    :title="paper.issue_admin_remarks || undefined"
+                  >
+                    <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" /><path d="M9 12l2 2 4-4" /></svg>
+                    {{ paper.issue_master_name }} Resolved
+                  </span>
+                </td>
                 <td class="px-4 py-1.5 font-semibold">{{ paper.marks }}</td>
                 <td class="px-4 py-1.5">{{ paper.max_marks ?? '—' }}</td>
                 <td class="px-4 py-1.5 whitespace-nowrap">{{ formatCompletedAt(paper.updated_at) }}</td>
                 <td class="px-4 py-1.5 text-center">
-                  <span class="inline-flex items-center gap-1.5 rounded-lg status-gradient-border px-3.5 py-2 text-[13px] font-medium text-success">
-                    <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5" /></svg>
+                  <span class="inline-flex items-center gap-1.5 rounded-full status-gradient-border px-3 py-1.5 text-[12px] font-medium text-success whitespace-nowrap">
+                    <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5" /></svg>
                     Evaluated
                   </span>
                 </td>

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Helpers\CourseLabel;
 use App\Mail\AnswerSheetAssignedMail;
 use App\Models\EmailLog;
 use App\Models\QuestionAnswerSheetMapping;
@@ -40,7 +41,7 @@ class TeacherReassignMailService
         int $mappingId,
     ): void {
         $mapping = QuestionAnswerSheetMapping::with('course')->find($mappingId);
-        $courseName = $mapping?->course ? "{$mapping->course->name} ({$mapping->course->code})" : 'the course';
+        $courseName = CourseLabel::of($mapping?->course);
         ['site_title' => $siteTitle, 'logo_url' => $logoUrl] = $this->branding->resolve();
 
         foreach ($summary as $row) {

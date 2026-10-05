@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import api from '../../utils/api'
+import { typeSuffix } from '../../utils/course'
 
 // Opened by clicking a teacher's "Courses" count in AssignedTeachersView.vue
 // — GET /teachers/{id}/courses, one row per *distinct* course this teacher
@@ -82,7 +83,7 @@ onMounted(fetchCourses)
                 >
                   <td class="px-2.5 py-2.5">
                     {{ row.course_name || '—' }}
-                    <span v-if="row.course_code" class="text-muted">({{ row.course_code }})</span>
+                    <span v-if="row.course_code" class="text-muted">({{ row.course_code }})</span><span v-if="row.course_type" class="text-muted">{{ typeSuffix(row.course_type) }}</span>
                   </td>
                   <td class="px-2.5 py-2.5">{{ row.exam_type_names || '—' }}</td>
                   <td class="px-2.5 py-2.5 text-center font-semibold">{{ row.sheet_count }}</td>

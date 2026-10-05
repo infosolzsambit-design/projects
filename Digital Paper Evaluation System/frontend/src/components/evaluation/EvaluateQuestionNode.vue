@@ -128,5 +128,12 @@ function clampMarks(node) {
       @blur="clampMarks(node)"
     />
     <span class="text-[11px] text-muted w-9 shrink-0 text-right">/ {{ node.marks ?? 0 }}</span>
+    <!-- Knowledge level (violet) and course outcome (teal) from the
+         question paper setup, after a divider — colours match the key at
+         the top of the panel; fixed width so every row lines up. -->
+    <span class="w-[66px] shrink-0 flex items-center gap-1 pl-1.5 border-l border-input-border whitespace-nowrap">
+      <span class="rounded bg-violet-100 text-violet-700 px-1 text-[10px] font-semibold leading-4" title="Knowledge Level">{{ node.bloom_level || '—' }}</span>
+      <span class="rounded bg-teal-100 text-teal-700 px-1 text-[10px] font-semibold leading-4" title="Course Outcome">{{ node.co || '—' }}</span>
+    </span>
   </div>
 </template>

@@ -37,6 +37,7 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/answer-sheet-mappings', [
             'question_paper_id' => $paper->id,
+            'department_id' => $this->paperDepartment($paper),
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
@@ -48,6 +49,15 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
         $response->assertCreated();
 
         return QuestionAnswerSheetMapping::findOrFail($response->json('data.id'));
+    }
+
+    /** A department the paper is tagged with — the upload must pick one of these. */
+    private function paperDepartment(QuestionPaper $paper): int
+    {
+        $department = \App\Models\Department::factory()->create();
+        $paper->departments()->syncWithoutDetaching([$department->id]);
+
+        return $department->id;
     }
 
     private function row(string $barcode, string $rollNo): array
@@ -72,6 +82,64 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
         ];
     }
 
+    public function test_packet_stores_the_chosen_department_id_and_name(): void
+    {
+        $this->actingAdmin();
+        $paper = QuestionPaper::factory()->create();
+        $science = \App\Models\Department::factory()->create(['name' => 'Department of Science']);
+        $paper->departments()->sync([$science->id]);
+
+        $response = $this->withApiKey()->postJson('/api/v1/answer-sheet-mappings', $this->packetPayload($paper, ['department_id' => $science->id]));
+
+        $response->assertCreated()
+            ->assertJsonPath('data.department_id', $science->id)
+            ->assertJsonPath('data.department_name', 'Department of Science');
+        $this->assertDatabaseHas('question_answer_sheet_mappings', ['department_id' => $science->id, 'department_name' => 'Department of Science']);
+    }
+
+    public function test_packet_department_is_required_and_must_belong_to_the_question_paper(): void
+    {
+        $this->actingAdmin();
+        $paper = QuestionPaper::factory()->create();
+        $tagged = \App\Models\Department::factory()->create();
+        $other = \App\Models\Department::factory()->create();
+        $paper->departments()->sync([$tagged->id]);
+
+        $this->withApiKey()->postJson('/api/v1/answer-sheet-mappings', $this->packetPayload($paper))
+            ->assertStatus(422)->assertJsonValidationErrors('department_id');
+        $this->withApiKey()->postJson('/api/v1/answer-sheet-mappings', $this->packetPayload($paper, ['department_id' => $other->id]))
+            ->assertStatus(422)->assertJsonValidationErrors('department_id');
+        $this->assertDatabaseCount('question_answer_sheet_mappings', 0);
+    }
+
+    public function test_list_can_be_filtered_and_searched_by_department(): void
+    {
+        $this->actingAdmin();
+        $science = \App\Models\Department::factory()->create(['name' => 'Department of Science']);
+        $arts = \App\Models\Department::factory()->create(['name' => 'Department of Arts']);
+        $sciencePacket = QuestionAnswerSheetMapping::factory()->create(['department_id' => $science->id, 'department_name' => 'Department of Science']);
+        QuestionAnswerSheetMapping::factory()->create(['department_id' => $arts->id, 'department_name' => 'Department of Arts']);
+
+        $ids = fn ($query) => collect($this->withApiKey()->getJson('/api/v1/answer-sheet-mappings?'.$query)->assertOk()->json('data.items'))->pluck('id')->all();
+
+        $this->assertSame([$sciencePacket->id], $ids('department_id='.$science->id));
+        $this->assertSame([$sciencePacket->id], $ids('search=Science'));
+        $this->assertSame('Department of Science', collect($this->withApiKey()->getJson('/api/v1/answer-sheet-mappings?department_id='.$science->id)->json('data.items'))->first()['department_name']);
+    }
+
+    private function packetPayload(QuestionPaper $paper, array $overrides = []): array
+    {
+        return array_merge([
+            'question_paper_id' => $paper->id,
+            'course_id' => Course::factory()->create()->id,
+            'semester' => 5,
+            'exam_term_id' => ExamTerm::factory()->create()->id,
+            'exam_type_id' => ExamType::factory()->create()->id,
+            'program_name' => Program::factory()->create()->name,
+            'packet_code' => 'PKT-777',
+        ], $overrides);
+    }
+
     private function postRows(QuestionAnswerSheetMapping $mapping, array $rows, array $pdfs)
     {
         return $this->withApiKey()->post("/api/v1/answer-sheet-mappings/{$mapping->id}/rows", [
@@ -89,6 +157,7 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/answer-sheet-mappings', [
             'question_paper_id' => $paper->id,
+            'department_id' => $this->paperDepartment($paper),
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => ExamTerm::factory()->create()->id,
@@ -206,6 +275,7 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
 
         $sameCombo = fn () => $this->withApiKey()->postJson('/api/v1/answer-sheet-mappings', [
             'question_paper_id' => $paper->id,
+            'department_id' => $this->paperDepartment($paper),
             'course_id' => $course->id,
             'semester' => 5,
             'exam_term_id' => $examTerm->id,
@@ -512,10 +582,13 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
             'pdf_path' => '/storage/answer-sheets/'.$mapping->id.'/bc-1001.pdf',
         ]);
         Storage::disk('public')->put('answer-sheets/'.$mapping->id.'/bc-1001.pdf', 'fake pdf content');
+        Storage::disk('public')->put('student-id-crops/'.$mapping->id.'/'.$sheet->id.'.png', 'fake png');
 
         $mapping->forceDelete();
 
         $this->assertDatabaseMissing('answer_sheets', ['id' => $sheet->id]);
         Storage::disk('public')->assertMissing('answer-sheets/'.$mapping->id.'/bc-1001.pdf');
+        Storage::disk('public')->assertMissing('answer-sheets/'.$mapping->id);
+        Storage::disk('public')->assertMissing('student-id-crops/'.$mapping->id);
     }
 }

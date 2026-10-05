@@ -7,6 +7,7 @@
 // scroll room.
 import { onMounted, ref } from 'vue'
 import api from '../../utils/api'
+import { courseLabel, typeSuffix } from '../../utils/course'
 
 const emit = defineEmits(['close'])
 
@@ -69,7 +70,7 @@ function close() {
               </tr>
               <tr v-for="(row, i) in rows" v-else :key="row.name" class="text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0">
                 <td class="px-2.5 py-2 text-gray-500">{{ i + 1 }}</td>
-                <td :title="row.code" class="px-2.5 py-2 font-medium whitespace-nowrap cursor-default">{{ row.name }}</td>
+                <td :title="courseLabel(row.name, row.code, row.type)" class="px-2.5 py-2 font-medium whitespace-nowrap cursor-default">{{ row.name }}{{ typeSuffix(row.type) }}</td>
                 <td class="px-2.5 py-2 text-center">{{ row.pending }}</td>
                 <td class="px-2.5 py-2 text-center">{{ row.total }}</td>
                 <td class="px-2.5 py-2 text-center">

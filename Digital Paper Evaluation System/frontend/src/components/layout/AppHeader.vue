@@ -5,19 +5,23 @@ import { useAuthStore } from '../../stores/auth'
 import { useExamYearStore } from '../../stores/examYear'
 import { useExamTypeStore } from '../../stores/examType'
 import { useSidebar } from '../../composables/useSidebar'
+import { useBrandingStore } from '../../stores/branding'
 import ChangePasswordModal from '../common/ChangePasswordModal.vue'
+import NotificationBell from '../notifications/NotificationBell.vue'
 
 const authStore = useAuthStore()
+const branding = useBrandingStore()
 const examYearStore = useExamYearStore()
 const examTypeStore = useExamTypeStore()
 const router = useRouter()
-const { isOpen, isPinned, toggle } = useSidebar()
+const { isOpen, isPinned, isDesktop, toggle } = useSidebar()
 
 onMounted(() => examTypeStore.load())
 
 const userMenuOpen = ref(false)
 const userMenuRoot = ref(null)
 const showChangePassword = ref(false)
+const bellOpen = ref(false)
 
 function openChangePassword() {
   userMenuOpen.value = false
@@ -40,7 +44,9 @@ async function logout() {
 </script>
 
 <template>
-  <header class="bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)] sticky top-0 z-20">
+  <!-- Raised above page content (some page banners are z-30) only while a
+       header dropdown is open, so the menus are never painted over. -->
+  <header class="bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)] sticky top-0" :class="userMenuOpen || bellOpen ? 'z-[35]' : 'z-20'">
     <div class="flex items-center justify-between h-14 sm:h-[70px] px-4 gap-3">
       <button
         type="button"
@@ -55,6 +61,21 @@ async function logout() {
           <line x1="3" y1="18" x2="21" y2="18" />
         </svg>
       </button>
+
+      <!-- Organization Logo (General Settings → Organization Icons). A wide
+           banner, so only on wide screens where it doesn't crowd the pickers;
+           nothing at all when none is set or its switch is off. When the
+           sidebar expands on hover it slides over the header (it doesn't push
+           the page like a pinned sidebar does), so the logo slides right with
+           it instead of being covered — same timing as the sidebar. -->
+      <img
+        v-if="branding.organizationLogoUrl"
+        :src="branding.organizationLogoUrl"
+        alt="Organization logo"
+        class="hidden xl:block h-9 w-auto max-w-[320px] object-contain object-left shrink min-w-0 transition-[margin] duration-[350ms] ease-in-out"
+        :class="isDesktop && isOpen && !isPinned ? 'ml-[140px]' : 'ml-0'"
+        @error="$event.target.style.display = 'none'"
+      />
 
       <!-- Examination (Exam Type — real now, see stores/examType.js; scopes
            My Pending Course, My Completed Course, Assigned Teacher List,
@@ -123,6 +144,8 @@ async function logout() {
           </div>
         </div>
       </div>
+
+      <NotificationBell @open-change="bellOpen = $event" />
 
       <div ref="userMenuRoot" class="relative">
         <button
@@ -198,6 +221,8 @@ async function logout() {
       </div>
     </div>
 
-    <ChangePasswordModal v-if="showChangePassword" @close="showChangePassword = false" />
+    <Teleport to="body">
+      <ChangePasswordModal v-if="showChangePassword" @close="showChangePassword = false" />
+    </Teleport>
   </header>
 </template>

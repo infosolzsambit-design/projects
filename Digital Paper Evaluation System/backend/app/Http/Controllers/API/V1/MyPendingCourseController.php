@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\API\V1;
 
+use App\Helpers\CourseLabel;
 use App\Http\Controllers\Controller;
+use App\Services\UserNotificationService;
 use App\Http\Resources\AnswerSheetResource;
 use App\Models\AnswerSheet;
 use App\Models\GeneralSetting;
@@ -33,9 +35,10 @@ use Illuminate\Validation\Rule;
  * authenticated user simply sees their own pending work, or an empty
  * list if they have none).
  *
- * "Pending" here means assigned to this teacher (teacher_id = them) but
- * not yet marked — marks IS NULL. Once evaluation is scored, marks gets
- * filled in and the sheet drops out of this list on its own.
+ * "Pending" here means assigned to this teacher (teacher_id = them), not
+ * yet marked — marks IS NULL — and with no open issue (those are listed
+ * by MyProblemCourseController instead). Once evaluation is scored, marks
+ * gets filled in and the sheet drops out of this list on its own.
  *
  * Also exam-year-scoped (see HasExamYearScope) via the sheet's packet's
  * own question paper — a non-super-admin only ever sees one exam year's
@@ -73,16 +76,18 @@ class MyPendingCourseController extends Controller
             ->when($examType !== null, fn ($q) => $q->where('qasm.exam_type_id', $examType))
             ->where('answer_sheets.teacher_id', $request->user()->id)
             ->whereNull('answer_sheets.marks')
+            ->withoutOpenIssue()
             ->whereNull('qasm.deleted_at')
             ->whereNull('courses.deleted_at')
-            ->selectRaw('courses.id as course_id, courses.code as course_code, courses.name as course_name, COUNT(*) as pending_count')
-            ->groupBy('courses.id', 'courses.code', 'courses.name')
+            ->selectRaw('courses.id as course_id, courses.code as course_code, courses.name as course_name, courses.type as course_type, COUNT(*) as pending_count')
+            ->groupBy('courses.id', 'courses.code', 'courses.name', 'courses.type')
             ->orderBy('courses.name')
             ->get()
             ->map(fn ($row) => [
                 'course_id' => (int) $row->course_id,
                 'course_code' => $row->course_code,
                 'course_name' => $row->course_name,
+                'course_type' => $row->course_type,
                 'pending_count' => (int) $row->pending_count,
             ]);
 
@@ -115,6 +120,12 @@ class MyPendingCourseController extends Controller
             })
             ->where('teacher_id', $request->user()->id)
             ->whereNull('marks')
+            ->withoutOpenIssue()
+            // Sorted by the QR code the page shows (barcode, else subject
+            // barcode, else roll no) — shorter first, so numeric codes sort
+            // as numbers (99 before 100), not as text.
+            ->orderByRaw("CHAR_LENGTH(COALESCE(NULLIF(barcode, ''), NULLIF(subject_barcode, ''), roll_no, ''))")
+            ->orderByRaw("COALESCE(NULLIF(barcode, ''), NULLIF(subject_barcode, ''), roll_no, '')")
             ->orderBy('id')
             ->get();
 
@@ -127,7 +138,7 @@ class MyPendingCourseController extends Controller
      * button fires before doing anything else, so the face-scan gate can
      * never be skipped by a client that just decides not to ask:
      *
-     *  1. general_settings.face_scan_applicable = 'no' → no scan needed
+     *  1. general_settings.is_face_scan_applicable = 'no' → no scan needed
      *     for anyone, full stop.
      *  2. Otherwise, defer to this specific teacher's own
      *     teacher_details.face_scan_applicable (see TeacherDetail /
@@ -152,8 +163,13 @@ class MyPendingCourseController extends Controller
         if ($answerSheet->teacher_id !== $request->user()->id || $answerSheet->marks !== null) {
             return $this->notFound('No pending answer sheet found.');
         }
+        if ($answerSheet->hasOpenIssue()) {
+            return $this->openIssueResponse();
+        }
 
-        $globallyApplicable = GeneralSetting::where('field_name', 'face_scan_applicable')->value('value') !== 'no';
+        // A setting switched off in General Settings is ignored — face scan
+        // then falls back to its default (applicable).
+        $globallyApplicable = GeneralSetting::where('field_name', 'is_face_scan_applicable')->where('status', true)->value('value') !== 'no';
 
         $teacherDetail = $request->user()->teacherDetail;
         $faceScanRequired = $globallyApplicable && (bool) ($teacherDetail?->face_scan_applicable ?? true);
@@ -193,13 +209,14 @@ class MyPendingCourseController extends Controller
             ! $answerSheet
             || $answerSheet->teacher_id !== $request->user()->id
             || $answerSheet->marks !== null
+            || $answerSheet->hasOpenIssue()
             || $answerSheet->evaluation_session_expires_at === null
             || $answerSheet->evaluation_session_expires_at->isPast()
         ) {
             return $this->notFound('This evaluation link is no longer valid. Please start evaluation again from your pending list.');
         }
 
-        $answerSheet->load('mapping.questionPaper.groups');
+        $answerSheet->load(['mapping.questionPaper.groups', 'mapping.course']);
 
         return $this->success(new AnswerSheetResource($answerSheet), 'Answer sheet fetched successfully.');
     }
@@ -221,6 +238,9 @@ class MyPendingCourseController extends Controller
         if ($answerSheet->teacher_id !== $request->user()->id || $answerSheet->marks !== null) {
             return $this->notFound('No pending answer sheet found.');
         }
+        if ($answerSheet->hasOpenIssue()) {
+            return $this->openIssueResponse();
+        }
 
         $answerSheet->load('mapping.questionPaper');
         $maxMarks = $answerSheet->mapping?->questionPaper?->full_marks;
@@ -235,13 +255,25 @@ class MyPendingCourseController extends Controller
             // optional (a client that somehow never got a tick in is
             // still allowed to complete), just persisted for the record.
             'consumed_time' => ['nullable', 'integer', 'min:0'],
+            // The final annotations/breakdown travel with Complete itself —
+            // the debounced saveDraft() autosave can still be pending when
+            // Complete is clicked, and it stops once the sheet is marked, so
+            // relying on it alone loses whatever was drawn last.
+            'marks_breakdown' => ['nullable', 'array'],
+            'marks_breakdown.*' => ['nullable', 'numeric', 'min:0'],
+            'annotations' => ['nullable', 'array'],
         ]);
 
-        $answerSheet->update([
+        $answerSheet->update(array_merge([
             'marks' => $data['marks'],
             'evaluated_at' => now(),
             'consumed_time' => $data['consumed_time'] ?? $answerSheet->consumed_time,
-        ]);
+        ], array_key_exists('annotations', $data) ? [
+            'draft_annotations' => $data['annotations'],
+        ] : [], array_key_exists('marks_breakdown', $data) ? [
+            'draft_marks_breakdown' => $data['marks_breakdown'],
+            'draft_marks' => $data['marks'],
+        ] : []));
 
         $this->auditLog->log(
             event: 'answer-sheet-evaluated',
@@ -273,10 +305,15 @@ class MyPendingCourseController extends Controller
         if ($answerSheet->teacher_id !== $request->user()->id || $answerSheet->marks !== null) {
             return $this->notFound('No pending answer sheet found.');
         }
+        if ($answerSheet->hasOpenIssue()) {
+            return $this->openIssueResponse();
+        }
 
         $data = $request->validate([
             'marks_breakdown' => ['nullable', 'array'],
-            'marks_breakdown.*' => ['numeric', 'min:0'],
+            // Nullable — a cleared marks input used to fail this outright
+            // and silently sink the whole autosave, annotations included.
+            'marks_breakdown.*' => ['nullable', 'numeric', 'min:0'],
             'annotations' => ['nullable', 'array'],
             'consumed_time' => ['nullable', 'integer', 'min:0'],
         ]);
@@ -317,18 +354,20 @@ class MyPendingCourseController extends Controller
      * same reasoning as AssignTeacherService::reassign()'s own reset) so
      * it's ready to be re-attempted from scratch once the physical sheet
      * itself gets fixed (see NotificationController::
-     * resolvePrintingIssue()) — the sheet also can't be evaluated at all
-     * while that's still open (see AnswerSheetResource's own
-     * 'blocks_evaluation' field). A *Timing* issue is only about the
+     * resolvePrintingIssue()). A *Timing* issue is only about the
      * evaluation window being wrong, not the sheet itself, so none of that
-     * progress is touched — the teacher can keep working right through it
-     * if they want, and just gets a new window once an admin resolves it
-     * (see NotificationController::resolveTimingIssue()).
+     * progress is touched. Either way, while the issue is open the sheet
+     * moves off the Pending list onto the teacher's Problem Course list
+     * (MyProblemCourseController) and can't be evaluated; it comes back to
+     * Pending once an admin resolves it.
      */
     public function raiseIssue(Request $request, AnswerSheet $answerSheet): JsonResponse
     {
         if ($answerSheet->teacher_id !== $request->user()->id || $answerSheet->marks !== null) {
             return $this->notFound('No pending answer sheet found.');
+        }
+        if ($answerSheet->hasOpenIssue()) {
+            return $this->error('An issue is already open for this answer sheet.', 422);
         }
 
         $data = $request->validate([
@@ -377,7 +416,7 @@ class MyPendingCourseController extends Controller
         $teacherEmpCode = $request->user()->loadMissing('teacherDetail')->teacherDetail?->emp_code;
         $issueTypeName = $answerSheet->issueMaster?->name ?? 'Issue';
         $courseName = $answerSheet->mapping?->course
-            ? "{$answerSheet->mapping->course->name} ({$answerSheet->mapping->course->code})"
+            ? CourseLabel::of($answerSheet->mapping->course)
             : 'the course';
         $rollNo = (string) $answerSheet->roll_no;
         $barcode = $answerSheet->subject_barcode;
@@ -401,6 +440,14 @@ class MyPendingCourseController extends Controller
             );
         })->afterResponse();
 
+        // In-app bell notification for the admins.
+        App::make(UserNotificationService::class)->issueRaised($answerSheet->id, $issueTypeName, $teacherName, $courseName, $barcode ?: $rollNo);
+
         return $this->success(new AnswerSheetResource($answerSheet), 'Issue raised successfully.');
+    }
+
+    private function openIssueResponse(): JsonResponse
+    {
+        return $this->error('This answer sheet has an open issue and cannot be evaluated until it is resolved.', 422);
     }
 }

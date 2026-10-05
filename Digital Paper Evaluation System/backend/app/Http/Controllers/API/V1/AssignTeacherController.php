@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\API\V1;
 
 use App\Http\Controllers\Controller;
+use App\Services\UserNotificationService;
 use App\Services\AssignTeacherService;
 use App\Services\AuditLogService;
 use App\Services\TeacherAssignmentMailService;
@@ -36,6 +37,9 @@ class AssignTeacherController extends Controller
             'course_id' => ['required', 'integer', Rule::exists('courses', 'id')->whereNull('deleted_at')],
             'semester' => ['required', 'integer', 'min:1', 'max:12'],
             'exam_year' => ['required', 'integer'],
+            // Optional — only the packets uploaded under this department
+            // (question_answer_sheet_mappings.department_id) are assigned.
+            'department_id' => ['nullable', 'integer', Rule::exists('departments', 'id')->whereNull('deleted_at')],
             'assignments' => ['required', 'array', 'min:1'],
             // Only a real teacher — a user with a (non-deleted)
             // teacher_details row — same check TeacherController::show()
@@ -74,6 +78,7 @@ class AssignTeacherController extends Controller
                     'course_id' => $data['course_id'],
                     'semester' => $data['semester'],
                     'exam_year' => $data['exam_year'],
+                    'department_id' => $data['department_id'] ?? null,
                 ],
                 assignments: $data['assignments'],
                 evaluationStartDate: $data['evaluation_start_date'],
@@ -99,6 +104,9 @@ class AssignTeacherController extends Controller
             newValues: ['filters' => $data, 'summary' => $summary],
             tags: ['assign-teacher', 'answer-sheet'],
         );
+
+        // In-app bell notification for each teacher who received sheets.
+        App::make(UserNotificationService::class)->answerSheetsAssigned($summary, (int) $data['course_id']);
 
         // Sent after the HTTP response goes out, not queued — this endpoint
         // has no guaranteed queue worker running, and the whole point is

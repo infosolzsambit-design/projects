@@ -48,6 +48,7 @@ import { loadPdf, renderPageToCanvas } from '../utils/pdf'
 import { useNotificationsStore } from '../stores/notifications'
 import EvaluateQuestionNode from '../components/evaluation/EvaluateQuestionNode.vue'
 import RaiseIssueModal from '../components/evaluation/RaiseIssueModal.vue'
+import { courseLabel } from '../utils/course'
 
 const route = useRoute()
 const router = useRouter()
@@ -265,6 +266,12 @@ function hasValue(nodeId) {
   const v = marksByNode[nodeId]
   return v !== undefined && v !== null && v !== ''
 }
+// What actually gets sent to the server — a cleared input leaves '' behind,
+// which would fail the API's numeric validation and silently sink the
+// whole save (annotations included), so only filled values go out.
+function filledBreakdown() {
+  return Object.fromEntries(Object.keys(marksByNode).filter(hasValue).map((id) => [id, Number(marksByNode[id])]))
+}
 // A leaf's own value against its own bounds (0..node.marks) —
 // EvaluateQuestionNode.vue's input already clamps as the teacher types so
 // this shouldn't normally trip, but a restored draft (or anything else
@@ -381,10 +388,10 @@ async function saveDraft() {
   if (!sheet.value || completed) return
   try {
     await api.post(`/my-pending-courses/papers/${sheet.value.id}/save-draft`, {
-      marks_breakdown: { ...marksByNode },
+      marks_breakdown: filledBreakdown(),
       annotations: JSON.parse(JSON.stringify(annotations)),
       consumed_time: elapsedSeconds.value,
-    })
+    }, { skipLoader: true }) // no full-screen loader — it would interrupt the teacher mid-checking
   } catch {
     // Silent by design — see this block's own docblock above.
   }
@@ -791,10 +798,15 @@ async function completeEvaluation() {
   }
 
   completing.value = true
+  // A debounced autosave may still be pending — the final annotations and
+  // breakdown go with the submit itself instead (see submitMarks()).
+  clearTimeout(draftSaveTimer)
   try {
     const res = await api.post(`/my-pending-courses/papers/${sheet.value.id}/submit-marks`, {
       marks: totalAwarded.value,
       consumed_time: elapsedSeconds.value,
+      marks_breakdown: filledBreakdown(),
+      annotations: JSON.parse(JSON.stringify(annotations)),
     })
     toast.success(res.data.message || 'Marks submitted successfully.')
     completed = true
@@ -819,7 +831,8 @@ function onIssueRaised() {
   showIssueModal.value = false
   completed = true // see this file's own `completed` flag above
   notificationsStore.loadUnresolvedCount()
-  router.push({ name: 'my-pending-courses' })
+  // The sheet now lives on Problem Course until an admin resolves it.
+  router.push({ name: 'my-problem-courses' })
 }
 
 // Closing the tab/browser or refreshing mid-evaluation — the draft
@@ -894,7 +907,7 @@ onBeforeUnmount(() => {
             <!-- Barcode/QR number only — never the roll number, so the
                  evaluator can't identify whose sheet this is while marking. -->
             <p class="text-[14px] font-semibold text-gray-900 truncate">{{ sheet.barcode || sheet.subject_barcode || `Sheet #${sheet.id}` }}</p>
-            <p class="text-[12px] text-muted truncate">{{ sheet.subject_code }} — {{ sheet.subject_name }}</p>
+            <p class="text-[12px] text-muted truncate">{{ sheet.course_name ? courseLabel(sheet.course_name, sheet.course_code, sheet.course_type) : `${sheet.subject_code} — ${sheet.subject_name}` }}</p>
           </div>
         </div>
         <div class="flex items-center gap-2 shrink-0 text-[11px] font-medium">
@@ -960,6 +973,11 @@ onBeforeUnmount(() => {
         <!-- question / marks panel -->
         <aside class="w-72 shrink-0 bg-white rounded-2xl shadow-panel p-3.5 overflow-y-auto">
           <template v-if="sheet.question_paper?.groups?.length">
+            <!-- Key for the coloured tags after each question's marks. -->
+            <div class="flex items-center gap-3 mb-2.5 px-0.5 text-[10.5px] text-gray-600">
+              <span class="inline-flex items-center gap-1"><span class="rounded bg-violet-100 text-violet-700 font-semibold px-1 leading-4">K</span>Knowledge Level</span>
+              <span class="inline-flex items-center gap-1"><span class="rounded bg-teal-100 text-teal-700 font-semibold px-1 leading-4">CO</span>Course Outcome</span>
+            </div>
             <EvaluateQuestionNode
               v-for="group in sheet.question_paper.groups"
               :key="group.id"

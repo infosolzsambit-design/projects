@@ -38,6 +38,8 @@ class QuestionAnswerSheetMapping extends Model implements AuditableContract
         'exam_term_id',
         'exam_type_id',
         'program_name',
+        'department_id',
+        'department_name',
         'packet_code',
     ];
 
@@ -79,6 +81,12 @@ class QuestionAnswerSheetMapping extends Model implements AuditableContract
                         }
                         $sheet->forceDelete();
                     });
+
+                // The packet's own folders (its answer-sheet PDFs and the
+                // student-ID crop images) would otherwise be left behind
+                // empty or orphaned.
+                Storage::disk('public')->deleteDirectory("answer-sheets/{$mapping->id}");
+                Storage::disk('public')->deleteDirectory("student-id-crops/{$mapping->id}");
 
                 return;
             }

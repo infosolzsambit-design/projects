@@ -153,7 +153,31 @@ class MyPendingCourseControllerTest extends TestCase
      * doesn't (only the schedule is wrong, not the sheet itself), and
      * neither does an already-resolved issue of either kind.
      */
-    public function test_papers_flags_blocks_evaluation_only_for_an_open_printing_issue(): void
+    public function test_papers_are_sorted_by_qr_code(): void
+    {
+        $teacher = $this->actingTeacher();
+        $course = Course::factory()->create();
+        $paper = QuestionPaper::factory()->create(['exam_year' => now()->year]);
+        $mapping = QuestionAnswerSheetMapping::factory()->create(['exam_type_id' => $this->defaultExamTypeId(), 'course_id' => $course->id, 'question_paper_id' => $paper->id]);
+
+        // Created out of order; 99 must come before 100 (numeric, not text).
+        foreach (['1775392', '99', '1775390', '100'] as $code) {
+            AnswerSheet::factory()->create([
+                'teacher_id' => $teacher->id,
+                'question_answer_sheet_mapping_id' => $mapping->id,
+                'marks' => null,
+                'barcode' => $code,
+                'subject_barcode' => $code,
+            ]);
+        }
+
+        $codes = collect($this->withApiKey()->getJson('/api/v1/my-pending-courses/papers?course_id='.$course->id)->assertOk()->json('data'))
+            ->pluck('barcode')->all();
+
+        $this->assertSame(['99', '100', '1775390', '1775392'], $codes);
+    }
+
+    public function test_papers_and_subjects_exclude_sheets_with_an_open_issue(): void
     {
         $teacher = $this->actingTeacher();
         $course = Course::factory()->create();
@@ -179,16 +203,65 @@ class MyPendingCourseControllerTest extends TestCase
         $response = $this->withApiKey()->getJson('/api/v1/my-pending-courses/papers?course_id='.$course->id);
 
         $response->assertOk();
-        $byId = collect($response->json('data'))->keyBy('id');
-        $this->assertTrue($byId[$openPrinting->id]['blocks_evaluation']);
-        $this->assertFalse($byId[$openTiming->id]['blocks_evaluation']);
-        $this->assertFalse($byId[$resolvedPrinting->id]['blocks_evaluation']);
-        $this->assertFalse($byId[$noIssue->id]['blocks_evaluation']);
+        $ids = collect($response->json('data'))->pluck('id')->sort()->values()->all();
+        $this->assertSame([$resolvedPrinting->id, $noIssue->id], $ids);
+        $this->assertNotContains($openPrinting->id, $ids);
+        $this->assertNotContains($openTiming->id, $ids);
+
+        $this->withApiKey()->getJson('/api/v1/my-pending-courses')
+            ->assertOk()
+            ->assertJsonPath('data.0.pending_count', 2);
+    }
+
+    private function openIssueSheet(User $teacher, int $issueMasterId): AnswerSheet
+    {
+        $mapping = QuestionAnswerSheetMapping::factory()->create(['exam_type_id' => $this->defaultExamTypeId()]);
+
+        return AnswerSheet::factory()->create([
+            'teacher_id' => $teacher->id, 'question_answer_sheet_mapping_id' => $mapping->id, 'marks' => null,
+            'issue_master_id' => $issueMasterId, 'issue_status' => 'open',
+        ]);
+    }
+
+    public function test_a_sheet_with_an_open_issue_of_either_type_cannot_be_evaluated(): void
+    {
+        $teacher = $this->actingTeacher();
+
+        foreach ([config('issues.printing_issue_id'), config('issues.timing_issue_id')] as $issueId) {
+            $sheet = $this->openIssueSheet($teacher, (int) $issueId);
+
+            $this->withApiKey()->postJson("/api/v1/my-pending-courses/papers/{$sheet->id}/start-evaluation")->assertStatus(422);
+            $this->withApiKey()->postJson("/api/v1/my-pending-courses/papers/{$sheet->id}/submit-marks", ['marks' => 5])->assertStatus(422);
+            $this->withApiKey()->postJson("/api/v1/my-pending-courses/papers/{$sheet->id}/save-draft", ['marks_breakdown' => ['1' => 2]])->assertStatus(422);
+            $this->assertNull($sheet->fresh()->marks);
+            $this->assertNull($sheet->fresh()->draft_marks);
+        }
+    }
+
+    public function test_show_by_token_rejects_a_sheet_whose_issue_was_raised_mid_session(): void
+    {
+        $teacher = $this->actingTeacher();
+        $mapping = QuestionAnswerSheetMapping::factory()->create(['exam_type_id' => $this->defaultExamTypeId()]);
+        $sheet = AnswerSheet::factory()->create(['teacher_id' => $teacher->id, 'question_answer_sheet_mapping_id' => $mapping->id, 'marks' => null]);
+        $token = $this->evaluationToken($sheet);
+
+        $sheet->update(['issue_master_id' => (int) config('issues.timing_issue_id'), 'issue_status' => 'open']);
+
+        $this->withApiKey()->getJson("/api/v1/my-pending-courses/evaluate/{$token}")->assertNotFound();
+    }
+
+    public function test_raise_issue_rejects_a_sheet_that_already_has_an_open_issue(): void
+    {
+        $teacher = $this->actingTeacher();
+        $sheet = $this->openIssueSheet($teacher, (int) config('issues.timing_issue_id'));
+
+        $this->withApiKey()->postJson("/api/v1/my-pending-courses/papers/{$sheet->id}/raise-issue", ['remarks' => 'again'])
+            ->assertStatus(422);
     }
 
     private function faceScanSetting(string $value): void
     {
-        GeneralSetting::factory()->create(['field_name' => 'face_scan_applicable', 'value' => $value]);
+        GeneralSetting::factory()->create(['field_name' => 'is_face_scan_applicable', 'value' => $value]);
     }
 
     public function test_start_evaluation_skips_the_scan_when_the_setting_is_globally_off(): void
@@ -594,6 +667,12 @@ class MyPendingCourseControllerTest extends TestCase
         ]);
 
         $response->assertOk();
+        // Every admin also gets an in-app notification linking to Problems.
+        foreach ($admins as $admin) {
+            $this->assertDatabaseHas('user_notifications', ['user_id' => $admin->id, 'type' => 'issue_raised', 'link' => '/problems']);
+        }
+        $this->assertDatabaseMissing('user_notifications', ['user_id' => $notAnAdmin->id]);
+        $this->assertDatabaseMissing('user_notifications', ['user_id' => $teacher->id]);
         $this->assertDatabaseCount('email_logs', $admins->count());
         foreach ($admins as $admin) {
             $this->assertDatabaseHas('email_logs', [

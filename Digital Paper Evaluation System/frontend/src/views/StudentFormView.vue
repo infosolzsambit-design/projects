@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import api from '../utils/api'
 import { useToast } from '../composables/useToast'
 import SearchableSelect from '../components/common/SearchableSelect.vue'
+import { useProgramsStore } from '../stores/programs'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,12 +35,15 @@ const availablePrograms = ref([])
 const programsLoading = ref(true)
 const programsError = ref('')
 
+const programsStore = useProgramsStore()
 async function loadPrograms() {
   programsLoading.value = true
   programsError.value = ''
   try {
-    const res = await api.get('/programs', { params: { status: 'all', is_active: 'yes', table_fields: ['name'] } })
-    availablePrograms.value = res.data.data.map((program) => ({ id: program.name, name: program.name }))
+    // Shown as "Name (Label)"; the stored value stays the plain name (a
+    // student only records the program name — see stores/programs.js).
+    await programsStore.load(true)
+    availablePrograms.value = programsStore.options()
   } catch (err) {
     programsError.value = err.response?.data?.message || 'Could not load programs.'
   } finally {

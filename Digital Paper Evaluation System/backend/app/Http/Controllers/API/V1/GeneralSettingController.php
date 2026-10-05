@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API\V1;
 
+use App\Helpers\PublicStorage;
 use App\Http\Controllers\Controller;
 use App\Models\GeneralSetting;
 use App\Services\AuditLogService;
@@ -31,7 +32,7 @@ class GeneralSettingController extends Controller
      */
     private const VISIBLE_COLUMNS = [
         'id', 'field_name', 'label', 'group_name', 'type', 'value', 'extra_value',
-        'options', 'placeholder', 'help_text', 'is_required', 'sort_order',
+        'options', 'placeholder', 'help_text', 'is_required', 'sort_order', 'status',
     ];
 
     /**
@@ -47,20 +48,56 @@ class GeneralSettingController extends Controller
      */
     private const BRANDING_FIELDS = [
         'favicon', 'login_logo', 'header_logo_full', 'header_logo_icon', 'footer_logo', 'site_title',
+        // "Organization Icons" group — shown in the app header (AppHeader.vue).
+        'organization_logo',
     ];
 
     public function __construct(private readonly AuditLogService $auditLog) {}
 
     /**
-     * GET /general-settings — every active field, in display order, each
-     * carrying both its form metadata (type/options/...) and its current
-     * value in one row (this doubles as "the schema" and "the data").
+     * GET /general-settings — every field, on or off, in display order, each
+     * carrying both its form metadata (type/options/...), its current value
+     * and its status (this doubles as "the schema" and "the data"). Off
+     * fields are listed too so they can be switched back on from the page;
+     * the rest of the app ignores them (see status()).
      */
     public function index(): JsonResponse
     {
-        return $this->success(
-            GeneralSetting::where('status', true)->orderBy('sort_order')->get(self::VISIBLE_COLUMNS),
+        return $this->success($this->allSettings());
+    }
+
+    /**
+     * PATCH /general-settings/{generalSetting}/status — the per-field On/Off
+     * switch. Off means the app stops using that setting and falls back to
+     * its own default (branding → the bundled logos/title, University Code →
+     * "—" on the marksheet, face scan → applicable, ...). Takes effect
+     * immediately, separate from the form's Save button.
+     */
+    public function status(Request $request, GeneralSetting $generalSetting): JsonResponse
+    {
+        $data = $request->validate(['status' => ['required', 'boolean']]);
+        $old = (bool) $generalSetting->status;
+        $generalSetting->update(['status' => (bool) $data['status']]);
+
+        $this->auditLog->log(
+            event: 'general-setting-status-changed',
+            module: 'General Settings',
+            description: sprintf('Turned %s "%s".', $data['status'] ? 'on' : 'off', $generalSetting->label ?: $generalSetting->field_name),
+            auditable: $generalSetting,
+            oldValues: ['status' => $old],
+            newValues: ['status' => (bool) $data['status']],
         );
+
+        return $this->success(
+            $generalSetting->fresh()->only(self::VISIBLE_COLUMNS),
+            $data['status'] ? 'Setting turned on.' : 'Setting turned off — the app now uses its default for it.',
+        );
+    }
+
+    /** @return \Illuminate\Database\Eloquent\Collection<int, GeneralSetting> */
+    private function allSettings()
+    {
+        return GeneralSetting::orderBy('sort_order')->get(self::VISIBLE_COLUMNS);
     }
 
     /**
@@ -135,7 +172,7 @@ class GeneralSettingController extends Controller
         });
 
         return $this->success(
-            GeneralSetting::where('status', true)->orderBy('sort_order')->get(self::VISIBLE_COLUMNS),
+            $this->allSettings(),
             'Settings saved successfully.',
         );
     }
@@ -199,6 +236,7 @@ class GeneralSettingController extends Controller
             if ($request->hasFile($field)) {
                 $this->deleteStoredFile($setting->value);
                 $update['value'] = '/storage/'.$request->file($field)->store('general-settings', 'public');
+                PublicStorage::openFolder('general-settings');
             }
             // No new file this submission → existing value stays as-is.
         } elseif ($setting->type === 'checkbox') {

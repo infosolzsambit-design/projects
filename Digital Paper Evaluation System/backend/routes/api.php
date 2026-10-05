@@ -21,11 +21,17 @@ use App\Http\Controllers\API\V1\Master\PermissionSubGroupController;
 use App\Http\Controllers\API\V1\Master\ProgramBulkUploadController;
 use App\Http\Controllers\API\V1\Master\ProgramController;
 use App\Http\Controllers\API\V1\MyCompletedCourseController;
+use App\Http\Controllers\API\V1\MyProblemCourseController;
+use App\Http\Controllers\API\V1\ResetEvaluationController;
+use App\Http\Controllers\API\V1\GenerateMarksheetController;
+use App\Http\Controllers\API\V1\UserNotificationController;
 use App\Http\Controllers\API\V1\MyPendingCourseController;
 use App\Http\Controllers\API\V1\NotificationController;
 use App\Http\Controllers\API\V1\QuestionAnswerSheetMappingController;
 use App\Http\Controllers\API\V1\QuestionPaperController;
 use App\Http\Controllers\API\V1\Report\AnswerBookTopSheetReportController;
+use App\Http\Controllers\API\V1\Report\PendingReportController;
+use App\Http\Controllers\API\V1\Report\ProblemReportController;
 use App\Http\Controllers\API\V1\Report\TeacherWiseEvaluationReportController;
 use App\Http\Controllers\API\V1\StudentBulkUploadController;
 use App\Http\Controllers\API\V1\StudentController;
@@ -88,6 +94,32 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     // own docblock.
     Route::get('my-completed-courses', [MyCompletedCourseController::class, 'subjects']);
     Route::get('my-completed-courses/papers', [MyCompletedCourseController::class, 'papers']);
+
+    // Sheets with an open issue — see MyProblemCourseController. No
+    // permission gate yet (to be added later).
+    Route::get('my-problem-courses', [MyProblemCourseController::class, 'subjects']);
+    Route::get('my-problem-courses/papers', [MyProblemCourseController::class, 'papers']);
+
+    // Sidebar's "Reset Evaluation" — see ResetEvaluationController. No
+    // permission gate yet (to be added later).
+    // Header bell — each user's own in-app notifications (always scoped to
+    // the caller, so no permission gate). See UserNotificationController.
+    Route::get('user-notifications', [UserNotificationController::class, 'index']);
+    Route::get('user-notifications/unread-count', [UserNotificationController::class, 'unreadCount']);
+    Route::post('user-notifications/read-all', [UserNotificationController::class, 'markAllRead']);
+    Route::post('user-notifications/{id}/read', [UserNotificationController::class, 'markRead'])->whereNumber('id');
+
+    // Sidebar's "Generate Marksheet" — see GenerateMarksheetController. No
+    // permission gate yet (to be added later).
+    Route::get('generate-marksheet', [GenerateMarksheetController::class, 'summary']);
+    Route::get('generate-marksheet/mismatches', [GenerateMarksheetController::class, 'mismatches']);
+    Route::post('generate-marksheet/check', [GenerateMarksheetController::class, 'check']);
+    Route::post('generate-marksheet/recheck', [GenerateMarksheetController::class, 'recheck']);
+    Route::post('generate-marksheet/confirm-match', [GenerateMarksheetController::class, 'confirmMatch']);
+    Route::get('generate-marksheet/export', [GenerateMarksheetController::class, 'export']);
+
+    Route::get('reset-evaluation/search', [ResetEvaluationController::class, 'search']);
+    Route::post('reset-evaluation/{answer_sheet}/reset', [ResetEvaluationController::class, 'reset']);
 
     // Dropdown source for the "Problem" modal above — see
     // IssueMasterController's own docblock.
@@ -164,6 +196,8 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     Route::get('teachers/{teacher}/assignments', [TeacherController::class, 'assignments']);
     Route::get('teachers/{teacher}/courses', [TeacherController::class, 'courses']);
     Route::post('teachers/{teacher}/assignments/reassign', [TeacherController::class, 'reassignAssignment']);
+    Route::get('teachers/{teacher}/assignments/{mapping}/time-span', [TeacherController::class, 'timeSpan'])->whereNumber('mapping');
+    Route::put('teachers/{teacher}/assignments/{mapping}/time-span', [TeacherController::class, 'updateTimeSpan'])->whereNumber('mapping');
     Route::post('teachers/{teacher}/restore', [TeacherController::class, 'restore'])->withTrashed();
     Route::apiResource('teachers', TeacherController::class);
 
@@ -178,6 +212,15 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
 
     // Sidebar's Report → Answer Book / Top Sheet — see that controller's
     // own docblock for what each of the three endpoints renders.
+    // No permission gate yet (to be added later).
+    Route::get('reports/problem-report', [ProblemReportController::class, 'index']);
+    Route::get('reports/problem-report/export', [ProblemReportController::class, 'export']);
+
+    // Sidebar's Report → Pending Report — see that controller's docblock.
+    // No permission gate.
+    Route::get('reports/pending-report', [PendingReportController::class, 'index']);
+    Route::get('reports/pending-report/export', [PendingReportController::class, 'export']);
+
     Route::get('reports/answer-book-top-sheet', [AnswerBookTopSheetReportController::class, 'index']);
     Route::get('reports/answer-book-top-sheet/export', [AnswerBookTopSheetReportController::class, 'export']);
     Route::get('reports/answer-book-top-sheet/{answerSheet}/view', [AnswerBookTopSheetReportController::class, 'view']);
@@ -187,6 +230,7 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
 
     Route::get('general-settings', [GeneralSettingController::class, 'index']);
     Route::post('general-settings', [GeneralSettingController::class, 'update']);
+    Route::patch('general-settings/{generalSetting}/status', [GeneralSettingController::class, 'status']);
 
     // Configuration → Email Logs — deliberately no permission gating, see
     // EmailLogController's own docblock.
@@ -199,6 +243,7 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     // destroy() are locked by evaluation_started — see
     // QuestionPaperController::updatePdf()'s own docblock for why.
     Route::post('question-papers/{question_paper}/pdf', [QuestionPaperController::class, 'updatePdf']);
+    Route::patch('question-papers/{question_paper}/departments', [QuestionPaperController::class, 'updateDepartments']);
     Route::apiResource('question-papers', QuestionPaperController::class);
 
     // No update() — a packet's rows are always replaced wholesale by a

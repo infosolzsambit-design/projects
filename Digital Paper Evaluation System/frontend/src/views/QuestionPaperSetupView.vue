@@ -4,7 +4,9 @@ import { useRouter } from 'vue-router'
 import api from '../utils/api'
 import { useToast } from '../composables/useToast'
 import SearchableSelect from '../components/common/SearchableSelect.vue'
+import SearchableMultiSelect from '../components/common/SearchableMultiSelect.vue'
 import QuestionPaperStructureBuilder from '../components/questionPapers/QuestionPaperStructureBuilder.vue'
+import { courseLabel } from '../utils/course'
 
 const router = useRouter()
 const toast = useToast()
@@ -22,6 +24,7 @@ const stage = ref('details') // 'details' | 'structure'
 // --- Stage 1: exam details + PDF picker ---
 const form = reactive({
   exam_year: new Date().getFullYear(),
+  department_ids: [],
   course_id: '',
   exam_term_id: '',
   semester: '',
@@ -32,14 +35,16 @@ const preparingPdf = ref(false)
 
 const fieldErrors = reactive({
   exam_year: '',
+  department_ids: [],
   course_id: '',
   exam_term_id: '',
   semester: '',
   pdf: '',
 })
-const FIELD_ORDER = ['exam_year', 'course_id', 'exam_term_id', 'semester', 'pdf']
+const FIELD_ORDER = ['department_ids', 'course_id', 'exam_year', 'exam_term_id', 'semester', 'pdf']
 const fieldRefs = {
   exam_year: ref(null),
+  department_ids: ref(null),
   course_id: ref(null),
   exam_term_id: ref(null),
   semester: ref(null),
@@ -63,13 +68,13 @@ async function loadCourses() {
   coursesLoading.value = true
   coursesError.value = ''
   try {
-    const res = await api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] } })
+    const res = await api.get('/courses', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code', 'type'] } })
     // SearchableSelect just renders each option's own `name` — appending
     // the code here (rather than changing SearchableSelect itself) keeps
     // this specific to this one dropdown.
     availableCourses.value = res.data.data.map((course) => ({
       ...course,
-      name: course.code ? `${course.name} (${course.code})` : course.name,
+      name: courseLabel(course.name, course.code, course.type),
     }))
   } catch (err) {
     coursesError.value = err.response?.data?.message || 'Could not load courses.'
@@ -78,6 +83,23 @@ async function loadCourses() {
   }
 }
 loadCourses()
+
+const availableDepartments = ref([])
+const departmentsLoading = ref(true)
+const departmentsError = ref('')
+async function loadDepartments() {
+  departmentsLoading.value = true
+  departmentsError.value = ''
+  try {
+    const res = await api.get('/departments', { params: { status: 'all', is_active: 'yes', table_fields: ['name', 'code'] } })
+    availableDepartments.value = res.data.data.map((d) => ({ ...d, name: d.code ? `${d.name} (${d.code})` : d.name }))
+  } catch (err) {
+    departmentsError.value = err.response?.data?.message || 'Could not load departments.'
+  } finally {
+    departmentsLoading.value = false
+  }
+}
+loadDepartments()
 
 const availableExamTerms = ref([])
 const examTermsLoading = ref(true)
@@ -106,6 +128,7 @@ function onPdfChange(event) {
 
 function validate() {
   if (!form.exam_year || String(form.exam_year).length !== 4) fieldErrors.exam_year = 'Enter a valid 4-digit exam year.'
+  if (!form.department_ids.length) fieldErrors.department_ids = 'Select at least one department.'
   if (!form.course_id) fieldErrors.course_id = 'Course is required.'
   if (!form.exam_term_id) fieldErrors.exam_term_id = 'Exam term is required.'
   if (!form.semester) fieldErrors.semester = 'Semester is required.'
@@ -166,6 +189,7 @@ async function proceedToStructure() {
     pdfSourceForBuilder.value = { data: await pdfFile.value.arrayBuffer() }
     structureInitialForm.value = {
       exam_year: form.exam_year,
+      department_ids: [...form.department_ids],
       course_id: form.course_id,
       exam_term_id: form.exam_term_id,
       semester: form.semester,
@@ -184,6 +208,7 @@ async function submitFn(payload) {
   const body = new FormData()
   body.append('exam_year', payload.exam_year)
   body.append('course_id', payload.course_id)
+  payload.department_ids.forEach((id) => body.append('department_ids[]', id))
   body.append('exam_term_id', payload.exam_term_id)
   body.append('semester', payload.semester)
   if (payload.full_marks !== null) body.append('full_marks', payload.full_marks)
@@ -254,23 +279,25 @@ const wrapperMaxWidth = computed(() => (stage.value === 'details' ? 'max-w-[900p
       <form v-if="stage === 'details'" class="space-y-4" @submit.prevent="proceedToStructure">
         <section class="bg-white rounded-[28px] shadow-card p-4 sm:p-5">
           <h2 class="text-[16px] sm:text-[18px] font-semibold text-gray-900 mb-1">Exam Details</h2>
-          <p class="text-[13px] text-muted mb-3">Which exam is this paper for?</p>
+          <p class="text-[13px] text-muted mb-3">Which department and exam is this paper for?</p>
 
-          <div class="grid grid-cols-1 md:grid-cols-[0.8fr_1.8fr_0.8fr_0.8fr] gap-3">
+          <!-- Row 1: Departments (one or more) · Course -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div class="flex flex-col gap-1.5">
-              <label for="exam_year" class="text-[13px] text-label">Exam Year <span class="text-brand">*</span></label>
-              <input
-                id="exam_year"
-                :ref="(el) => (fieldRefs.exam_year.value = el)"
-                v-model="form.exam_year"
-                type="number"
-                placeholder="e.g. 2025"
-                autofocus
-                @input="clearFieldError('exam_year')"
-                class="w-full h-10 px-3 rounded-xl bg-input-bg text-sm text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition"
-                :class="fieldErrors.exam_year ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
+              <label for="department" class="text-[13px] text-label">Departments <span class="text-brand">*</span></label>
+              <SearchableMultiSelect
+                id="department"
+                :ref="(el) => (fieldRefs.department_ids.value = el)"
+                v-model="form.department_ids"
+                :options="availableDepartments"
+                :loading="departmentsLoading"
+                :error="!!fieldErrors.department_ids"
+                placeholder="Select one or more departments"
+                search-placeholder="Search departments…"
+                @change="clearFieldError('department_ids')"
               />
-              <p v-if="fieldErrors.exam_year" class="text-[12px] text-brand">{{ fieldErrors.exam_year }}</p>
+              <p v-if="departmentsError" class="text-[12px] text-brand">{{ departmentsError }}</p>
+              <p v-else-if="fieldErrors.department_ids" class="text-[12px] text-brand">{{ fieldErrors.department_ids }}</p>
             </div>
             <div class="flex flex-col gap-1.5">
               <label for="course" class="text-[13px] text-label">Course <span class="text-brand">*</span></label>
@@ -287,6 +314,24 @@ const wrapperMaxWidth = computed(() => (stage.value === 'details' ? 'max-w-[900p
               />
               <p v-if="coursesError" class="text-[12px] text-brand">{{ coursesError }}</p>
               <p v-else-if="fieldErrors.course_id" class="text-[12px] text-brand">{{ fieldErrors.course_id }}</p>
+            </div>
+          </div>
+          <!-- Row 2: Exam Year · Exam Term · Semester -->
+          <div class="grid grid-cols-1 md:grid-cols-[1fr_1.4fr_1fr] gap-3 mt-3">
+            <div class="flex flex-col gap-1.5">
+              <label for="exam_year" class="text-[13px] text-label">Exam Year <span class="text-brand">*</span></label>
+              <input
+                id="exam_year"
+                :ref="(el) => (fieldRefs.exam_year.value = el)"
+                v-model="form.exam_year"
+                type="number"
+                placeholder="e.g. 2025"
+                autofocus
+                @input="clearFieldError('exam_year')"
+                class="w-full h-10 px-3 rounded-xl bg-input-bg text-sm text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition"
+                :class="fieldErrors.exam_year ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
+              />
+              <p v-if="fieldErrors.exam_year" class="text-[12px] text-brand">{{ fieldErrors.exam_year }}</p>
             </div>
             <div class="flex flex-col gap-1.5">
               <label for="exam_term" class="text-[13px] text-label">Exam Term <span class="text-brand">*</span></label>
