@@ -74,7 +74,8 @@ class MyPendingCourseController extends Controller
                 ->join('question_papers as qp', 'qp.id', '=', 'qasm.question_paper_id')
                 ->where('qp.exam_year', $examYear))
             ->when($examType !== null, fn ($q) => $q->where('qasm.exam_type_id', $examType))
-            ->where('answer_sheets.teacher_id', $request->user()->id)
+            // Their own sheets plus unstarted sheets of pools they share.
+            ->availableTo($request->user()->id)
             ->whereNull('answer_sheets.marks')
             ->withoutOpenIssue()
             ->whereNull('qasm.deleted_at')
@@ -118,7 +119,7 @@ class MyPendingCourseController extends Controller
                     $q->where('exam_type_id', $examType);
                 }
             })
-            ->where('teacher_id', $request->user()->id)
+            ->availableTo($request->user()->id)
             ->whereNull('marks')
             ->withoutOpenIssue()
             // Sorted by the QR code the page shows (barcode, else subject
@@ -160,6 +161,26 @@ class MyPendingCourseController extends Controller
      */
     public function startEvaluation(Request $request, AnswerSheet $answerSheet): JsonResponse
     {
+        // A pool sheet another pool teacher already started (this teacher's
+        // list was just out of date) — same message as losing the race below.
+        if (
+            $answerSheet->answer_sheet_pool_id !== null
+            && $answerSheet->teacher_id !== null
+            && $answerSheet->teacher_id !== $request->user()->id
+            && AnswerSheet::poolIdsFor($request->user()->id)->where('apt.answer_sheet_pool_id', $answerSheet->answer_sheet_pool_id)->exists()
+        ) {
+            return $this->alreadyStartedResponse();
+        }
+
+        // A sheet waiting in a pool this teacher shares: starting it claims it.
+        if ($answerSheet->teacher_id === null && $answerSheet->answer_sheet_pool_id !== null && $answerSheet->marks === null) {
+            $claimed = $this->claimPoolSheet($request, $answerSheet);
+            if ($claimed instanceof JsonResponse) {
+                return $claimed;
+            }
+            $answerSheet = $claimed;
+        }
+
         if ($answerSheet->teacher_id !== $request->user()->id || $answerSheet->marks !== null) {
             return $this->notFound('No pending answer sheet found.');
         }
@@ -444,6 +465,59 @@ class MyPendingCourseController extends Controller
         App::make(UserNotificationService::class)->issueRaised($answerSheet->id, $issueTypeName, $teacherName, $courseName, $barcode ?: $rollNo);
 
         return $this->success(new AnswerSheetResource($answerSheet), 'Issue raised successfully.');
+    }
+
+    /**
+     * Claims a pool sheet for the calling teacher — ONE conditional UPDATE
+     * ("only while teacher_id is still empty"), so when two pool teachers
+     * click Start Evaluate on the same sheet at the same moment exactly one
+     * wins; the other gets a 409 and their list refreshes. Once claimed the
+     * sheet is an ordinary assigned sheet (drafts, Complete, issues,
+     * Reassign, reports all work unchanged). assigned_by is the admin who
+     * created the pool.
+     */
+    private function claimPoolSheet(Request $request, AnswerSheet $answerSheet): AnswerSheet|JsonResponse
+    {
+        $teacherId = $request->user()->id;
+        $poolId = $answerSheet->answer_sheet_pool_id;
+
+        if (! AnswerSheet::poolIdsFor($teacherId)->where('apt.answer_sheet_pool_id', $poolId)->exists()) {
+            return $this->notFound('No pending answer sheet found.');
+        }
+        if ($answerSheet->hasOpenIssue()) {
+            return $this->openIssueResponse();
+        }
+
+        $claimed = AnswerSheet::whereKey($answerSheet->id)
+            ->whereNull('teacher_id')
+            ->whereNull('marks')
+            ->update([
+                'teacher_id' => $teacherId,
+                'assigned_at' => now(),
+                'assigned_by' => $answerSheet->pool?->created_by,
+                'updated_by' => $teacherId,
+                'updated_at' => now(),
+            ]);
+
+        if ($claimed === 0) {
+            return $this->alreadyStartedResponse();
+        }
+
+        $this->auditLog->log(
+            event: 'answer-sheet-claimed-from-pool',
+            module: 'Evaluation',
+            description: "Started answer sheet #{$answerSheet->id} from pool #{$poolId}.",
+            auditable: $answerSheet,
+            newValues: ['teacher_id' => $teacherId, 'answer_sheet_pool_id' => $poolId],
+            tags: ['evaluation', 'answer-sheet', 'pool'],
+        );
+
+        return $answerSheet->fresh();
+    }
+
+    private function alreadyStartedResponse(): JsonResponse
+    {
+        return $this->error('This answer sheet has already been started by another teacher. Your list has been refreshed.', 409);
     }
 
     private function openIssueResponse(): JsonResponse

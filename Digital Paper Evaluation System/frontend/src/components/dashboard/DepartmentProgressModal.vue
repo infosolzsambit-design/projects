@@ -24,6 +24,7 @@ async function fetchDepartments() {
       evaluated: d.evaluated_pct,
       pending: d.pending_pct,
       problem: d.problem_pct ?? 0,
+      inPool: d.in_pool_pct ?? 0,
       notAssigned: d.not_assigned_pct,
     }))
   } catch (err) {
@@ -65,6 +66,7 @@ function close() {
                 <span class="h-full bg-emerald-500" :style="{ width: dept.evaluated + '%' }"></span>
                 <span class="h-full bg-amber-400" :style="{ width: dept.pending + '%' }"></span>
               <span class="h-full bg-rose-500" :style="{ width: dept.problem + '%' }"></span>
+                <span class="h-full bg-cyan-500" :style="{ width: dept.inPool + '%' }"></span>
                 <span class="h-full bg-gray-300" :style="{ width: dept.notAssigned + '%' }"></span>
               </div>
               <span class="w-9 shrink-0 text-right text-[12.5px] font-semibold text-gray-800">{{ dept.evaluated }}%</span>
@@ -74,6 +76,7 @@ function close() {
             <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>Evaluated</span>
             <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>Pending</span>
             <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>Problem</span>
+            <span v-if="departments.some((d) => d.inPool > 0)" class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>In Pool</span>
             <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-gray-300"></span>Not Assigned</span>
           </div>
         </template>

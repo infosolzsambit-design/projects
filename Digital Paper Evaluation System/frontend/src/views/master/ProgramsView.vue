@@ -282,14 +282,14 @@ onMounted(async () => {
         <table class="w-full min-w-[820px] text-left">
           <thead>
             <tr class="bg-subject-header text-white text-[12px] font-medium">
-              <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
+              <th class="px-4 py-1.5 font-medium rounded-tl-2xl w-px whitespace-nowrap">#</th>
               <th class="px-4 py-1.5 font-medium">Name</th>
               <th class="px-4 py-1.5 font-medium">Label</th>
               <th class="px-4 py-1.5 font-medium">Department</th>
               <th class="px-4 py-1.5 font-medium">Code</th>
               <th class="px-4 py-1.5 font-medium">Courses</th>
               <th class="px-4 py-1.5 font-medium" v-if="authStore.can('program-status-change')">Status</th>
-              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('program-edit') || authStore.can('program-delete')">Action</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap" v-if="authStore.can('program-edit') || authStore.can('program-delete')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">

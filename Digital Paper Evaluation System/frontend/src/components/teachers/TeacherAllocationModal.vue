@@ -29,6 +29,8 @@ const emit = defineEmits(['close'])
 
 const breakdown = ref([])
 const total = ref(0)
+// Sheets waiting (nobody has started them) in shared pools this teacher is in.
+const poolWaitingTotal = ref(0)
 const loading = ref(true)
 const loadError = ref('')
 
@@ -39,6 +41,7 @@ async function fetchAssignments() {
     const res = await api.get(`/teachers/${props.teacher.id}/assignments`)
     breakdown.value = res.data.data.breakdown
     total.value = res.data.data.total
+    poolWaitingTotal.value = res.data.data.pool_waiting_total ?? 0
   } catch (err) {
     loadError.value = err.response?.data?.message || "Could not load this teacher's allocations."
   } finally {
@@ -63,7 +66,7 @@ onMounted(fetchAssignments)
         <div>
           <h2 class="text-lg font-bold text-black">{{ pendingOnly ? 'Pending' : 'Allocated' }} Answer Sheets — {{ teacher.name }}</h2>
           <p class="text-[13px] text-muted mt-0.5">
-            {{ sheetTotal }} {{ pendingOnly ? 'pending ' : '' }}answer sheet{{ sheetTotal === 1 ? '' : 's' }} {{ pendingOnly ? '' : 'allocated ' }}across {{ rows.length }} course{{ rows.length === 1 ? '' : 's' }}.
+            {{ sheetTotal }} {{ pendingOnly ? 'pending ' : '' }}answer sheet{{ sheetTotal === 1 ? '' : 's' }} {{ pendingOnly ? '' : 'allocated ' }}across {{ rows.length }} course{{ rows.length === 1 ? '' : 's' }}<template v-if="!pendingOnly && poolWaitingTotal">, plus <span class="font-semibold text-cyan-700">{{ poolWaitingTotal }}</span> waiting in shared pools</template>.
           </p>
         </div>
         <button type="button" class="text-gray-400 hover:text-gray-700 transition-colors" aria-label="Close" @click="close">
@@ -136,12 +139,20 @@ onMounted(fetchAssignments)
                     <div class="inline-grid grid-cols-[auto_auto_auto] gap-x-1.5 gap-y-0.5 leading-snug whitespace-nowrap">
                       <span class="text-muted">Total</span><span class="text-muted">:</span><span class="font-semibold text-gray-900">{{ row.sheet_count }}</span>
                       <span class="text-muted">Completed</span><span class="text-muted">:</span><span class="font-semibold text-success">{{ row.completed_count }}</span>
+                      <!-- Of these, taken from a shared pool. -->
+                      <template v-if="row.from_pool_count > 0">
+                        <span class="text-muted">From pool</span><span class="text-muted">:</span><span class="font-semibold text-gray-900">{{ row.from_pool_count }}</span>
+                      </template>
                     </div>
                   </td>
                   <td class="px-2.5 py-2.5">
                     <div class="inline-grid grid-cols-[auto_auto_auto] gap-x-1.5 gap-y-0.5 leading-snug whitespace-nowrap">
                       <span class="text-muted">Pending</span><span class="text-muted">:</span><span class="font-semibold text-brand">{{ row.pending_count ?? 0 }}</span>
                       <span class="text-muted">Problem</span><span class="text-muted">:</span><span class="font-semibold text-amber-600">{{ row.problem_count ?? 0 }}</span>
+                      <!-- Not started by anyone yet, in pools this teacher shares. -->
+                      <template v-if="row.pool_waiting_count > 0">
+                        <span class="text-muted" title="Not started by anyone yet — shared with the other pool teachers">Pool waiting</span><span class="text-muted">:</span><span class="font-semibold text-cyan-700">{{ row.pool_waiting_count }}</span>
+                      </template>
                     </div>
                   </td>
                 </tr>

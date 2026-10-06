@@ -59,6 +59,11 @@ class TeacherResource extends JsonResource
             // problem (AnswerSheet::pendingSql()), same as the allocation
             // modal's Pending column.
             'pending_answer_sheet_count' => $this->assigned_answer_sheets_pending_count ?? 0,
+            // Shared pools: of the allocated sheets, how many were taken from
+            // a pool; and how many sheets still wait (unstarted) in pools
+            // this teacher shares.
+            'from_pool_answer_sheet_count' => (int) ($this->assigned_answer_sheets_from_pool_count ?? 0),
+            'pool_waiting_answer_sheet_count' => (int) ($this->pool_waiting_count ?? 0),
             // Set via ->addSelect()'s correlated subquery on the same
             // query — the number of *distinct* courses those allocated
             // sheets span. AssignedTeachersView.vue's own "Courses" column;

@@ -317,7 +317,7 @@ function cancel() {
             <table class="w-full min-w-[720px] text-left border-separate border-spacing-0">
               <thead>
                 <tr class="bg-subject-header text-white text-[11px] font-medium">
-                  <th class="px-2 py-1.5 rounded-tl-xl">#</th>
+                  <th class="px-2 py-1.5 rounded-tl-xl w-px whitespace-nowrap">#</th>
                   <th class="px-2 py-1.5 min-w-[180px]">Name</th>
                   <th class="px-2 py-1.5 min-w-[90px]">Label</th>
                   <th class="px-2 py-1.5 min-w-[200px]">Department</th>

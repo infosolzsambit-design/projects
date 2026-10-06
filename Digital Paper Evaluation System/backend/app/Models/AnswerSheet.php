@@ -34,6 +34,7 @@ class AnswerSheet extends Model implements AuditableContract
     protected $fillable = [
         'question_answer_sheet_mapping_id',
         'teacher_id',
+        'answer_sheet_pool_id',
         'assigned_at',
         'assigned_by',
         'evaluation_start_date',
@@ -148,6 +149,17 @@ class AnswerSheet extends Model implements AuditableContract
     }
 
     /**
+     * The shared pool this sheet was put in (Assign Teacher → "Pool") —
+     * null if it was never pooled. A pooled sheet with no teacher yet is
+     * waiting for a pool teacher to start it; once one does, teacher_id is
+     * set and this stays as history.
+     */
+    public function pool(): BelongsTo
+    {
+        return $this->belongsTo(AnswerSheetPool::class, 'answer_sheet_pool_id');
+    }
+
+    /**
      * The evaluation-issue type raised against this sheet (see
      * MyPendingCourseController::raiseIssue()) — null means none has been.
      */
@@ -239,6 +251,57 @@ class AnswerSheet extends Model implements AuditableContract
     public static function problemSql(string $table = 'answer_sheets'): string
     {
         return "({$table}.marks IS NULL AND {$table}.issue_status = 'open')";
+    }
+
+    /**
+     * Sheets still waiting to be ASSIGNED — no teacher and not in a pool.
+     * A pooled sheet has no teacher until a pool teacher starts it, but it
+     * is already handed out, so it must never be offered for assignment
+     * again (Assign Teacher, "Pending to assign" counts, dashboard).
+     */
+    public function scopeAwaitingAssignment(Builder $query): Builder
+    {
+        return $query->whereNull($query->qualifyColumn('teacher_id'))
+            ->whereNull($query->qualifyColumn('answer_sheet_pool_id'));
+    }
+
+    /**
+     * Sheets waiting in a shared pool — handed to a pool, but no pool
+     * teacher has started them yet (so no teacher_id).
+     */
+    public function scopeWaitingInPool(Builder $query): Builder
+    {
+        return $query->whereNull($query->qualifyColumn('teacher_id'))
+            ->whereNotNull($query->qualifyColumn('answer_sheet_pool_id'))
+            ->whereNull($query->qualifyColumn('marks'));
+    }
+
+    /**
+     * Sheets a teacher can work on from My Pending Course: their own, plus
+     * any sheet still waiting (no teacher yet) in a pool they share. The
+     * first pool teacher to start one claims it (see
+     * MyPendingCourseController::startEvaluation()).
+     */
+    public function scopeAvailableTo(Builder $query, int $teacherId): Builder
+    {
+        $teacherColumn = $query->qualifyColumn('teacher_id');
+        $poolColumn = $query->qualifyColumn('answer_sheet_pool_id');
+
+        return $query->where(fn (Builder $q) => $q
+            ->where($teacherColumn, $teacherId)
+            ->orWhere(fn (Builder $pooled) => $pooled
+                ->whereNull($teacherColumn)
+                ->whereIn($poolColumn, self::poolIdsFor($teacherId))));
+    }
+
+    /** Pools (not deleted) this teacher shares — a subquery for scopeAvailableTo(). */
+    public static function poolIdsFor(int $teacherId): \Illuminate\Database\Query\Builder
+    {
+        return \Illuminate\Support\Facades\DB::table('answer_sheet_pool_teachers as apt')
+            ->join('answer_sheet_pools as ap', 'ap.id', '=', 'apt.answer_sheet_pool_id')
+            ->whereNull('ap.deleted_at')
+            ->where('apt.teacher_id', $teacherId)
+            ->select('apt.answer_sheet_pool_id');
     }
 
     /** Sheets still waiting to be evaluated — see pendingSql(). */

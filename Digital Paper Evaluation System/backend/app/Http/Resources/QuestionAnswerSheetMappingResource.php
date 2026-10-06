@@ -47,6 +47,8 @@ class QuestionAnswerSheetMappingResource extends JsonResource
             // draws from. Distinct from answer_sheet_count above once any
             // of a packet's sheets have been assigned to a teacher.
             'pending_answer_sheet_count' => $this->pending_answer_sheet_count,
+            // Waiting in a shared pool (Assign Teacher → Pool), not started yet.
+            'in_pool_answer_sheet_count' => $this->in_pool_answer_sheet_count,
             'created_by' => $this->created_by,
             'created_by_name' => $this->whenLoaded('creator', fn () => $this->creator?->name),
             'updated_by' => $this->updated_by,

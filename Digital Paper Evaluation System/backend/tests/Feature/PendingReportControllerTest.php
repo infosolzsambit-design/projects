@@ -168,4 +168,32 @@ class PendingReportControllerTest extends TestCase
         $setting->update(['status' => false]);
         $this->assertStringNotContainsString($encoded, $this->withApiKey()->get($url)->getContent());
     }
+
+    public function test_unstarted_pool_sheets_are_reported_separately_with_their_teachers(): void
+    {
+        $this->actingUser();
+        ['mapping' => $mapping, 'filters' => $filters] = $this->searchableMapping();
+        $a = $this->teacher('Pool Teacher A');
+        $b = $this->teacher('Pool Teacher B');
+        $pool = \App\Models\AnswerSheetPool::create(['program_name' => 'B.Tech', 'course_id' => $mapping->course_id, 'exam_term_id' => $mapping->exam_term_id, 'exam_type_id' => $mapping->exam_type_id, 'semester' => 6, 'exam_year' => 2026]);
+        $pool->teachers()->attach([$a, $b]);
+        AnswerSheet::factory()->count(3)->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => null, 'marks' => null, 'answer_sheet_pool_id' => $pool->id]);
+        // One already started by teacher A — now A's own pending sheet.
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $a, 'marks' => null, 'answer_sheet_pool_id' => $pool->id]);
+
+        $data = $this->withApiKey()->getJson('/api/v1/reports/pending-report?'.http_build_query($filters))->assertOk()->json('data');
+
+        $this->assertSame(3, $data['pool']['pending']);
+        $this->assertSame(['Pool Teacher A', 'Pool Teacher B'], $data['pool']['teachers']);
+        $this->assertCount(1, $data['rows']);
+        $this->assertSame(1, $data['rows'][0]['pending']);
+
+        // Teacher filter: only pools that teacher is in.
+        $outsider = $this->teacher('Outsider');
+        $this->assertSame(0, $this->withApiKey()->getJson('/api/v1/reports/pending-report?'.http_build_query($filters + ['teacher_id' => $outsider]))->json('data.pool.pending'));
+
+        $excel = $this->withApiKey()->get('/api/v1/reports/pending-report/export?'.http_build_query($filters))->getContent();
+        $this->assertStringContainsString('Shared pool — not started yet:', $excel);
+        $this->assertStringContainsString('Pool Teacher A, Pool Teacher B', $excel);
+    }
 }

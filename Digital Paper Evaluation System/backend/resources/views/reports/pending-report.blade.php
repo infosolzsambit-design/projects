@@ -61,6 +61,16 @@
         <th align="center" style="{{ $th }}">Evaluation End Date</th>
     </tr>
 
+    {{-- Shared-pool sheets nobody has started yet — not any one teacher's. --}}
+    @if (($pool['pending'] ?? 0) > 0)
+        <tr>
+            <td colspan="{{ $cols }}" align="left" style="border: 1px solid #c7d2fe; background-color: #eef2ff; padding: 5px 10px; font-size: 9px; color: #1f3a82;">
+                <strong>Shared pool — not started yet:</strong> {{ $pool['pending'] }} answer sheet{{ $pool['pending'] === 1 ? '' : 's' }}
+                (shared by {{ implode(', ', $pool['teachers']) }} — the first teacher to start a sheet gets it)
+            </td>
+        </tr>
+    @endif
+
     @forelse ($rows as $i => $row)
         @php
             $bg = $i % 2 === 1 ? '#f6f8fc' : '#ffffff';
@@ -82,9 +92,11 @@
             <td align="center" style="{{ $td }}{{ $row['overdue'] ? ' color: #e81b26; font-weight: bold;' : '' }}">{{ $row['evaluation_end_date'] ?? '—' }}</td>
         </tr>
     @empty
-        <tr>
-            <td colspan="{{ $cols }}" align="center" style="border: 1px solid #d0d5dd; padding: 10px; font-size: 11px;">No teacher has pending answer sheets for this search.</td>
-        </tr>
+        @if (($pool['pending'] ?? 0) === 0)
+            <tr>
+                <td colspan="{{ $cols }}" align="center" style="border: 1px solid #d0d5dd; padding: 10px; font-size: 11px;">No teacher has pending answer sheets for this search.</td>
+            </tr>
+        @endif
     @endforelse
 
     @if (count($rows))

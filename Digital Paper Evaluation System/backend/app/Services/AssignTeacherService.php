@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AnswerSheet;
+use App\Models\AnswerSheetPool;
 use App\Models\QuestionAnswerSheetMapping;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -48,26 +49,12 @@ class AssignTeacherService
     public function assign(array $filters, array $assignments, string $evaluationStartDate, string $evaluationEndDate, ?int $evaluationTimePerSheet = null): array
     {
         return DB::transaction(function () use ($filters, $assignments, $evaluationStartDate, $evaluationEndDate, $evaluationTimePerSheet) {
-            $mappingIds = QuestionAnswerSheetMapping::query()
-                ->where('program_name', $filters['program_name'])
-                ->where('exam_term_id', $filters['exam_term_id'])
-                ->where('exam_type_id', $filters['exam_type_id'])
-                ->where('course_id', $filters['course_id'])
-                ->where('semester', $filters['semester'])
-                ->whereHas('questionPaper', fn ($q) => $q->where('exam_year', $filters['exam_year']))
-                ->when(! empty($filters['department_id']), fn ($q) => $q->where('department_id', $filters['department_id']))
-                ->pluck('id');
-
-            if ($mappingIds->isEmpty()) {
-                throw ValidationException::withMessages([
-                    'assignments' => ['No answer sheet packet matches these exam details.'],
-                ]);
-            }
+            $mappingIds = $this->matchingMappingIds($filters, 'assignments');
 
             // Locked so two admins racing to assign the same course's
             // sheets at once can't both claim the same physical sheet.
             $pendingSheets = AnswerSheet::whereIn('question_answer_sheet_mapping_id', $mappingIds)
-                ->whereNull('teacher_id')
+                ->awaitingAssignment()
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->get();
@@ -116,6 +103,105 @@ class AssignTeacherService
 
             return $summary;
         });
+    }
+
+    /**
+     * Pool mode (Assign Teacher → "Pool"): instead of fixed quantities per
+     * teacher, $quantity still-pending sheets of the search (taken in the
+     * same order assign() uses) go into one new pool shared by all the
+     * given teachers. No sheet gets a teacher here — each pool teacher
+     * sees every sheet still waiting in the pool, and whoever starts one
+     * first claims it (MyPendingCourseController). The evaluation window is
+     * stamped on each sheet the same way assign() does.
+     *
+     * @param  array{program_name:string,exam_term_id:int,exam_type_id:int,course_id:int,semester:int,exam_year:int,department_id?:int|null}  $filters
+     * @param  list<int>  $teacherIds
+     * @return array{pool_id:int, sheet_count:int, teacher_ids:list<int>}
+     *
+     * @throws ValidationException when nothing matches, or fewer than $quantity sheets are still pending.
+     */
+    public function assignPool(array $filters, array $teacherIds, int $quantity, string $evaluationStartDate, string $evaluationEndDate, ?int $evaluationTimePerSheet = null): array
+    {
+        return DB::transaction(function () use ($filters, $teacherIds, $quantity, $evaluationStartDate, $evaluationEndDate, $evaluationTimePerSheet) {
+            $mappingIds = $this->matchingMappingIds($filters, 'teacher_ids');
+
+            // Locked for the same reason as assign() — two admins at once
+            // can't hand the same sheet out twice.
+            $pendingSheets = AnswerSheet::whereIn('question_answer_sheet_mapping_id', $mappingIds)
+                ->awaitingAssignment()
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
+
+            if ($pendingSheets->isEmpty()) {
+                throw ValidationException::withMessages([
+                    'teacher_ids' => ['No answer sheets are still pending for this search.'],
+                ]);
+            }
+            if ($quantity > $pendingSheets->count()) {
+                throw ValidationException::withMessages([
+                    'pool_quantity' => ["Only {$pendingSheets->count()} answer sheet(s) are still pending for this search — {$quantity} were requested."],
+                ]);
+            }
+            $pendingSheets = $pendingSheets->take($quantity);
+
+            $pool = AnswerSheetPool::create([
+                'program_name' => $filters['program_name'],
+                'course_id' => $filters['course_id'],
+                'exam_term_id' => $filters['exam_term_id'],
+                'exam_type_id' => $filters['exam_type_id'],
+                'semester' => $filters['semester'],
+                'exam_year' => $filters['exam_year'],
+                'department_id' => $filters['department_id'] ?? null,
+                'evaluation_start_date' => $evaluationStartDate,
+                'evaluation_end_date' => $evaluationEndDate,
+                'evaluation_time_per_sheet' => $evaluationTimePerSheet,
+            ]);
+            $pool->teachers()->attach($teacherIds);
+
+            // Per-sheet ->update() for the same userstamp/audit reasons as assign().
+            foreach ($pendingSheets as $sheet) {
+                $sheet->update([
+                    'answer_sheet_pool_id' => $pool->id,
+                    'evaluation_start_date' => $evaluationStartDate,
+                    'evaluation_end_date' => $evaluationEndDate,
+                    'evaluation_time_per_sheet' => $evaluationTimePerSheet,
+                ]);
+            }
+
+            return [
+                'pool_id' => $pool->id,
+                'sheet_count' => $pendingSheets->count(),
+                'teacher_ids' => array_map('intval', $teacherIds),
+            ];
+        });
+    }
+
+    /**
+     * The packets matching an Assign Teacher search (shared by assign() and
+     * assignPool()).
+     *
+     * @throws ValidationException (under $errorKey) when none match.
+     */
+    private function matchingMappingIds(array $filters, string $errorKey)
+    {
+        $mappingIds = QuestionAnswerSheetMapping::query()
+            ->where('program_name', $filters['program_name'])
+            ->where('exam_term_id', $filters['exam_term_id'])
+            ->where('exam_type_id', $filters['exam_type_id'])
+            ->where('course_id', $filters['course_id'])
+            ->where('semester', $filters['semester'])
+            ->whereHas('questionPaper', fn ($q) => $q->where('exam_year', $filters['exam_year']))
+            ->when(! empty($filters['department_id']), fn ($q) => $q->where('department_id', $filters['department_id']))
+            ->pluck('id');
+
+        if ($mappingIds->isEmpty()) {
+            throw ValidationException::withMessages([
+                $errorKey => ['No answer sheet packet matches these exam details.'],
+            ]);
+        }
+
+        return $mappingIds;
     }
 
     /**

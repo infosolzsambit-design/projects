@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\API\V1\AnswerSheetPoolController;
 use App\Http\Controllers\API\V1\AssignTeacherController;
 use App\Http\Controllers\API\V1\AuditController;
 use App\Http\Controllers\API\V1\Auth\AuthController;
@@ -204,6 +205,11 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     // Persists AssignTeacherView.vue's "Assign" click — see
     // AssignTeacherService's own docblock for what this actually stores.
     Route::post('assign-teacher', [AssignTeacherController::class, 'store']);
+
+    // Shared Pools page — list, change teachers, cancel (see AnswerSheetPoolController).
+    Route::get('answer-sheet-pools', [AnswerSheetPoolController::class, 'index']);
+    Route::put('answer-sheet-pools/{pool}/teachers', [AnswerSheetPoolController::class, 'updateTeachers']);
+    Route::post('answer-sheet-pools/{pool}/cancel', [AnswerSheetPoolController::class, 'cancel']);
 
     // Sidebar's Report → Teacher Wise Report — see that controller's own
     // docblock for why index()/export() share one query.

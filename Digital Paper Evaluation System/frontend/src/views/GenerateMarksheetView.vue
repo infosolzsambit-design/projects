@@ -753,7 +753,7 @@ function statusLabel(status) {
                 <th class="px-2 py-2">QR Code</th>
                 <th class="px-2 py-2">System Roll No.</th>
                 <th class="px-2 py-2">Written on Answer Sheet</th>
-                <th class="pl-2 pr-5 py-2 text-center w-16">Action</th>
+                <th class="pl-2 pr-5 py-2 text-center w-px whitespace-nowrap">Action</th>
               </tr>
             </thead>
             <tbody class="bg-white">

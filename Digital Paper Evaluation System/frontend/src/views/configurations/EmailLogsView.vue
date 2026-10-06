@@ -237,13 +237,13 @@ onMounted(async () => {
         <table class="w-full min-w-[920px] text-left">
           <thead>
             <tr class="bg-subject-header text-white text-[12px] font-medium">
-              <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
+              <th class="px-4 py-1.5 font-medium rounded-tl-2xl w-px whitespace-nowrap">#</th>
               <th class="px-4 py-1.5 font-medium">Subject</th>
               <th class="px-4 py-1.5 font-medium">To</th>
               <th class="px-4 py-1.5 font-medium">Type</th>
               <th class="px-4 py-1.5 font-medium">Status</th>
               <th class="px-4 py-1.5 font-medium">Sent / Attempted At</th>
-              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl">Action</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">

@@ -113,6 +113,8 @@ const donutSegments = computed(() => {
     { label: 'Pending Evaluation', value: s?.pending_evaluation ?? 0, displayPct: pct(s?.pending_evaluation ?? 0), color: '#f9a228' },
     { label: 'Problem', value: s?.problem ?? 0, displayPct: pct(s?.problem ?? 0), color: '#f43f5e' },
     { label: 'Not Assigned', value: s?.not_assigned ?? 0, displayPct: pct(s?.not_assigned ?? 0), color: '#2f56c0' },
+    // Shared-pool sheets nobody has started yet — only listed once there are any.
+    ...((s?.in_pool ?? 0) > 0 ? [{ label: 'In Pool', value: s.in_pool, displayPct: pct(s.in_pool), color: '#06b6d4' }] : []),
   ]
 })
 // Four disjoint buckets (DashboardController::evaluationStatus()) —
@@ -142,8 +144,10 @@ const departments = computed(() => (summary.value?.department_progress ?? []).ma
   evaluated: d.evaluated_pct,
   pending: d.pending_pct,
   problem: d.problem_pct ?? 0,
+  inPool: d.in_pool_pct ?? 0,
   notAssigned: d.not_assigned_pct,
 })))
+const anyDepartmentInPool = computed(() => departments.value.some((d) => d.inPool > 0))
 const departmentsHasMore = computed(() => summary.value?.department_progress_has_more ?? false)
 
 // --- Issue Summary -----------------------------------------------------
@@ -217,6 +221,9 @@ const showCoursePendingModal = ref(false)
         <div class="min-w-0">
           <p class="text-[12px] font-medium text-gray-700 leading-tight whitespace-nowrap overflow-hidden text-ellipsis">{{ kpi.label }}</p>
           <p class="text-[19px] font-bold text-gray-900 leading-tight">{{ kpi.value }}</p>
+          <!-- Shared-pool sheets not started yet aren't anyone's — shown
+               under Assigned so the row still adds up. -->
+          <p v-if="kpi.key === 'assigned' && summary?.workflow?.in_pool" class="text-[10.5px] font-semibold text-cyan-700 leading-tight">+{{ fmt(summary.workflow.in_pool) }} in pool</p>
         </div>
       </div>
     </section>
@@ -289,6 +296,7 @@ const showCoursePendingModal = ref(false)
               <span class="h-full bg-emerald-500" :style="{ width: dept.evaluated + '%' }"></span>
               <span class="h-full bg-amber-400" :style="{ width: dept.pending + '%' }"></span>
               <span class="h-full bg-rose-500" :style="{ width: dept.problem + '%' }"></span>
+              <span class="h-full bg-cyan-500" :style="{ width: dept.inPool + '%' }"></span>
               <span class="h-full bg-gray-300" :style="{ width: dept.notAssigned + '%' }"></span>
             </div>
             <span class="w-9 shrink-0 text-right text-[12px] font-semibold text-gray-800">{{ dept.evaluated }}%</span>
@@ -299,6 +307,7 @@ const showCoursePendingModal = ref(false)
             <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>Evaluated</span>
             <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>Pending</span>
             <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>Problem</span>
+            <span v-if="anyDepartmentInPool" class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>In Pool</span>
             <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-gray-300"></span>Not Assigned</span>
           </div>
           <button v-if="departmentsHasMore" type="button" class="shrink-0 text-[11.5px] font-semibold text-brand-blue hover:underline" @click="showDepartmentsModal = true">
@@ -346,7 +355,7 @@ const showCoursePendingModal = ref(false)
           <table class="w-full min-w-[420px] text-left text-[12px]">
             <thead>
               <tr class="text-muted">
-                <th class="px-1 py-1.5 font-medium">#</th>
+                <th class="px-1 py-1.5 font-medium w-px whitespace-nowrap">#</th>
                 <th class="px-1 py-1.5 font-medium">Teacher Name</th>
                 <th class="px-1 py-1.5 font-medium text-center">Assigned</th>
                 <th class="px-1 py-1.5 font-medium text-center">Evaluated</th>
@@ -387,7 +396,7 @@ const showCoursePendingModal = ref(false)
           <table class="w-full min-w-[380px] text-left text-[12px]">
             <thead>
               <tr class="text-muted">
-                <th class="px-1 py-1.5 font-medium">#</th>
+                <th class="px-1 py-1.5 font-medium w-px whitespace-nowrap">#</th>
                 <th class="px-1 py-1.5 font-medium">Course Name</th>
                 <th class="px-1 py-1.5 font-medium text-center">Pending</th>
                 <th class="px-1 py-1.5 font-medium text-center">Total</th>

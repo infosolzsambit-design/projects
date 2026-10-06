@@ -108,6 +108,7 @@ onMounted(() => nextTick(updateEvaluateCourseMaxHeight))
 const assignTeacherItems = [
   { to: '/assign-teacher', label: 'Assign Teacher', permission: 'assign-answersheet-to-teacher' },
   { to: '/assigned-teachers', label: 'Assigned Teacher List', permission: 'assigned-teacher-list' },
+  { to: '/shared-pools', label: 'Shared Pools', permission: 'shared-pool-list' },
 ]
 const visibleAssignTeacherItems = computed(() => assignTeacherItems.filter((item) => authStore.can(item.permission)))
 
@@ -351,7 +352,7 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
         <span class="sidebar-label">Answer Sheet Upload</span>
       </RouterLink>
 
-      <button v-if="authStore.can('assign-answersheet-to-teacher') || authStore.can('assigned-teacher-list')" type="button" :aria-expanded="assignTeacherOpen" aria-controls="assign-teacher-submenu"
+      <button v-if="authStore.can('assign-answersheet-to-teacher') || authStore.can('assigned-teacher-list') || authStore.can('shared-pool-list')" type="button" :aria-expanded="assignTeacherOpen" aria-controls="assign-teacher-submenu"
         class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
         :class="assignTeacherActive ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'"
         @click="assignTeacherOpen = !assignTeacherOpen">

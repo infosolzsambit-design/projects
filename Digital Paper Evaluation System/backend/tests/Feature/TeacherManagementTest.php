@@ -1319,4 +1319,36 @@ class TeacherManagementTest extends TestCase
             'is_sent' => true,
         ]);
     }
+
+    public function test_assigned_teacher_list_and_modal_show_pool_counts(): void
+    {
+        $this->actingAdmin();
+        $mapping = QuestionAnswerSheetMapping::factory()->create();
+        $starter = TeacherDetail::factory()->create()->user_id;   // started 1 pool sheet
+        $waiter = TeacherDetail::factory()->create()->user_id;    // in the pool, started nothing yet
+        $pool = \App\Models\AnswerSheetPool::create(['program_name' => $mapping->program_name, 'course_id' => $mapping->course_id, 'exam_term_id' => $mapping->exam_term_id, 'exam_type_id' => $mapping->exam_type_id, 'semester' => $mapping->semester, 'exam_year' => 2026]);
+        $pool->teachers()->attach([$starter, $waiter]);
+        AnswerSheet::factory()->count(3)->create(['question_answer_sheet_mapping_id' => $mapping->id, 'answer_sheet_pool_id' => $pool->id, 'teacher_id' => null, 'marks' => null]);
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'answer_sheet_pool_id' => $pool->id, 'teacher_id' => $starter, 'marks' => null]);
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $starter, 'marks' => null]); // a normal assignment
+
+        $items = collect($this->withApiKey()->getJson('/api/v1/teachers?has_assignments=yes')->assertOk()->json('data.items'))->keyBy('id');
+
+        // The pool-only teacher is listed even with nothing allocated yet.
+        $this->assertSame(0, $items[$waiter]['allocated_answer_sheet_count']);
+        $this->assertSame(3, $items[$waiter]['pool_waiting_answer_sheet_count']);
+        $this->assertSame(2, $items[$starter]['allocated_answer_sheet_count']);
+        $this->assertSame(1, $items[$starter]['from_pool_answer_sheet_count']);
+        $this->assertSame(3, $items[$starter]['pool_waiting_answer_sheet_count']);
+
+        $modal = $this->withApiKey()->getJson("/api/v1/teachers/{$starter}/assignments")->assertOk()->json('data');
+        $this->assertSame(3, $modal['pool_waiting_total']);
+        $this->assertSame(1, $modal['breakdown'][0]['from_pool_count']);
+        $this->assertSame(3, $modal['breakdown'][0]['pool_waiting_count']);
+
+        // The pool-only teacher's modal has the packet with 0 own sheets and 3 waiting.
+        $waiterModal = $this->withApiKey()->getJson("/api/v1/teachers/{$waiter}/assignments")->assertOk()->json('data');
+        $this->assertSame(0, $waiterModal['total']);
+        $this->assertSame(3, $waiterModal['breakdown'][0]['pool_waiting_count']);
+    }
 }

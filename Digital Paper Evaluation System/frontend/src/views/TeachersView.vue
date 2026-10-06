@@ -342,14 +342,14 @@ function retakeFromView() {
         <table class="w-full min-w-[1150px] text-left">
           <thead>
             <tr class="bg-subject-header text-white text-[12px] font-medium">
-              <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
+              <th class="px-4 py-1.5 font-medium rounded-tl-2xl w-px whitespace-nowrap">#</th>
               <th class="px-4 py-1.5 font-medium">Name</th>
               <th class="px-4 py-1.5 font-medium">Contact</th>
               <th class="px-4 py-1.5 font-medium">Department</th>
               <th class="px-4 py-1.5 font-medium">Designation</th>
               <th class="px-4 py-1.5 font-medium" v-if="authStore.can('teacher-face-scan')">Face Scan</th>
               <th class="px-4 py-1.5 font-medium" v-if="authStore.can('teacher-status-change')">Status</th>
-              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('teacher-edit') || authStore.can('teacher-delete')">Action</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap" v-if="authStore.can('teacher-edit') || authStore.can('teacher-delete')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">

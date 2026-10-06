@@ -115,16 +115,18 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
     public function test_list_can_be_filtered_and_searched_by_department(): void
     {
         $this->actingAdmin();
-        $science = \App\Models\Department::factory()->create(['name' => 'Department of Science']);
+        // A made-up word for the search, so the other packet's random factory
+        // data (course/program names like "Computer Science") can't match it too.
+        $science = \App\Models\Department::factory()->create(['name' => 'Department of Zyxology']);
         $arts = \App\Models\Department::factory()->create(['name' => 'Department of Arts']);
-        $sciencePacket = QuestionAnswerSheetMapping::factory()->create(['department_id' => $science->id, 'department_name' => 'Department of Science']);
+        $sciencePacket = QuestionAnswerSheetMapping::factory()->create(['department_id' => $science->id, 'department_name' => 'Department of Zyxology']);
         QuestionAnswerSheetMapping::factory()->create(['department_id' => $arts->id, 'department_name' => 'Department of Arts']);
 
         $ids = fn ($query) => collect($this->withApiKey()->getJson('/api/v1/answer-sheet-mappings?'.$query)->assertOk()->json('data.items'))->pluck('id')->all();
 
         $this->assertSame([$sciencePacket->id], $ids('department_id='.$science->id));
-        $this->assertSame([$sciencePacket->id], $ids('search=Science'));
-        $this->assertSame('Department of Science', collect($this->withApiKey()->getJson('/api/v1/answer-sheet-mappings?department_id='.$science->id)->json('data.items'))->first()['department_name']);
+        $this->assertSame([$sciencePacket->id], $ids('search=Zyxology'));
+        $this->assertSame('Department of Zyxology', collect($this->withApiKey()->getJson('/api/v1/answer-sheet-mappings?department_id='.$science->id)->json('data.items'))->first()['department_name']);
     }
 
     private function packetPayload(QuestionPaper $paper, array $overrides = []): array

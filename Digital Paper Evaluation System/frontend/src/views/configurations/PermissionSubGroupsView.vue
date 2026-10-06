@@ -298,12 +298,12 @@ onMounted(async () => {
         <table class="w-full min-w-[680px] text-left">
           <thead>
             <tr class="bg-subject-header text-white text-[12px] font-medium">
-              <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
+              <th class="px-4 py-1.5 font-medium rounded-tl-2xl w-px whitespace-nowrap">#</th>
               <th class="px-4 py-1.5 font-medium">Name</th>
               <th class="px-4 py-1.5 font-medium">Group</th>
               <th class="px-4 py-1.5 font-medium">Sort Order</th>
               <th class="px-4 py-1.5 font-medium" v-if="authStore.can('permission-sub-group-status-change')">Status</th>
-              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('permission-sub-group-edit') || authStore.can('permission-sub-group-delete')">Action</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap" v-if="authStore.can('permission-sub-group-edit') || authStore.can('permission-sub-group-delete')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">

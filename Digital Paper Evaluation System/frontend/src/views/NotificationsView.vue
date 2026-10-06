@@ -230,7 +230,7 @@ function onResolved() {
         <table class="w-full min-w-[920px] text-left">
           <thead>
             <tr class="bg-subject-header text-white text-[12px] font-medium">
-              <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
+              <th class="px-4 py-1.5 font-medium rounded-tl-2xl w-px whitespace-nowrap">#</th>
               <th class="px-4 py-1.5 font-medium">Unique Number</th>
               <th class="px-4 py-1.5 font-medium">Course</th>
               <th class="px-4 py-1.5 font-medium">Issue Type</th>

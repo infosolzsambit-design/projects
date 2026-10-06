@@ -30,7 +30,14 @@ class AssignTeacherController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        // "distribution" (default — fixed quantities per teacher) or "pool"
+        // (every pending sheet shared by the selected teachers, first to
+        // start a sheet gets it — see AssignTeacherService::assignPool()).
+        $isPool = $request->input('mode') === 'pool';
+        $teacherRule = ['required', 'integer', 'distinct', Rule::exists('teacher_details', 'user_id')->whereNull('deleted_at')];
+
         $data = $request->validate([
+            'mode' => ['nullable', Rule::in(['distribution', 'pool'])],
             'program_name' => ['required', 'string'],
             'exam_term_id' => ['required', 'integer', Rule::exists('exam_terms', 'id')->whereNull('deleted_at')],
             'exam_type_id' => ['required', 'integer', Rule::exists('exam_types', 'id')->whereNull('deleted_at')],
@@ -40,15 +47,20 @@ class AssignTeacherController extends Controller
             // Optional — only the packets uploaded under this department
             // (question_answer_sheet_mappings.department_id) are assigned.
             'department_id' => ['nullable', 'integer', Rule::exists('departments', 'id')->whereNull('deleted_at')],
-            'assignments' => ['required', 'array', 'min:1'],
             // Only a real teacher — a user with a (non-deleted)
             // teacher_details row — same check TeacherController::show()
             // makes, just expressed as a validation rule instead.
-            'assignments.*.teacher_id' => [
-                'required', 'integer', 'distinct',
-                Rule::exists('teacher_details', 'user_id')->whereNull('deleted_at'),
-            ],
-            'assignments.*.quantity' => ['required', 'integer', 'min:1'],
+            ...($isPool ? [
+                // A pool is only a pool with at least two teachers sharing it.
+                'teacher_ids' => ['required', 'array', 'min:2'],
+                'teacher_ids.*' => $teacherRule,
+                // How many of the pending sheets go into the pool — a whole number.
+                'pool_quantity' => ['required', 'integer', 'min:1'],
+            ] : [
+                'assignments' => ['required', 'array', 'min:1'],
+                'assignments.*.teacher_id' => $teacherRule,
+                'assignments.*.quantity' => ['required', 'integer', 'min:1'],
+            ]),
             // The evaluation window every sheet this call touches gets
             // stamped with — see AssignTeacherService::assign()'s own
             // docblock. Required, not optional: nothing here should be
@@ -69,17 +81,23 @@ class AssignTeacherController extends Controller
             'email_body' => ['required', 'string'],
         ]);
 
+        $filters = [
+            'program_name' => $data['program_name'],
+            'exam_term_id' => $data['exam_term_id'],
+            'exam_type_id' => $data['exam_type_id'],
+            'course_id' => $data['course_id'],
+            'semester' => $data['semester'],
+            'exam_year' => $data['exam_year'],
+            'department_id' => $data['department_id'] ?? null,
+        ];
+
+        if ($isPool) {
+            return $this->storePool($request, $data, $filters);
+        }
+
         try {
             $summary = $this->assignTeacherService->assign(
-                filters: [
-                    'program_name' => $data['program_name'],
-                    'exam_term_id' => $data['exam_term_id'],
-                    'exam_type_id' => $data['exam_type_id'],
-                    'course_id' => $data['course_id'],
-                    'semester' => $data['semester'],
-                    'exam_year' => $data['exam_year'],
-                    'department_id' => $data['department_id'] ?? null,
-                ],
+                filters: $filters,
                 assignments: $data['assignments'],
                 evaluationStartDate: $data['evaluation_start_date'],
                 evaluationEndDate: $data['evaluation_end_date'],
@@ -137,5 +155,72 @@ class AssignTeacherController extends Controller
             'total_assigned' => $totalAssigned,
             'summary' => $summary,
         ], "Assigned {$totalAssigned} answer sheet(s) successfully.");
+    }
+
+    /**
+     * Pool mode — every pending sheet of the search into one pool shared by
+     * the selected teachers; each of them gets the bell notification and
+     * the (admin-edited) email, same as a normal assignment.
+     */
+    private function storePool(Request $request, array $data, array $filters): JsonResponse
+    {
+        $evaluationTimePerSheet = isset($data['evaluation_time_per_sheet']) ? (int) $data['evaluation_time_per_sheet'] : null;
+        $teacherIds = array_map('intval', $data['teacher_ids']);
+
+        try {
+            $result = $this->assignTeacherService->assignPool(
+                filters: $filters,
+                teacherIds: $teacherIds,
+                quantity: (int) $data['pool_quantity'],
+                evaluationStartDate: $data['evaluation_start_date'],
+                evaluationEndDate: $data['evaluation_end_date'],
+                evaluationTimePerSheet: $evaluationTimePerSheet,
+            );
+        } catch (ValidationException $e) {
+            return $this->error(collect($e->errors())->flatten()->first() ?? 'Could not create the pool.', 422, $e->errors());
+        }
+
+        $sheetCount = $result['sheet_count'];
+        $teacherCount = count($teacherIds);
+
+        $this->auditLog->log(
+            event: 'answer-sheets-pooled',
+            module: 'Assign Teacher',
+            description: "Added {$sheetCount} answer sheet(s) to pool #{$result['pool_id']}, shared by {$teacherCount} teacher(s).",
+            newValues: ['filters' => $data, 'pool' => $result],
+            tags: ['assign-teacher', 'answer-sheet', 'pool'],
+        );
+
+        App::make(UserNotificationService::class)->answerSheetsPooled($teacherIds, $sheetCount, (int) $data['course_id']);
+
+        // Same after-response email as a normal assignment; each teacher's
+        // row carries the whole pool's sheet count.
+        $senderId = $request->user()->id;
+        $summary = array_map(fn ($id) => ['teacher_id' => $id, 'assigned_count' => $sheetCount], $teacherIds);
+        $emailSubject = $data['email_subject'];
+        $emailBody = $data['email_body'];
+        $courseId = (int) $data['course_id'];
+        $evaluationStartDate = $data['evaluation_start_date'];
+        $evaluationEndDate = $data['evaluation_end_date'];
+
+        dispatch(function () use ($senderId, $summary, $emailSubject, $emailBody, $courseId, $evaluationStartDate, $evaluationEndDate, $evaluationTimePerSheet, $teacherCount) {
+            App::make(TeacherAssignmentMailService::class)->sendAssignmentEmails(
+                senderId: $senderId,
+                summary: $summary,
+                emailSubject: $emailSubject,
+                emailBody: $emailBody,
+                courseId: $courseId,
+                evaluationStartDate: $evaluationStartDate,
+                evaluationEndDate: $evaluationEndDate,
+                evaluationTimePerSheet: $evaluationTimePerSheet,
+                poolTeacherCount: $teacherCount,
+            );
+        })->afterResponse();
+
+        return $this->success([
+            'pool_id' => $result['pool_id'],
+            'total_pooled' => $sheetCount,
+            'teacher_count' => $teacherCount,
+        ], "Added {$sheetCount} answer sheet(s) to a pool shared by {$teacherCount} teachers.");
     }
 }

@@ -32,7 +32,11 @@
                                         <p style="margin:0 0 8px; font-weight:bold;">Assignment Details:</p>
                                         <ul style="margin:0; padding-left:20px;">
                                             <li><strong>Course:</strong> {{ $courseName }}</li>
-                                            <li><strong>Number of Sheets Assigned:</strong> {{ $sheetsAssigned }}</li>
+                                            @if ($poolTeacherCount ?? null)
+                                                <li><strong>Shared Pool:</strong> {{ $sheetsAssigned }} answer sheets, shared by {{ $poolTeacherCount }} teachers — the first teacher to start a sheet gets it</li>
+                                            @else
+                                                <li><strong>Number of Sheets Assigned:</strong> {{ $sheetsAssigned }}</li>
+                                            @endif
                                             <li><strong>Evaluation Start Date:</strong> {{ $evaluationStartDate }}</li>
                                             <li><strong>Evaluation End Date:</strong> {{ $evaluationEndDate }}</li>
                                             @if ($evaluationTimePerSheet)

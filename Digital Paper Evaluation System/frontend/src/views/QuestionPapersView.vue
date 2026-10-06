@@ -372,7 +372,7 @@ watch(
         <table class="w-full min-w-[860px] text-left">
           <thead>
             <tr class="bg-subject-header text-white text-[12px] font-medium">
-              <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
+              <th class="px-4 py-1.5 font-medium rounded-tl-2xl w-px whitespace-nowrap">#</th>
               <th class="px-4 py-1.5 font-medium">Exam Year</th>
               <th class="px-4 py-1.5 font-medium">Departments</th>
               <th class="px-4 py-1.5 font-medium">Course</th>
@@ -381,7 +381,7 @@ watch(
               <th class="px-4 py-1.5 font-medium">Full Marks</th>
               <th class="px-4 py-1.5 font-medium whitespace-nowrap">Uploaded By / At</th>
               <th class="px-4 py-1.5 font-medium">Status</th>
-              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('question-paper-edit') || authStore.can('question-paper-delete') || authStore.can('question-paper-view')">Action</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap" v-if="authStore.can('question-paper-edit') || authStore.can('question-paper-delete') || authStore.can('question-paper-view')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
@@ -552,7 +552,7 @@ watch(
             <table class="w-full text-left border-separate border-spacing-0">
               <thead class="sticky top-0">
                 <tr class="bg-subject-header text-white text-[11px] font-medium">
-                  <th class="px-3 py-2 rounded-tl-xl w-10">#</th>
+                  <th class="px-3 py-2 rounded-tl-xl w-px whitespace-nowrap">#</th>
                   <th class="px-3 py-2">Department</th>
                   <th class="px-3 py-2 rounded-tr-xl">Code</th>
                 </tr>

@@ -132,17 +132,23 @@ class DashboardControllerTest extends TestCase
         AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => null]);
         AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => 12]);
         AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => null, 'issue_status' => 'open']);
+        // Waiting in a shared pool — its own bucket, not "not assigned".
+        $pool = \App\Models\AnswerSheetPool::create(['program_name' => $mapping->program_name, 'course_id' => $mapping->course_id, 'exam_term_id' => $mapping->exam_term_id, 'exam_type_id' => $mapping->exam_type_id, 'semester' => $mapping->semester, 'exam_year' => now()->year]);
+        AnswerSheet::factory()->count(2)->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => null, 'marks' => null, 'answer_sheet_pool_id' => $pool->id]);
 
         $response = $this->withApiKey()->getJson('/api/v1/dashboard/admin-summary');
 
         $response->assertOk();
         $status = $response->json('data.evaluation_status');
-        $this->assertSame(4, $status['total']);
+        $this->assertSame(6, $status['total']);
         $this->assertSame(1, $status['evaluated']);
         $this->assertSame(1, $status['pending_evaluation']);
         $this->assertSame(1, $status['problem']);
         $this->assertSame(1, $status['not_assigned']);
-        $this->assertSame($status['total'], $status['evaluated'] + $status['pending_evaluation'] + $status['problem'] + $status['not_assigned']);
+        $this->assertSame(2, $status['in_pool']);
+        $this->assertSame($status['total'], $status['evaluated'] + $status['pending_evaluation'] + $status['problem'] + $status['not_assigned'] + $status['in_pool']);
+        $response->assertJsonPath('data.workflow.in_pool', 2);
+        $response->assertJsonPath('data.workflow.pending_assignment', 1);
     }
 
     public function test_evaluation_progress_buckets_by_assigned_at_and_evaluated_at(): void

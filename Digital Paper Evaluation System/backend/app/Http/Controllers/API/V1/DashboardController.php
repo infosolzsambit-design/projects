@@ -172,7 +172,10 @@ class DashboardController extends Controller
     {
         return [
             'assigned' => $sheetQuery()->whereNotNull('teacher_id')->count(),
-            'pending_assignment' => $sheetQuery()->whereNull('teacher_id')->count(),
+            'pending_assignment' => $sheetQuery()->awaitingAssignment()->count(),
+            // Shared-pool sheets nobody has started yet (neither assigned
+            // nor pending assignment).
+            'in_pool' => $sheetQuery()->waitingInPool()->count(),
             'evaluated' => $sheetQuery()->whereNotNull('marks')->count(),
             'pending_evaluation' => $sheetQuery()->whereNotNull('teacher_id')->pendingEvaluation()->count(),
             'raised_issues' => $sheetQuery()->whereNotNull('issue_master_id')->count(),
@@ -212,9 +215,10 @@ class DashboardController extends Controller
     }
 
     /**
-     * "Evaluation Status" donut — four disjoint buckets that always sum
+     * "Evaluation Status" donut — five disjoint buckets that always sum
      * to total: evaluated; pending_evaluation (assigned, not evaluated, no
-     * open issue); problem (open issue); not_assigned (no teacher yet).
+     * open issue); problem (open issue); not_assigned (no teacher, not in
+     * a pool); in_pool (waiting in a shared pool, not started yet).
      * Same rule as AnswerSheet::pendingSql().
      *
      * @param  Closure(): Builder<AnswerSheet>  $sheetQuery
@@ -227,7 +231,8 @@ class DashboardController extends Controller
             'evaluated' => $sheetQuery()->whereNotNull('marks')->count(),
             'pending_evaluation' => $sheetQuery()->whereNotNull('teacher_id')->pendingEvaluation()->count(),
             'problem' => $sheetQuery()->whereNull('marks')->withOpenIssue()->count(),
-            'not_assigned' => $sheetQuery()->whereNull('teacher_id')->pendingEvaluation()->count(),
+            'not_assigned' => $sheetQuery()->awaitingAssignment()->pendingEvaluation()->count(),
+            'in_pool' => $sheetQuery()->waitingInPool()->count(),
         ];
     }
 
@@ -271,7 +276,8 @@ class DashboardController extends Controller
                 'departments.name as department_name, COUNT(*) as total, '.
                 'SUM(CASE WHEN answer_sheets.marks IS NOT NULL THEN 1 ELSE 0 END) as evaluated, '.
                 'SUM(CASE WHEN answer_sheets.teacher_id IS NOT NULL AND '.AnswerSheet::pendingSql().' THEN 1 ELSE 0 END) as pending, '.
-                'SUM(CASE WHEN '.AnswerSheet::problemSql().' THEN 1 ELSE 0 END) as problem',
+                'SUM(CASE WHEN '.AnswerSheet::problemSql().' THEN 1 ELSE 0 END) as problem, '.
+                'SUM(CASE WHEN answer_sheets.teacher_id IS NULL AND answer_sheets.answer_sheet_pool_id IS NOT NULL AND answer_sheets.marks IS NULL THEN 1 ELSE 0 END) as in_pool',
             );
     }
 
@@ -287,6 +293,7 @@ class DashboardController extends Controller
             $evaluatedPct = (int) round($row->evaluated / $total * 100);
             $pendingPct = (int) round($row->pending / $total * 100);
             $problemPct = (int) round($row->problem / $total * 100);
+            $poolPct = (int) round(($row->in_pool ?? 0) / $total * 100);
 
             $mapped[] = [
                 'name' => $row->department_name,
@@ -294,7 +301,8 @@ class DashboardController extends Controller
                 'evaluated_pct' => $evaluatedPct,
                 'pending_pct' => $pendingPct,
                 'problem_pct' => $problemPct,
-                'not_assigned_pct' => max(0, 100 - $evaluatedPct - $pendingPct - $problemPct),
+                'in_pool_pct' => $poolPct,
+                'not_assigned_pct' => max(0, 100 - $evaluatedPct - $pendingPct - $problemPct - $poolPct),
             ];
         }
 

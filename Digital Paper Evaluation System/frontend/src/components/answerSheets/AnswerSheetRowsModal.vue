@@ -144,7 +144,7 @@ onMounted(() => fetchRows(1))
             <table class="w-full min-w-[860px] text-left border-separate border-spacing-0">
               <thead>
                 <tr class="bg-subject-header text-white text-[11px] font-medium">
-                  <th class="px-2.5 py-2 rounded-tl-xl">#</th>
+                  <th class="px-2.5 py-2 rounded-tl-xl w-px whitespace-nowrap">#</th>
                   <th class="px-2.5 py-2 min-w-[110px]">Roll No</th>
                   <th class="px-2.5 py-2 min-w-[160px]">Name</th>
                   <th class="px-2.5 py-2 min-w-[130px]">Subject Barcode</th>
@@ -152,7 +152,7 @@ onMounted(() => fetchRows(1))
                   <th class="px-2.5 py-2 min-w-[170px]">Evaluation By</th>
                   <th class="px-2.5 py-2 min-w-[110px]">Evaluation Status</th>
                   <th class="px-2.5 py-2 text-center min-w-[70px]">Marks</th>
-                  <th class="px-2.5 py-2 text-center rounded-tr-xl min-w-[70px]">Action</th>
+                  <th class="px-2.5 py-2 text-center rounded-tr-xl min-w-[70px] w-px whitespace-nowrap">Action</th>
                 </tr>
               </thead>
               <tbody class="bg-white">

@@ -55,7 +55,7 @@ class QuestionAnswerSheetMappingController extends Controller
         ));
 
         $query = QuestionAnswerSheetMapping::with(['course', 'questionPaper', 'examTerm', 'examType', 'creator'])
-            ->withCount(['answerSheets', 'answerSheets as pending_answer_sheet_count' => fn ($q) => $q->whereNull('teacher_id')]);
+            ->withCount(['answerSheets', 'answerSheets as pending_answer_sheet_count' => fn ($q) => $q->awaitingAssignment(), 'answerSheets as in_pool_answer_sheet_count' => fn ($q) => $q->waitingInPool()]);
 
         if ($search = $request->string('search')->toString()) {
             $query->where(function ($q) use ($search) {
@@ -100,7 +100,7 @@ class QuestionAnswerSheetMappingController extends Controller
     public function show(QuestionAnswerSheetMapping $questionAnswerSheetMapping): JsonResponse
     {
         return $this->success(
-            new QuestionAnswerSheetMappingResource($questionAnswerSheetMapping->loadCount(['answerSheets', 'answerSheets as pending_answer_sheet_count' => fn ($q) => $q->whereNull('teacher_id')])->load(['course', 'questionPaper', 'examTerm', 'examType'])),
+            new QuestionAnswerSheetMappingResource($questionAnswerSheetMapping->loadCount(['answerSheets', 'answerSheets as pending_answer_sheet_count' => fn ($q) => $q->awaitingAssignment(), 'answerSheets as in_pool_answer_sheet_count' => fn ($q) => $q->waitingInPool()])->load(['course', 'questionPaper', 'examTerm', 'examType'])),
             'Answer sheet packet fetched successfully.',
         );
     }

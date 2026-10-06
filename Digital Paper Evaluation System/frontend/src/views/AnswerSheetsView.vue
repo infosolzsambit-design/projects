@@ -319,7 +319,7 @@ onMounted(async () => {
         <table class="w-full min-w-[1000px] text-left">
           <thead>
             <tr class="whitespace-nowrap bg-subject-header text-white text-[12px] font-medium">
-              <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
+              <th class="px-4 py-1.5 font-medium rounded-tl-2xl w-px whitespace-nowrap">#</th>
               <th class="px-4 py-1.5 font-medium" title="Program, Question Paper and Department">Program / Paper / Dept</th>
               <th class="px-4 py-1.5 font-medium">Exam Term / Type</th>
               <th class="px-4 py-1.5 font-medium" title="Semester">Sem</th>
@@ -327,7 +327,7 @@ onMounted(async () => {
               <th class="px-4 py-1.5 font-medium">Ans Sheets</th>
               <th class="px-4 py-1.5 font-medium whitespace-nowrap">Uploaded By / At</th>
               <th class="px-4 py-1.5 font-medium">Status</th>
-              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('answer-sheet-view')">Action</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap" v-if="authStore.can('answer-sheet-view')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
@@ -376,6 +376,11 @@ onMounted(async () => {
                   <span class="font-semibold text-gray-900">{{ mapping.answer_sheet_count }}</span>
                   <span class="text-muted">Pending to assign</span><span class="text-muted">:</span>
                   <span class="font-semibold" :class="mapping.pending_answer_sheet_count > 0 ? 'text-amber-600' : 'text-gray-900'">{{ mapping.pending_answer_sheet_count ?? 0 }}</span>
+                  <!-- Waiting in a shared pool, not started by any teacher yet. -->
+                  <template v-if="mapping.in_pool_answer_sheet_count > 0">
+                    <span class="text-muted">In pool</span><span class="text-muted">:</span>
+                    <span class="font-semibold text-cyan-700">{{ mapping.in_pool_answer_sheet_count }}</span>
+                  </template>
                 </div>
               </td>
               <!-- Who uploaded the packet, with when below. -->

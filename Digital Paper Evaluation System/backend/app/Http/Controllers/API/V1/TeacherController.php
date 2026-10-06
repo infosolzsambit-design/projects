@@ -107,7 +107,14 @@ class TeacherController extends Controller
                 $scopeToExamYear($q);
                 $q->whereRaw(AnswerSheet::pendingSql());
             }])
-            ->addSelect(['assigned_courses_count' => $this->allocatedCoursesCountSubquery($assignmentsExamYear, $assignmentsExamType)]);
+            // Of the allocated sheets, how many this teacher took from a shared pool.
+            ->withCount(['assignedAnswerSheets as assigned_answer_sheets_from_pool_count' => function ($q) use ($scopeToExamYear) {
+                $scopeToExamYear($q);
+                $q->whereNotNull('answer_sheet_pool_id');
+            }])
+            ->addSelect(['assigned_courses_count' => $this->allocatedCoursesCountSubquery($assignmentsExamYear, $assignmentsExamType)])
+            // Sheets waiting (not started by anyone) in pools this teacher shares.
+            ->addSelect(['pool_waiting_count' => $this->poolWaitingSubquery($assignmentsExamYear, $assignmentsExamType)->selectRaw('COUNT(*)')]);
 
         if ($onlyDeleted) {
             $query->onlyTrashed()
@@ -196,7 +203,11 @@ class TeacherController extends Controller
             $hasAssignments = Str::lower($request->string('has_assignments')->toString());
 
             if ($hasAssignments === 'yes') {
-                $query->whereHas('assignedAnswerSheets', $scopeToExamYear);
+                // Also a teacher sharing a pool that still has waiting
+                // sheets, even before they've started any of them.
+                $query->where(fn ($q) => $q
+                    ->whereHas('assignedAnswerSheets', $scopeToExamYear)
+                    ->orWhereExists($this->poolWaitingSubquery($assignmentsExamYear, $assignmentsExamType)->select(DB::raw(1))));
             } elseif ($hasAssignments === 'no') {
                 // "No assignments at all, in any year" — exam-year scoping
                 // doesn't apply here; nothing in this app currently needs
@@ -322,9 +333,24 @@ class TeacherController extends Controller
             ->selectRaw('SUM(CASE WHEN marks IS NOT NULL THEN 1 ELSE 0 END) as completed_count')
             ->selectRaw('SUM(CASE WHEN '.AnswerSheet::problemSql().' THEN 1 ELSE 0 END) as problem_count')
             ->selectRaw('SUM(CASE WHEN '.AnswerSheet::pendingSql().' THEN 1 ELSE 0 END) as pending_count')
+            // Of these, how many the teacher took from a shared pool.
+            ->selectRaw('SUM(CASE WHEN answer_sheet_pool_id IS NOT NULL THEN 1 ELSE 0 END) as from_pool_count')
             ->where('teacher_id', $teacher->id)
             ->groupBy('question_answer_sheet_mapping_id')
             ->get();
+
+        // Per packet: sheets waiting (nobody has started them) in pools this
+        // teacher shares — a packet can be here without any sheet of the
+        // teacher's own yet.
+        $poolWaiting = AnswerSheet::query()
+            ->whereIn('answer_sheet_pool_id', AnswerSheet::poolIdsFor($teacher->id))
+            ->waitingInPool()
+            ->groupBy('question_answer_sheet_mapping_id')
+            ->selectRaw('question_answer_sheet_mapping_id, COUNT(*) as waiting')
+            ->pluck('waiting', 'question_answer_sheet_mapping_id');
+        foreach ($poolWaiting->keys()->diff($counts->pluck('question_answer_sheet_mapping_id')) as $mappingId) {
+            $counts->push((object) ['question_answer_sheet_mapping_id' => $mappingId, 'sheet_count' => 0, 'completed_count' => 0, 'problem_count' => 0, 'pending_count' => 0, 'from_pool_count' => 0]);
+        }
 
         $mappings = QuestionAnswerSheetMapping::with(['course', 'examTerm', 'examType', 'questionPaper'])
             ->whereIn('id', $counts->pluck('question_answer_sheet_mapping_id'))
@@ -343,7 +369,7 @@ class TeacherController extends Controller
         ]);
 
         $breakdown = $counts
-            ->map(function ($row) use ($mappings, $latest) {
+            ->map(function ($row) use ($mappings, $latest, $poolWaiting) {
                 $mapping = $mappings->get($row->question_answer_sheet_mapping_id);
 
                 return [
@@ -353,8 +379,8 @@ class TeacherController extends Controller
                     'department_name' => $mapping?->department_name,
                     // The most recent assignment of this packet's sheets to
                     // this teacher — when, and by whom.
-                    'assigned_at' => $latest[$row->question_answer_sheet_mapping_id]?->assigned_at?->format('Y-m-d H:i:s'),
-                    'assigned_by_name' => $latest[$row->question_answer_sheet_mapping_id]?->assigner?->name,
+                    'assigned_at' => ($latest[$row->question_answer_sheet_mapping_id] ?? null)?->assigned_at?->format('Y-m-d H:i:s'),
+                    'assigned_by_name' => ($latest[$row->question_answer_sheet_mapping_id] ?? null)?->assigner?->name,
                     'course_name' => $mapping?->course?->name,
                     'course_code' => $mapping?->course?->code,
                     'course_type' => $mapping?->course?->type,
@@ -367,6 +393,8 @@ class TeacherController extends Controller
                     'completed_count' => (int) $row->completed_count,
                     'pending_count' => (int) $row->pending_count,
                     'problem_count' => (int) $row->problem_count,
+                    'from_pool_count' => (int) $row->from_pool_count,
+                    'pool_waiting_count' => (int) ($poolWaiting[$row->question_answer_sheet_mapping_id] ?? 0),
                 ];
             })
             ->sortByDesc('sheet_count')
@@ -374,8 +402,33 @@ class TeacherController extends Controller
 
         return $this->success([
             'total' => (int) $breakdown->sum('sheet_count'),
+            'pool_waiting_total' => (int) $breakdown->sum('pool_waiting_count'),
             'breakdown' => $breakdown,
         ], 'Teacher assignments fetched successfully.');
+    }
+
+    /**
+     * Correlated subquery (against the outer users.id) over the sheets
+     * waiting — nobody has started them yet — in shared pools that teacher
+     * is part of; exam-year/type-scoped like the counts around it. Callers
+     * add their own select (a COUNT, or 1 for EXISTS).
+     */
+    private function poolWaitingSubquery(?int $examYear, ?int $examType): \Illuminate\Database\Query\Builder
+    {
+        return DB::table('answer_sheets as pws')
+            ->join('answer_sheet_pool_teachers as pwt', 'pwt.answer_sheet_pool_id', '=', 'pws.answer_sheet_pool_id')
+            ->join('answer_sheet_pools as pwp', 'pwp.id', '=', 'pwt.answer_sheet_pool_id')
+            ->join('question_answer_sheet_mappings as pwm', 'pwm.id', '=', 'pws.question_answer_sheet_mapping_id')
+            ->whereColumn('pwt.teacher_id', 'users.id')
+            ->whereNull('pwp.deleted_at')
+            ->whereNull('pwm.deleted_at')
+            ->whereNull('pws.deleted_at')
+            ->whereNull('pws.teacher_id')
+            ->whereNull('pws.marks')
+            ->when($examYear !== null, fn ($q) => $q
+                ->join('question_papers as pwq', 'pwq.id', '=', 'pwm.question_paper_id')
+                ->where('pwq.exam_year', $examYear))
+            ->when($examType !== null, fn ($q) => $q->where('pwm.exam_type_id', $examType));
     }
 
     /**

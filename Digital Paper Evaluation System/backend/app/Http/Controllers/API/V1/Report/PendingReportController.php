@@ -38,7 +38,10 @@ class PendingReportController extends Controller
     {
         $filters = $this->validateFilters($request);
 
-        return $this->success(['rows' => $this->rows($filters)], 'Pending report fetched successfully.');
+        return $this->success([
+            'rows' => $this->rows($filters),
+            'pool' => $this->poolSummary($filters),
+        ], 'Pending report fetched successfully.');
     }
 
     public function export(Request $request): Response
@@ -55,6 +58,7 @@ class PendingReportController extends Controller
             'examinationName' => ExamType::find($filters['exam_type_id'])?->name,
             'courseLabel' => CourseLabel::of(Course::find($filters['course_id'])),
             'rows' => $this->rows($filters),
+            'pool' => $this->poolSummary($filters),
             'isPdf' => $format === 'pdf',
         ])->render();
 
@@ -84,6 +88,44 @@ class PendingReportController extends Controller
             'exam_year' => ['required', 'integer', 'digits:4'],
             'teacher_id' => ['nullable', 'integer', Rule::exists('teacher_details', 'user_id')->whereNull('deleted_at')],
         ]);
+    }
+
+    /**
+     * Sheets of this search still waiting in a shared pool (Assign Teacher →
+     * Pool) — not started by anyone yet, so they belong to no teacher row
+     * above; listed with the teachers who share those pools. With a Teacher
+     * filter, only pools that teacher is in.
+     *
+     * @return array{pending: int, teachers: list<string>}
+     */
+    private function poolSummary(array $filters): array
+    {
+        $sheets = AnswerSheet::query()
+            ->join('question_answer_sheet_mappings as m', 'm.id', '=', 'answer_sheets.question_answer_sheet_mapping_id')
+            ->join('question_papers as qp', 'qp.id', '=', 'm.question_paper_id')
+            ->whereNull('m.deleted_at')
+            ->where('m.program_name', $filters['program_name'])
+            ->where('m.course_id', $filters['course_id'])
+            ->where('m.exam_term_id', $filters['exam_term_id'])
+            ->where('m.exam_type_id', $filters['exam_type_id'])
+            ->where('m.semester', $filters['semester'])
+            ->where('qp.exam_year', $filters['exam_year'])
+            ->when(! empty($filters['department_id']), fn ($q) => $q->where('m.department_id', $filters['department_id']))
+            ->when(! empty($filters['teacher_id']), fn ($q) => $q->whereIn('answer_sheets.answer_sheet_pool_id', AnswerSheet::poolIdsFor((int) $filters['teacher_id'])))
+            ->waitingInPool();
+
+        $pending = (clone $sheets)->count();
+        $teachers = $pending
+            ? \Illuminate\Support\Facades\DB::table('answer_sheet_pool_teachers as apt')
+                ->join('users as u', 'u.id', '=', 'apt.teacher_id')
+                ->whereIn('apt.answer_sheet_pool_id', (clone $sheets)->select('answer_sheets.answer_sheet_pool_id')->distinct())
+                ->orderBy('u.name')
+                ->distinct()
+                ->pluck('u.name')
+                ->all()
+            : [];
+
+        return ['pending' => $pending, 'teachers' => $teachers];
     }
 
     /**

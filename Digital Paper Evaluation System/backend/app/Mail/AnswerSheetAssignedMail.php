@@ -32,6 +32,9 @@ class AnswerSheetAssignedMail extends Mailable
         public readonly string $siteTitle,
         public readonly ?string $logoUrl = null,
         public readonly ?int $evaluationTimePerSheet = null,
+        // Pool mode: how many teachers share the pool (null = a normal
+        // assignment with its own sheet count).
+        public readonly ?int $poolTeacherCount = null,
     ) {}
 
     public function envelope(): Envelope
@@ -51,6 +54,7 @@ class AnswerSheetAssignedMail extends Mailable
                 'evaluationStartDate' => $this->evaluationStartDate,
                 'evaluationEndDate' => $this->evaluationEndDate,
                 'sheetsAssigned' => $this->sheetsAssigned,
+                'poolTeacherCount' => $this->poolTeacherCount,
                 'siteTitle' => $this->siteTitle,
                 'logoUrl' => $this->logoUrl,
                 'evaluationTimePerSheet' => $this->evaluationTimePerSheet,

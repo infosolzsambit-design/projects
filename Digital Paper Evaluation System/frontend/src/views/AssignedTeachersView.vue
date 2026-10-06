@@ -265,15 +265,15 @@ function openTimeSpanModal(teacher) {
         <table class="w-full min-w-[960px] text-left">
           <thead>
             <tr class="bg-subject-header text-white text-[12px] font-medium">
-              <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
+              <th class="px-4 py-1.5 font-medium rounded-tl-2xl w-px whitespace-nowrap">#</th>
               <th class="px-4 py-1.5 font-medium">Teacher</th>
               <th class="px-4 py-1.5 font-medium">Contact</th>
               <th class="px-4 py-1.5 font-medium whitespace-nowrap">Teacher Dept</th>
               <th class="px-4 py-1.5 font-medium text-center" v-if="authStore.can('view-allocated-answersheet')">Courses</th>
               <th class="px-4 py-1.5 font-medium text-center" v-if="authStore.can('view-allocated-answersheet')">Allocated Answer Sheets</th>
-              <th class="px-4 py-1.5 font-medium text-center" v-if="authStore.can('view-allocated-answersheet')">Pending</th>
-              <th class="px-4 py-1.5 font-medium text-center" v-if="authStore.can('view-allocated-answersheet')">Completed Sheets</th>
-              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl" v-if="authStore.can('reassign-teacher') || authStore.can('update-time-span')">Action</th>
+              <th class="px-4 py-1.5 font-medium whitespace-nowrap" v-if="authStore.can('view-allocated-answersheet')">Pending / Completed</th>
+              <th class="px-4 py-1.5 font-medium whitespace-nowrap" v-if="authStore.can('view-allocated-answersheet')" title="Shared pools: sheets this teacher took from a pool, and sheets still waiting in pools they share">Pool</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap" v-if="authStore.can('reassign-teacher') || authStore.can('update-time-span')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
@@ -325,19 +325,30 @@ function openTimeSpanModal(teacher) {
               </td>
               <!-- Not evaluated and no open problem — same count as the
                    Pending column in the allocation modal. -->
-              <td v-if="authStore.can('view-allocated-answersheet')" class="px-4 py-1 text-center">
-                <button
-                  v-if="teacher.pending_answer_sheet_count > 0"
-                  type="button"
-                  class="font-semibold text-brand hover:underline"
-                  @click="openAllocationModal(teacher, true)"
-                >
-                  {{ teacher.pending_answer_sheet_count }}
-                </button>
-                <span v-else class="font-semibold text-brand">0</span>
+              <!-- Pending (click to see them) with Completed below — label : value. -->
+              <td v-if="authStore.can('view-allocated-answersheet')" class="px-4 py-1.5">
+                <div class="inline-grid grid-cols-[auto_auto_auto] gap-x-1.5 gap-y-0.5 text-[12px] leading-snug whitespace-nowrap">
+                  <span class="text-muted">Pending</span><span class="text-muted">:</span>
+                  <button
+                    v-if="teacher.pending_answer_sheet_count > 0"
+                    type="button"
+                    class="text-left font-semibold text-brand hover:underline"
+                    @click="openAllocationModal(teacher, true)"
+                  >
+                    {{ teacher.pending_answer_sheet_count }}
+                  </button>
+                  <span v-else class="font-semibold text-brand">0</span>
+                  <span class="text-muted">Completed</span><span class="text-muted">:</span>
+                  <span class="font-semibold text-success">{{ teacher.completed_answer_sheet_count }}</span>
+                </div>
               </td>
-              <td v-if="authStore.can('view-allocated-answersheet')" class="px-4 py-1 text-center font-semibold text-success">
-                {{ teacher.completed_answer_sheet_count }}
+              <!-- Shared pools: taken from a pool (part of Allocated) / still
+                   waiting in pools this teacher shares (not started by anyone). -->
+              <td v-if="authStore.can('view-allocated-answersheet')" class="px-4 py-1.5">
+                <div class="inline-grid grid-cols-[auto_auto_auto] gap-x-1.5 gap-y-0.5 text-[12px] leading-snug whitespace-nowrap">
+                  <span class="text-muted" title="Of the allocated sheets, how many this teacher took from a pool">From pool</span><span class="text-muted">:</span><span class="font-semibold text-gray-900">{{ teacher.from_pool_answer_sheet_count ?? 0 }}</span>
+                  <span class="text-muted" title="Not started by anyone yet — shared with the other pool teachers">Waiting</span><span class="text-muted">:</span><span class="font-semibold text-cyan-700">{{ teacher.pool_waiting_answer_sheet_count ?? 0 }}</span>
+                </div>
               </td>
               
               <td v-if="authStore.can('reassign-teacher') || authStore.can('update-time-span')" class="px-4 py-1 text-center relative" @click.stop>

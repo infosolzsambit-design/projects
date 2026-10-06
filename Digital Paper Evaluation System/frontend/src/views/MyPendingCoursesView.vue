@@ -148,6 +148,8 @@ function isIssueOpen(paper) {
 // that hasn't opened yet (nothing to report before evaluation even
 // starts), an already-open issue, or an already-blocking Printing Issue.
 function canRaiseIssue(paper) {
+  // A shared pool sheet isn't anyone's until a teacher starts it.
+  if (paper.in_pool) return false
   if (isIssueOpen(paper) || paper.blocks_evaluation) return false
   const { state } = paperTimeStatus(paper)
   return state !== 'upcoming' && state !== 'unscheduled'
@@ -277,6 +279,9 @@ async function evaluate(paper) {
     faceScanPaper.value = paper
   } catch (err) {
     toast.error(err.response?.data?.message || 'Could not start evaluation for this paper.')
+    // 409 = another pool teacher started this sheet first — refresh so it
+    // disappears from this list (staying on the same course).
+    if (err.response?.status === 409) loadCourses(activeCourse.value?.course_id)
   } finally {
     checkingEvaluationId.value = null
   }
@@ -479,7 +484,7 @@ watch(
           <table class="w-full min-w-[860px] text-left">
             <thead>
               <tr class="bg-subject-header text-white text-[12px] font-medium">
-                <th class="px-4 py-1.5 font-medium rounded-tl-2xl">#</th>
+                <th class="px-4 py-1.5 font-medium rounded-tl-2xl w-px whitespace-nowrap">#</th>
                 <th class="px-4 py-1.5 font-medium">Script/Unique Number</th>
                 <th class="px-4 py-1.5 font-medium">Marks</th>
                 <th class="px-4 py-1.5 font-medium">Max Mark</th>
@@ -508,6 +513,13 @@ watch(
                 </td>
                 <td class="px-4 py-1.5 font-semibold">
                   {{ paper.barcode || paper.subject_barcode || paper.roll_no || '—' }}
+                  <!-- Shared pool sheet nobody has started yet — the first
+                       teacher to click Start Evaluate gets it. -->
+                  <span
+                    v-if="paper.in_pool"
+                    class="ml-1.5 inline-flex items-center rounded-full bg-brand-blue/10 text-brand-blue text-[11px] font-semibold px-2 py-0.5 align-middle whitespace-nowrap"
+                    title="Shared pool sheet — the first teacher to start it gets it"
+                  >Pool</span>
                   <span
                     v-if="isIssueOpen(paper)"
                     class="ml-1.5 inline-flex items-center gap-1 rounded-full bg-brand/10 text-brand text-[11px] font-medium px-2 py-0.5 align-middle whitespace-nowrap"
@@ -582,7 +594,7 @@ watch(
                     :title="isIssueOpen(paper)
                       ? `${paper.issue_master_name} already raised for this sheet`
                       : !canRaiseIssue(paper)
-                        ? (paper.blocks_evaluation ? 'A printing issue is already pending for this sheet' : 'Evaluation has not started for this sheet yet')
+                        ? (paper.in_pool ? 'Start this pool sheet first — it then becomes yours' : paper.blocks_evaluation ? 'A printing issue is already pending for this sheet' : 'Evaluation has not started for this sheet yet')
                         : 'Raise Issue'"
                     @click="issuePaper = paper"
                   >

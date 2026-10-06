@@ -54,7 +54,7 @@ function close() {
           <table class="w-full min-w-[380px] text-left text-[12.5px]">
             <thead>
               <tr class="bg-subject-header text-white text-[11px] font-medium">
-                <th class="px-2.5 py-2 rounded-tl-xl">#</th>
+                <th class="px-2.5 py-2 rounded-tl-xl w-px whitespace-nowrap">#</th>
                 <th class="px-2.5 py-2">Course Name</th>
                 <th class="px-2.5 py-2 text-center">Pending</th>
                 <th class="px-2.5 py-2 text-center">Total</th>

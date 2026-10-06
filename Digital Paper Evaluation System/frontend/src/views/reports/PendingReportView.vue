@@ -178,6 +178,8 @@ const searched = ref(false)
 const searching = ref(false)
 const searchError = ref('')
 const rows = ref([])
+// Shared-pool sheets of this search not started by anyone yet — {pending, teachers}.
+const pool = ref({ pending: 0, teachers: [] })
 
 function exportParams() {
   const params = { ...filters }
@@ -193,6 +195,7 @@ async function runSearch() {
   try {
     const res = await api.get('/reports/pending-report', { params: exportParams() })
     rows.value = res.data.data.rows
+    pool.value = res.data.data.pool ?? { pending: 0, teachers: [] }
     searched.value = true
   } catch (err) {
     searchError.value = err.response?.data?.message || 'Could not load this report.'
@@ -424,7 +427,8 @@ async function downloadReport() {
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 mb-3">
         <p class="text-[13px] text-gray-700">
           {{ rows.length }} teacher{{ rows.length === 1 ? '' : 's' }} with
-          <span class="font-semibold text-brand">{{ totalPending }}</span> pending answer sheet{{ totalPending === 1 ? '' : 's' }}.
+          <span class="font-semibold text-brand">{{ totalPending }}</span> pending answer sheet{{ totalPending === 1 ? '' : 's' }}<template v-if="pool.pending">, plus
+          <span class="font-semibold text-cyan-700">{{ pool.pending }}</span> in a shared pool</template>.
         </p>
         <div class="flex items-center gap-2">
           <div class="relative">
@@ -440,7 +444,7 @@ async function downloadReport() {
           <button
             type="button"
             class="h-9 inline-flex items-center gap-1.5 rounded-lg bg-btn-gradient text-white text-[12.5px] font-semibold px-4 hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
-            :disabled="downloading || !rows.length"
+            :disabled="downloading || (!rows.length && !pool.pending)"
             @click="downloadReport"
           >
             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
@@ -455,7 +459,7 @@ async function downloadReport() {
         <table class="w-full min-w-[1000px] text-left">
           <thead>
             <tr class="bg-subject-header text-white text-[12px] font-medium whitespace-nowrap">
-              <th class="px-2 py-2.5 rounded-tl-xl text-center w-12">#</th>
+              <th class="px-2 py-2.5 rounded-tl-xl text-center w-px whitespace-nowrap">#</th>
               <th class="px-2 py-2.5">Teacher</th>
               <th class="px-2 py-2.5">Contact</th>
               <th class="px-2 py-2.5">Department</th>
@@ -465,10 +469,18 @@ async function downloadReport() {
             </tr>
           </thead>
           <tbody class="bg-white">
-            <tr v-if="!rows.length">
+            <!-- Shared-pool sheets nobody has started yet — not any one teacher's. -->
+            <tr v-if="pool.pending" class="bg-cyan-50 text-[12.5px] text-cyan-900 border-b border-cyan-100">
+              <td colspan="7" class="px-3 py-2.5">
+                <span class="font-semibold">Shared pool — not started yet:</span>
+                {{ pool.pending }} answer sheet{{ pool.pending === 1 ? '' : 's' }}, shared by {{ pool.teachers.join(', ') }}.
+                <span class="text-cyan-700">The first teacher to start a sheet gets it.</span>
+              </td>
+            </tr>
+            <tr v-if="!rows.length && !pool.pending">
               <td colspan="7" class="px-3 py-8 text-center text-sm text-muted">No teacher has pending answer sheets for this search.</td>
             </tr>
-            <tr v-for="(row, i) in rows" v-else :key="i" class="text-[12.5px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0">
+            <tr v-for="(row, i) in rows" :key="i" class="text-[12.5px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0">
               <td class="px-2 py-2.5 text-center text-muted">{{ i + 1 }}</td>
               <!-- Teacher name, with the emp code below it. -->
               <td class="px-2 py-2.5 whitespace-nowrap">

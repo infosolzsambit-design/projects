@@ -236,6 +236,8 @@ async function loadTeachers() {
       department: t.department || '—',
       selected: true, // every active teacher starts selected — deselect to exclude one
       assignQuantity: 0,
+      // Sheets still waiting (nobody started them) in shared pools this teacher is in.
+      poolPendingCount: t.pool_waiting_answer_sheet_count || 0,
       allocatedCount: t.allocated_answer_sheet_count || 0,
       completedCount: t.completed_answer_sheet_count || 0,
     }))
@@ -391,6 +393,32 @@ function distributeEqually() {
   toast.success(`Split ${pendingAnswerSheets.value} answer sheet(s) equally across ${selectedTeachers.value.length} teacher(s) — adjust any quantity below if needed. Not saved yet.`)
 }
 
+// "distribution" — fixed quantities per teacher (below); "pool" — every
+// pending sheet is shared by all selected teachers and whoever starts a
+// sheet first gets it (AssignTeacherService::assignPool() on the backend).
+const assignMode = ref('distribution')
+const isPoolMode = computed(() => assignMode.value === 'pool')
+
+// Pool mode: how many of the pending sheets go into the pool — whole
+// numbers only, 1..pending. Starts at "all of them" and is pulled back
+// down if a new search has fewer pending.
+const poolQuantity = ref('')
+const poolQuantityError = ref('')
+const poolQuantityRef = ref(null)
+watch([isPoolMode, pendingAnswerSheets], ([pool, pending]) => {
+  if (!pool) return
+  const current = Number(poolQuantity.value)
+  if (!poolQuantity.value || !Number.isInteger(current) || current > pending) poolQuantity.value = pending ? String(pending) : ''
+})
+// Blocks the keys that would make a non-whole number (decimal point, sign, exponent).
+function blockNonIntegerKeys(e) {
+  if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault()
+}
+const poolSheetCount = computed(() => {
+  const n = Number(poolQuantity.value)
+  return Number.isInteger(n) && n > 0 ? Math.min(n, pendingAnswerSheets.value) : pendingAnswerSheets.value
+})
+
 const totalAssignedQuantity = computed(() => teachers.value.reduce((sum, t) => sum + (Number(t.assignQuantity) || 0), 0))
 const assignmentRemaining = computed(() => pendingAnswerSheets.value - totalAssignedQuantity.value)
 
@@ -445,11 +473,32 @@ const pendingAssignPayload = ref(null)
 const assignEmailCourseName = computed(() => availableCourses.value.find((c) => c.id === filters.course_id)?.name || '')
 
 function assignPapers() {
-  if (!totalAssignedQuantity.value) {
+  if (isPoolMode.value) {
+    if (selectedTeachers.value.length < 2) {
+      toast.error('Select at least 2 teachers to share the pool.')
+      return
+    }
+    if (!pendingAnswerSheets.value) {
+      toast.error('No pending answer sheets to put in a pool for this search.')
+      return
+    }
+    const raw = String(poolQuantity.value ?? '').trim()
+    if (!/^\d+$/.test(raw) || Number(raw) < 1) {
+      poolQuantityError.value = 'Whole number only (e.g. 50) — no decimals.'
+    } else if (Number(raw) > pendingAnswerSheets.value) {
+      poolQuantityError.value = `Only ${pendingAnswerSheets.value} pending.`
+    } else {
+      poolQuantityError.value = ''
+    }
+    if (poolQuantityError.value) {
+      toast.error('Enter how many answer sheets go into the pool.')
+      poolQuantityRef.value?.focus()
+      return
+    }
+  } else if (!totalAssignedQuantity.value) {
     toast.error('Enter at least one quantity, or click "Distribute Equally" first.')
     return
-  }
-  if (totalAssignedQuantity.value > pendingAnswerSheets.value) {
+  } else if (totalAssignedQuantity.value > pendingAnswerSheets.value) {
     toast.error(`Assigned total (${totalAssignedQuantity.value}) is more than the ${pendingAnswerSheets.value} pending answer sheet(s).`)
     return
   }
@@ -493,7 +542,9 @@ function assignPapers() {
     evaluation_start_date: evaluationStartDate.value,
     evaluation_end_date: evaluationEndDate.value,
     evaluation_time_per_sheet: timeValue ? Number(timeValue) : null,
-    assignments: assignedTeachers.map((t) => ({ teacher_id: t.id, quantity: Number(t.assignQuantity) })),
+    ...(isPoolMode.value
+      ? { mode: 'pool', teacher_ids: selectedTeachers.value.map((t) => t.id), pool_quantity: Number(poolQuantity.value) }
+      : { assignments: assignedTeachers.map((t) => ({ teacher_id: t.id, quantity: Number(t.assignQuantity) })) }),
   }
   showSendMailModal.value = true
 }
@@ -535,6 +586,8 @@ function resetSearchForm() {
   evaluationStartDate.value = ''
   evaluationEndDate.value = ''
   evaluationTimePerSheet.value = ''
+  poolQuantity.value = ''
+  poolQuantityError.value = ''
   evaluationDateErrors.evaluation_start_date = ''
   evaluationDateErrors.evaluation_end_date = ''
   evaluationDateErrors.evaluation_time_per_sheet = ''
@@ -722,11 +775,30 @@ function resetSearchForm() {
           <p v-if="teachersLoading" class="text-[13px] text-muted text-center py-8">Loading teachers&hellip;</p>
 
           <template v-else>
-            <div class="flex items-center gap-2 mb-0.5">
-              <h2 class="text-[13px] font-semibold text-gray-900">Distribute Answer Sheets</h2>
-              <span class="inline-flex items-center rounded-full bg-success/10 text-success text-[10px] font-semibold px-2 py-0.5">Equal split, then editable</span>
+            <!-- Distribution (fixed quantities) or Pool (shared, first to start gets it). -->
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-0.5">
+              <div class="flex items-center gap-2">
+                <h2 class="text-[13px] font-semibold text-gray-900">{{ isPoolMode ? 'Pool Answer Sheets' : 'Distribute Answer Sheets' }}</h2>
+                <span v-if="!isPoolMode" class="inline-flex items-center rounded-full bg-success/10 text-success text-[10px] font-semibold px-2 py-0.5">Equal split, then editable</span>
+                <span v-else class="inline-flex items-center rounded-full bg-brand-blue/10 text-brand-blue text-[10px] font-semibold px-2 py-0.5">Shared, first to start gets it</span>
+              </div>
+              <div class="inline-flex rounded-lg border border-input-border bg-input-bg p-0.5 text-[12px] font-semibold" role="radiogroup" aria-label="Assignment mode">
+                <button
+                  v-for="mode in [{ id: 'distribution', label: 'Distribution' }, { id: 'pool', label: 'Pool' }]"
+                  :key="mode.id"
+                  type="button"
+                  role="radio"
+                  :aria-checked="assignMode === mode.id"
+                  class="px-3 h-7 rounded-md transition-colors"
+                  :class="assignMode === mode.id ? 'bg-white text-brand-blue shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+                  @click="assignMode = mode.id"
+                >
+                  {{ mode.label }}
+                </button>
+              </div>
             </div>
-            <p class="text-[12px] text-muted mb-3">Click "Distribute Equally" to split papers evenly across selected teachers below, then fine-tune any teacher's quantity by hand.</p>
+            <p v-if="!isPoolMode" class="text-[12px] text-muted mb-3">Click "Distribute Equally" to split papers evenly across selected teachers below, then fine-tune any teacher's quantity by hand.</p>
+            <p v-else class="text-[12px] text-muted mb-3">Every pending answer sheet goes into one pool shared by the selected teachers. Each of them sees all the sheets; the first teacher to start a sheet gets it, and it disappears for the others.</p>
 
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
               <div class="rounded-lg bg-input-bg p-2">
@@ -737,13 +809,19 @@ function resetSearchForm() {
                 <p class="text-[10px] text-muted mb-0.5">Selected teachers</p>
                 <p class="text-[13px] font-bold text-gray-900">{{ selectedTeachers.length }}</p>
               </div>
-              <div class="rounded-lg bg-input-bg p-2">
-                <p class="text-[10px] text-muted mb-0.5">Each teacher gets</p>
-                <p class="text-[13px] font-bold text-gray-900">{{ eachTeacherGets }}</p>
-              </div>
-              <div class="rounded-lg bg-input-bg p-2">
-                <p class="text-[10px] text-muted mb-0.5">Remaining</p>
-                <p class="text-[13px] font-bold text-gray-900">{{ equalRemaining }}</p>
+              <template v-if="!isPoolMode">
+                <div class="rounded-lg bg-input-bg p-2">
+                  <p class="text-[10px] text-muted mb-0.5">Each teacher gets</p>
+                  <p class="text-[13px] font-bold text-gray-900">{{ eachTeacherGets }}</p>
+                </div>
+                <div class="rounded-lg bg-input-bg p-2">
+                  <p class="text-[10px] text-muted mb-0.5">Remaining</p>
+                  <p class="text-[13px] font-bold text-gray-900">{{ equalRemaining }}</p>
+                </div>
+              </template>
+              <div v-else class="rounded-lg bg-input-bg p-2 col-span-2">
+                <p class="text-[10px] text-muted mb-0.5">Each selected teacher sees</p>
+                <p class="text-[13px] font-bold text-gray-900">{{ poolSheetCount }} sheet{{ poolSheetCount === 1 ? '' : 's' }} (shared)</p>
               </div>
             </div>
 
@@ -772,6 +850,7 @@ function resetSearchForm() {
               </div>
 
               <button
+                v-if="!isPoolMode"
                 type="button"
                 class="h-9 shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-btn-gradient text-white text-[13px] font-semibold px-4 hover:opacity-90 transition-opacity"
                 @click="distributeEqually"
@@ -792,14 +871,15 @@ function resetSearchForm() {
                     <th class="px-2.5 py-1.5 font-medium">Emp Code</th>
                     <th class="px-2.5 py-1.5 font-medium">Department</th>
                     <th class="px-2.5 py-1.5 font-medium">Designation</th>
+                    <th class="px-2.5 py-1.5 font-medium text-center" title="Sheets waiting in shared pools this teacher is in — not started by anyone yet">Pending Pool</th>
                     <th class="px-2.5 py-1.5 font-medium text-center">Already Allocated</th>
                     <th class="px-2.5 py-1.5 font-medium text-center">Completed</th>
-                    <th class="px-2.5 py-1.5 font-medium text-center">Assign Quantity</th>
+                    <th v-if="!isPoolMode" class="px-2.5 py-1.5 font-medium text-center">Assign Quantity</th>
                   </tr>
                 </thead>
                 <tbody class="bg-white">
                   <tr v-if="!filteredTeachers.length">
-                    <td colspan="8" class="px-2.5 py-6 text-center text-muted">No teachers found.</td>
+                    <td :colspan="isPoolMode ? 8 : 9" class="px-2.5 py-6 text-center text-muted">No teachers found.</td>
                   </tr>
                   <tr v-for="teacher in filteredTeachers" :key="teacher.id" class="border-b border-gray-100 last:border-b-0 even:bg-gray-50">
                     <td class="px-2.5 py-1.5">
@@ -809,6 +889,7 @@ function resetSearchForm() {
                     <td class="px-2.5 py-1.5">{{ teacher.emp_code }}</td>
                     <td class="px-2.5 py-1.5">{{ teacher.department }}</td>
                     <td class="px-2.5 py-1.5">{{ teacher.designation }}</td>
+                    <td class="px-2.5 py-1.5 text-center font-semibold" :class="teacher.poolPendingCount ? 'text-cyan-700' : 'text-gray-400'">{{ teacher.poolPendingCount }}</td>
                     <td class="px-2.5 py-1.5 text-center">
                       <button
                         type="button"
@@ -820,7 +901,7 @@ function resetSearchForm() {
                       </button>
                     </td>
                     <td class="px-2.5 py-1.5 text-center font-semibold text-success">{{ teacher.completedCount }}</td>
-                    <td class="px-2.5 py-1.5 text-center">
+                    <td v-if="!isPoolMode" class="px-2.5 py-1.5 text-center">
                       <input
                         v-model.number="teacher.assignQuantity"
                         type="number"
@@ -835,7 +916,7 @@ function resetSearchForm() {
             </div>
 
             <div class="flex flex-wrap items-start gap-2.5">
-              <div class="flex flex-col gap-1">
+              <div v-if="!isPoolMode" class="flex flex-col gap-1">
                 <span class="text-[11px] text-label invisible" aria-hidden="true">Stats</span>
                 <div class="h-8 flex items-center gap-3 text-[12px] whitespace-nowrap">
                   <span><span class="text-muted">Total Assigned</span> <span class="font-bold text-gray-900">{{ totalAssignedQuantity }}</span></span>
@@ -888,7 +969,28 @@ function resetSearchForm() {
                 <p v-if="evaluationDateErrors.evaluation_time_per_sheet" class="text-[11px] text-brand">{{ evaluationDateErrors.evaluation_time_per_sheet }}</p>
               </div>
 
-              <div v-if="authStore.can('assign-answersheet-to-teacher')" class="flex flex-col gap-1 ml-auto">
+              <!-- Pool mode: how many pending sheets go into the pool. -->
+              <div v-if="isPoolMode" class="flex flex-col gap-1 w-32 ml-auto">
+                <label for="assign_pool_quantity" class="text-[11px] text-label">Sheets in Pool <span class="text-brand">*</span></label>
+                <input
+                  id="assign_pool_quantity"
+                  ref="poolQuantityRef"
+                  v-model="poolQuantity"
+                  type="number"
+                  min="1"
+                  :max="pendingAnswerSheets"
+                  step="1"
+                  inputmode="numeric"
+                  class="w-full h-8 px-2.5 rounded-xl bg-input-bg text-[12px] font-semibold text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition"
+                  :class="poolQuantityError ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
+                  @keydown="blockNonIntegerKeys"
+                  @input="poolQuantityError = ''"
+                />
+                <p v-if="poolQuantityError" class="text-[11px] text-brand">{{ poolQuantityError }}</p>
+                <p v-else class="text-[10.5px] text-muted">of {{ pendingAnswerSheets }} pending</p>
+              </div>
+
+              <div v-if="authStore.can('assign-answersheet-to-teacher')" class="flex flex-col gap-1" :class="isPoolMode ? '' : 'ml-auto'">
                 <span class="text-[11px] text-label invisible" aria-hidden="true">Assign</span>
                 <button
                   type="button"
@@ -896,7 +998,7 @@ function resetSearchForm() {
                   @click="assignPapers"
                 >
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12" /></svg>
-                  Assign
+                  {{ isPoolMode ? 'Assign as Pool' : 'Assign' }}
                 </button>
               </div>
             </div>
@@ -916,6 +1018,7 @@ function resetSearchForm() {
       :evaluation-start-date-display="formatDateTime(evaluationStartDate)"
       :evaluation-end-date-display="formatDateTime(evaluationEndDate)"
       :site-title="brandingStore.siteTitleValue"
+      :pool="isPoolMode"
       @close="showSendMailModal = false"
       @assigned="onAssigned"
     />

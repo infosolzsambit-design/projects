@@ -99,6 +99,9 @@ class AnswerSheetResource extends JsonResource
             'locked_time' => $this->locked_time,
             'packet_no' => $this->packet_no,
             'barcode' => $this->barcode,
+            // Still waiting in a shared pool (nobody has started it yet) —
+            // My Pending Course shows it with a "Pool" tag.
+            'in_pool' => $this->answer_sheet_pool_id !== null && $this->teacher_id === null,
             'marks' => $this->marks,
             // Only present when the caller eager-loaded mapping.questionPaper
             // (see MyPendingCourseController::papers()) — everyone else gets

@@ -22,11 +22,15 @@ const props = defineProps({
   evaluationStartDateDisplay: { type: String, default: '' },
   evaluationEndDateDisplay: { type: String, default: '' },
   siteTitle: { type: String, default: 'Paper Check' },
+  // Assign Teacher's "Pool" mode — the sheets are shared, not handed out.
+  pool: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'assigned'])
 const toast = useToast()
 
-const defaultSubject = `Answer Sheets ${props.actionWord === 'Reassign' ? 'Reassigned' : 'Assigned'} — ${props.courseName || 'Evaluation'}`
+const defaultSubject = props.pool
+  ? `Shared Answer Sheet Pool — ${props.courseName || 'Evaluation'}`
+  : `Answer Sheets ${props.actionWord === 'Reassign' ? 'Reassigned' : 'Assigned'} — ${props.courseName || 'Evaluation'}`
 // A single evaluation window only makes sense to state up front for a
 // fresh Assign (one window is picked for the whole batch); a Reassign
 // hands over sheets that may already carry different windows per teacher
@@ -35,7 +39,10 @@ const defaultSubject = `Answer Sheets ${props.actionWord === 'Reassign' ? 'Reass
 const windowBlock = props.evaluationStartDateDisplay || props.evaluationEndDateDisplay
   ? `\n\nEvaluation Window:\nStart: ${props.evaluationStartDateDisplay || '—'}\nEnd: ${props.evaluationEndDateDisplay || '—'}`
   : ''
-const defaultBody = `You have been ${props.actionWord === 'Reassign' ? 'reassigned' : 'assigned'} answer sheets to evaluate for ${props.courseName || 'this course'}.${windowBlock}
+const intro = props.pool
+  ? `You have been added to a shared pool of answer sheets to evaluate for ${props.courseName || 'this course'}. The pool is shared with other teachers: every sheet is visible to all of you, and the first teacher to start a sheet gets it.`
+  : `You have been ${props.actionWord === 'Reassign' ? 'reassigned' : 'assigned'} answer sheets to evaluate for ${props.courseName || 'this course'}.`
+const defaultBody = `${intro}${windowBlock}
 
 Please log in to ${props.siteTitle} at your earliest convenience and complete your evaluations within the given window. If you have any questions, please reach out to the administration.
 

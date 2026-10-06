@@ -117,6 +117,12 @@ const router = createRouter({
           meta: { title: 'Assign Teacher' },
         },
         {
+          path: 'shared-pools',
+          name: 'shared-pools',
+          component: () => import('../views/SharedPoolsView.vue'),
+          meta: { title: 'Shared Pools' },
+        },
+        {
           path: 'assigned-teachers',
           name: 'assigned-teachers',
           component: () => import('../views/AssignedTeachersView.vue'),

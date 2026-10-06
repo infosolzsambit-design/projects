@@ -51,6 +51,31 @@ class UserNotificationService
     }
 
     /**
+     * Pool mode: every pool teacher is told about the whole shared pool.
+     *
+     * @param  list<int>  $teacherIds
+     */
+    public function answerSheetsPooled(array $teacherIds, int $sheetCount, int $courseId, ?int $poolSize = null): void
+    {
+        $course = self::courseLabel(Course::find($courseId));
+        // $poolSize: everyone sharing the pool, when only some of them are
+        // being notified (teachers added to an existing pool).
+        $others = ($poolSize ?? count($teacherIds)) - 1;
+        $rows = [];
+        foreach ($teacherIds as $teacherId) {
+            $rows[] = $this->row(
+                userId: (int) $teacherId,
+                type: UserNotification::ASSIGNED,
+                title: 'Shared answer sheet pool',
+                message: "A shared pool of {$sheetCount} answer sheet".($sheetCount === 1 ? '' : 's')." in {$course} is available to you and {$others} other teacher".($others === 1 ? '' : 's').'. The first teacher to start a sheet gets it.',
+                link: self::PENDING_COURSES,
+                data: ['course_id' => $courseId, 'count' => $sheetCount, 'pool' => true],
+            );
+        }
+        $this->insert($rows);
+    }
+
+    /**
      * @param  list<array{teacher_id:int, reassigned_count:int}>  $summary
      */
     public function answerSheetsReassigned(array $summary, int $mappingId, string $fromTeacherName): void

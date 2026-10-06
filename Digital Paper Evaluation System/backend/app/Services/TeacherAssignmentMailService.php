@@ -38,6 +38,7 @@ class TeacherAssignmentMailService
         string $evaluationStartDate,
         string $evaluationEndDate,
         ?int $evaluationTimePerSheet = null,
+        ?int $poolTeacherCount = null,
     ): void {
         $course = Course::find($courseId);
         $courseName = CourseLabel::of($course);
@@ -65,6 +66,7 @@ class TeacherAssignmentMailService
                 siteTitle: $siteTitle,
                 logoUrl: $logoUrl,
                 evaluationTimePerSheet: $evaluationTimePerSheet,
+                poolTeacherCount: $poolTeacherCount,
             );
 
             $log = EmailLog::create([
