@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\API\V1\AnswerSheetPoolController;
+use App\Http\Controllers\API\V1\MainDbSyncController;
+use App\Http\Controllers\API\V1\QrCodeController;
 use App\Http\Controllers\API\V1\AssignTeacherController;
 use App\Http\Controllers\API\V1\AuditController;
 use App\Http\Controllers\API\V1\Auth\AuthController;
@@ -16,6 +18,7 @@ use App\Http\Controllers\API\V1\Master\CourseController;
 use App\Http\Controllers\API\V1\Master\DepartmentBulkUploadController;
 use App\Http\Controllers\API\V1\Master\DepartmentController;
 use App\Http\Controllers\API\V1\Master\ExamTermController;
+use App\Http\Controllers\API\V1\Master\ExamSubTypeController;
 use App\Http\Controllers\API\V1\Master\ExamTypeController;
 use App\Http\Controllers\API\V1\Master\PermissionGroupController;
 use App\Http\Controllers\API\V1\Master\PermissionSubGroupController;
@@ -128,6 +131,11 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
 
     // Admin dashboard's own summary — see DashboardController's own docblock.
     Route::get('dashboard/admin-summary', [DashboardController::class, 'adminSummary']);
+    // The logged-in teacher's own dashboard (only their own sheets).
+    Route::get('dashboard/teacher-summary', [DashboardController::class, 'teacherSummary']);
+    Route::get('dashboard/teacher-course-pending', [DashboardController::class, 'teacherCoursePending']);
+    Route::get('dashboard/teacher-recent', [DashboardController::class, 'teacherRecent']);
+    Route::get('dashboard/teacher-week', [DashboardController::class, 'teacherWeek']);
     // Each "See All" modal behind admin-summary's own capped lists.
     Route::get('dashboard/department-progress', [DashboardController::class, 'departments']);
     Route::get('dashboard/teacher-workload', [DashboardController::class, 'teacherWorkloadFull']);
@@ -159,23 +167,51 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     Route::post('courses/bulk/validate', [CourseBulkUploadController::class, 'validateRows']);
     Route::post('courses/bulk/store', [CourseBulkUploadController::class, 'store']);
     Route::post('courses/{course}/restore', [CourseController::class, 'restore'])->withTrashed();
+    // Sync from the college's main database (see CourseController::sync()).
+    Route::post('courses/sync', [CourseController::class, 'sync']);
     Route::apiResource('courses', CourseController::class);
 
     Route::post('programs/bulk/validate', [ProgramBulkUploadController::class, 'validateRows']);
     Route::post('programs/bulk/store', [ProgramBulkUploadController::class, 'store']);
     Route::post('programs/{program}/restore', [ProgramController::class, 'restore'])->withTrashed();
+    // Sync from the college's main database (see ProgramController::sync()).
+    Route::post('programs/sync', [ProgramController::class, 'sync']);
     Route::apiResource('programs', ProgramController::class);
 
     Route::post('departments/bulk/validate', [DepartmentBulkUploadController::class, 'validateRows']);
     Route::post('departments/bulk/store', [DepartmentBulkUploadController::class, 'store']);
     Route::post('departments/{department}/restore', [DepartmentController::class, 'restore'])->withTrashed();
+    // Sync from the college's main database (see DepartmentController::sync()).
+    Route::post('departments/sync', [DepartmentController::class, 'sync']);
+    // Whether the "Sync …" buttons show (General Settings flag only).
+    Route::get('main-db-sync/status', [MainDbSyncController::class, 'status']);
+    // The Sync modal's auto-saved request settings (method / path / params).
+    Route::put('main-db-sync/config', [MainDbSyncController::class, 'updateConfig']);
+    // Generate QR — the students sitting an exam (main database's DataApi/examStudent).
+    Route::get('qr/exam-students', [QrCodeController::class, 'examStudents']);
+    // Generate QR's Course dropdown — the courses mapped to a program (by Ref Id).
+    Route::get('qr/program-courses', [QrCodeController::class, 'programCourses']);
+    // Generate QR modal: its Question Paper dropdown, and Generate itself.
+    Route::get('qr/question-papers', [QrCodeController::class, 'questionPapers']);
+    Route::post('qr/generate', [QrCodeController::class, 'generate']);
+    // Scan Papers → Print QR Code: a packet's QR numbers and students.
+    Route::get('qr/packets/{question_answer_sheet_mapping}/codes', [QrCodeController::class, 'packetCodes']);
     Route::apiResource('departments', DepartmentController::class);
 
     Route::post('exam-terms/{exam_term}/restore', [ExamTermController::class, 'restore'])->withTrashed();
+    // Sync from the college's main database (see ExamTermController::sync()).
+    Route::post('exam-terms/sync', [ExamTermController::class, 'sync']);
     Route::apiResource('exam-terms', ExamTermController::class);
 
     Route::post('exam-types/{exam_type}/restore', [ExamTypeController::class, 'restore'])->withTrashed();
+    // Sync from the college's main database (see ExamTypeController::sync()).
+    Route::post('exam-types/sync', [ExamTypeController::class, 'sync']);
     Route::apiResource('exam-types', ExamTypeController::class);
+
+    Route::post('exam-sub-types/{exam_sub_type}/restore', [ExamSubTypeController::class, 'restore'])->withTrashed();
+    // Sync from the college's main database (see ExamSubTypeController::sync()).
+    Route::post('exam-sub-types/sync', [ExamSubTypeController::class, 'sync']);
+    Route::apiResource('exam-sub-types', ExamSubTypeController::class);
 
     Route::post('permission-groups/{permission_group}/restore', [PermissionGroupController::class, 'restore'])->withTrashed();
     Route::apiResource('permission-groups', PermissionGroupController::class);
@@ -185,11 +221,15 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
 
     Route::post('students/bulk/validate', [StudentBulkUploadController::class, 'validateRows']);
     Route::post('students/bulk/store', [StudentBulkUploadController::class, 'store']);
+    // Sync from the college's main database (see StudentController::sync()).
+    Route::post('students/sync', [StudentController::class, 'sync']);
     Route::post('students/{student}/restore', [StudentController::class, 'restore'])->withTrashed();
     Route::apiResource('students', StudentController::class);
 
     Route::post('teachers/bulk/validate', [TeacherBulkUploadController::class, 'validateRows']);
     Route::post('teachers/bulk/store', [TeacherBulkUploadController::class, 'store']);
+    // Sync from the college's main database (see TeacherController::sync()).
+    Route::post('teachers/sync', [TeacherController::class, 'sync']);
     Route::get('teachers/{teacher}/face', [TeacherFaceController::class, 'show']);
     Route::post('teachers/{teacher}/face', [TeacherFaceController::class, 'update']);
     Route::get('teachers/{teacher}/esign', [TeacherEsignController::class, 'show']);

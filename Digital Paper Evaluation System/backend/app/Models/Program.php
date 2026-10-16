@@ -25,11 +25,15 @@ class Program extends Model implements AuditableContract
      * @var list<string>
      */
     protected $fillable = [
+        // The college main database's own id (set by "Sync Program").
+        'inserted_id',
         'name',
         'label',
         'department',
         'department_id',
         'code',
+        // delete_status from the main database's API (set by "Sync Program").
+        'deleted_from_main_db',
         'status',
     ];
 
@@ -39,6 +43,7 @@ class Program extends Model implements AuditableContract
     protected function casts(): array
     {
         return [
+            'deleted_from_main_db' => 'boolean',
             'status' => 'boolean',
         ];
     }

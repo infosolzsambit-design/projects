@@ -19,8 +19,8 @@ class StudentFactory extends Factory
     {
         return [
             'name' => fake()->name(),
-            'roll_no' => fake()->unique()->bothify('ROLL-####'),
-            'semester' => fake()->numberBetween(1, 8),
+            'registration_no' => fake()->unique()->numerify('2410050#####'),
+            'batch' => (string) fake()->numberBetween(2022, 2026),
             'program_name' => fake()->randomElement(['B.Tech in Computer Science Engineering', 'B.Sc in Physics', 'B.A in English']),
             'status' => true,
         ];

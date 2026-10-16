@@ -6,12 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Student\StoreStudentRequest;
 use App\Http\Requests\Student\UpdateStudentRequest;
 use App\Http\Resources\StudentResource;
+use App\Models\MainDbSyncConfig;
+use App\Models\Program;
 use App\Models\Student;
+use App\Services\MainDbApiService;
+use App\Services\MainDbSyncService;
 use App\Traits\ApiResponse;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 // NOTE: no permission gating yet — every authenticated user (auth:sanctum,
 // applied at the route-group level) can manage students for now.
@@ -28,11 +33,11 @@ class StudentController extends Controller
      *  - ?id=5                    → single record (like show(), but via query param)
      *  - ?status=deleted          → only soft-deleted students
      *  - ?status=all              → every matching student, unpaginated
-     *      - ?table_fields=["name","semester"]  → trims the SELECT to just those columns (+id)
+     *      - ?table_fields=["name","batch"]  → trims the SELECT to just those columns (+id)
      *      - ?is_active=yes|no    → filter by the student's own active/inactive flag
      *  - default                  → paginated, searchable listing
-     *      - ?search=, ?name=, ?semester= (exact match), ?program_name=, ?is_active=yes|no, ?sort_by=, ?sort_by_field=, ?per_page=
-     *      - ?table_fields=["name","semester"]  → same column-trimming as the "all" branch
+     *      - ?search=, ?name=, ?batch= (exact match), ?program_name=, ?is_active=yes|no, ?sort_by=, ?sort_by_field=, ?per_page=
+     *      - ?table_fields=["name","batch"]  → same column-trimming as the "all" branch
      */
     public function index(Request $request): JsonResponse
     {
@@ -66,16 +71,16 @@ class StudentController extends Controller
         }
 
         // Searches every column the list actually shows (see
-        // StudentsView.vue's table: Name, Semester, Program, Status) —
+        // StudentsView.vue's table: Name, Registration No, Batch, Program, Status) —
         // "Active"/"Inactive" match the boolean `status` column since
         // that's how it's displayed, not literal stored text.
         if ($request->filled('search')) {
             $search = $request->string('search')->toString();
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('roll_no', 'like', "%{$search}%")
+                    ->orWhere('registration_no', 'like', "%{$search}%")
                     ->orWhere('program_name', 'like', "%{$search}%")
-                    ->orWhere('semester', 'like', "%{$search}%");
+                    ->orWhere('batch', 'like', "%{$search}%");
                 // Prefix match, not "contains" — "active" is itself a
                 // substring of "inactive" ("in-active"), so a naive
                 // stripos() on either word would make searching "active"
@@ -94,8 +99,8 @@ class StudentController extends Controller
             $query->where('name', 'like', '%'.$request->string('name')->toString().'%');
         }
 
-        if ($request->filled('semester')) {
-            $query->where('semester', $request->integer('semester'));
+        if ($request->filled('batch')) {
+            $query->where('batch', $request->string('batch')->toString());
         }
 
         if ($request->filled('program_name')) {
@@ -158,7 +163,7 @@ class StudentController extends Controller
 
     private function applySorting(Builder $query, Request $request): void
     {
-        $sortField = in_array($request->input('sort_by_field'), ['id', 'name', 'roll_no', 'semester', 'program_name', 'status', 'created_at'], true)
+        $sortField = in_array($request->input('sort_by_field'), ['id', 'name', 'registration_no', 'batch', 'program_name', 'status', 'created_at'], true)
             ? $request->input('sort_by_field')
             : 'id';
         $sortDir = Str::lower((string) $request->input('sort_by')) === 'asc' ? 'asc' : 'desc';
@@ -200,5 +205,50 @@ class StudentController extends Controller
         $student->restore();
 
         return $this->success(new StudentResource($student), 'Student restored successfully.');
+    }
+
+    /**
+     * POST /students/sync — "Sync Student": see MainDbSyncService (matched
+     * by inserted_id; new → added, existing → updated/restored, gone →
+     * soft-deleted; hand-added students untouched — unless one has the same
+     * registration number, which is then linked instead of duplicated).
+     * By default only students not deleted in the main database
+     * (delete_status=1 — the Sync modal's MainDbSyncConfig). API fields:
+     * regisration_id → registration_no, batch, and program_id (the main
+     * database's program id) → our program's name by its inserted_id (sync
+     * Programs first; an unknown one leaves it blank).
+     */
+    public function sync(MainDbApiService $mainDb, MainDbSyncService $syncer): JsonResponse
+    {
+        try {
+            $config = MainDbSyncConfig::forEntity('students');
+            $remote = $mainDb->fetch($config->path, $config->method, $config->queryParams());
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
+
+        $programNames = Program::withTrashed()->whereNotNull('inserted_id')->pluck('name', 'inserted_id');
+        // The API's names can start with a non-breaking space (U+00A0), which trim() doesn't remove.
+        $clean = fn ($value) => trim(preg_replace('/[\s\x{00A0}]+/u', ' ', (string) $value));
+
+        $summary = $syncer->sync(Student::class, $remote, function (array $row) use ($programNames, $clean) {
+            $name = $clean($row['name'] ?? '');
+            $registrationNo = $clean($row['regisration_id'] ?? $row['registration_id'] ?? '');
+            if ($name === '' || $registrationNo === '') {
+                return null;
+            }
+            $batch = $clean($row['batch'] ?? '');
+            $programId = $clean($row['program_id'] ?? '');
+
+            return [
+                'name' => Str::limit($name, 255, ''),
+                'registration_no' => Str::limit($registrationNo, 255, ''),
+                'batch' => $batch === '' ? null : Str::limit($batch, 20, ''),
+                'program_name' => is_numeric($programId) ? $programNames->get((int) $programId) : null,
+                'deleted_from_main_db' => MainDbSyncService::isDeletedInMainDb($row),
+            ];
+        }, 'students', matchColumn: 'registration_no');
+
+        return $this->success($summary, 'Students synced successfully.');
     }
 }

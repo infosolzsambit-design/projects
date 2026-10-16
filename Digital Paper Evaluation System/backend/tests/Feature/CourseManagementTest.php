@@ -38,14 +38,14 @@ class CourseManagementTest extends TestCase
         $this->assertDatabaseHas('courses', ['code' => 'BCA-01']);
     }
 
-    public function test_type_is_required_and_max_50_characters(): void
+    public function test_type_is_required_and_max_100_characters(): void
     {
         $this->actingAdmin();
         $payload = ['name' => 'Physics', 'code' => 'PHY101'];
 
         $this->withApiKey()->postJson('/api/v1/courses', $payload)
             ->assertStatus(422)->assertJsonValidationErrors('type');
-        $this->withApiKey()->postJson('/api/v1/courses', $payload + ['type' => str_repeat('X', 51)])
+        $this->withApiKey()->postJson('/api/v1/courses', $payload + ['type' => str_repeat('X', 101)])
             ->assertStatus(422)->assertJsonValidationErrors('type');
         $this->withApiKey()->postJson('/api/v1/courses', $payload + ['type' => 'T'])
             ->assertStatus(201)->assertJsonPath('data.type', 'T');

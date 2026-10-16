@@ -25,13 +25,16 @@ class UpdateTeacherRequest extends FormRequest
             'email' => ['sometimes', 'required', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($userId)->whereNull('deleted_at')],
             // digits:10 — exactly 10 numeric characters, so it also rejects a
             // decimal point or any other non-digit character.
-            'phone_no' => ['sometimes', 'required', 'digits:10', Rule::unique('users', 'phone_no')->ignore($userId)->whereNull('deleted_at')],
+            // Not unique — login is by email only (see AuthController::login).
+            'phone_no' => ['sometimes', 'required', 'digits:10'],
             'password' => ['sometimes', 'nullable', 'string', 'confirmed', PasswordPolicy::rule()],
             // ignore($userId, 'user_id') — emp_code lives on teacher_details,
             // keyed by user_id, not by its own id (see StoreTeacherRequest
             // for the matching create-time rule).
             'emp_code' => ['sometimes', 'required', 'string', 'max:50', Rule::unique('teacher_details', 'emp_code')->ignore($userId, 'user_id')->whereNull('deleted_at')],
-            'department_id' => ['sometimes', 'required', 'integer', Rule::exists('departments', 'id')->whereNull('deleted_at')],
+            // A teacher can be in several departments (teacher_department_mappings).
+            'department_ids' => ['sometimes', 'required', 'array', 'min:1'],
+            'department_ids.*' => ['distinct', 'integer', Rule::exists('departments', 'id')->whereNull('deleted_at')],
             'designation' => ['sometimes', 'required', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
             // Set via the Teachers list's own "Face Scan Applicable" row

@@ -7,6 +7,7 @@ import { useConfirm } from '../../composables/useConfirm'
 import { useToast } from '../../composables/useToast'
 import Pagination from '../../components/common/Pagination.vue'
 import RowActionMenu from '../../components/common/RowActionMenu.vue'
+import RolePermissionsModal from '../../components/roles/RolePermissionsModal.vue'
 
 const router = useRouter()
 const { confirmDialog } = useConfirm()
@@ -59,6 +60,9 @@ function goToEdit(role) {
   router.push({ name: 'configurations-roles-edit', params: { id: role.id } })
 }
 
+// Clicking a role's Permissions count opens them grouped (RolePermissionsModal).
+const viewingPermissionsOf = ref(null)
+
 async function removeRole(role) {
   const confirmed = await confirmDialog({
     title: 'Delete Role',
@@ -100,7 +104,7 @@ onMounted(async () => {
   </div>
   <div v-else>
     <!-- Breadcrumb + page action -->
-    <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-5 flex items-center justify-between gap-3">
+    <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-2.5 flex items-center justify-between gap-3">
       <div class="flex items-center gap-3">
         <RouterLink to="/dashboard" class="inline-flex items-center gap-2 text-[13px] sm:text-sm text-gray-700 hover:text-brand-blue">
           <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5z" /></svg>
@@ -124,28 +128,28 @@ onMounted(async () => {
     <p v-if="loadError" class="text-[13px] text-brand mb-4">{{ loadError }}</p>
 
     <!-- Section title bar -->
-    <section class="relative bg-subject-header rounded-t-2xl rounded-b-none px-4 sm:px-5 py-4 mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <section class="relative bg-subject-header rounded-t-2xl rounded-b-none px-4 sm:px-5 py-2 mb-1.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
       <div class="flex items-center gap-3 min-w-0">
-        <span class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
-          <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <span class="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
+          <svg class="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12.01V2h10.01l8.58 8.58a2 2 0 0 1 0 2.83z" />
             <circle cx="7" cy="7" r="1.5" />
           </svg>
         </span>
-        <h2 class="text-white text-[16px] sm:text-lg font-medium truncate">All Roles</h2>
+        <h2 class="text-white text-[15px] font-medium truncate">All Roles</h2>
       </div>
       <div class="flex items-center gap-2" @click.stop>
-        <span class="inline-flex items-center rounded-[10px] bg-white/15 text-white text-[11px] sm:text-[12px] px-3.5 py-2 shrink-0 whitespace-nowrap">Total : {{ pagination.total }}</span>
+        <span class="inline-flex items-center rounded-[10px] bg-white/15 text-white text-[11px] sm:text-[12px] px-3 py-1.5 shrink-0 whitespace-nowrap">Total : {{ pagination.total }}</span>
         <input
           v-model="search"
           type="text"
           placeholder="Search roles…"
-          class="w-full sm:w-56 h-10 px-3.5 rounded-lg bg-white text-sm text-gray-800 outline-none border border-transparent focus:border-white/60 transition"
+          class="w-full sm:w-56 h-8 px-3.5 rounded-lg bg-white text-sm text-gray-800 outline-none border border-transparent focus:border-white/60 transition"
           @keyup.enter="runSearch"
         />
         <button
           type="button"
-          class="h-10 w-10 shrink-0 rounded-lg bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors"
+          class="h-8 w-8 shrink-0 rounded-lg bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors"
           aria-label="Search"
           @click="runSearch"
         >
@@ -180,12 +184,22 @@ onMounted(async () => {
               class="text-[12px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0"
             >
               <td class="px-4 py-1">
-                <span class="inline-flex items-center justify-center min-w-[40px] rounded-md status-gradient-border px-2 py-0.5 text-[11px] font-medium">
+                <span class="inline-flex items-center justify-center min-w-[40px] rounded-md status-gradient-border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap">
                   # {{ (pagination.current_page - 1) * pagination.per_page + index + 1 }}
                 </span>
               </td>
               <td class="px-4 py-1 font-semibold">{{ role.name }}</td>
-              <td class="px-4 py-1">{{ role.permissions?.length || 0 }}</td>
+              <td class="px-4 py-1">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1.5 rounded-full bg-soft text-brand-blue px-2.5 py-0.5 text-[12px] font-semibold hover:bg-brand-blue hover:text-white transition-colors"
+                  :title="`View ${role.name}'s permissions`"
+                  @click="viewingPermissionsOf = role"
+                >
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                  {{ role.permissions?.length || 0 }}
+                </button>
+              </td>
               <td v-if="authStore.can('role-edit') || authStore.can('role-delete')" class="px-4 py-1 text-center relative" @click.stop>
                 <RowActionMenu>
                   <button v-if="authStore.can('role-edit')" type="button" class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors" @click="goToEdit(role)">
@@ -214,6 +228,14 @@ onMounted(async () => {
       :last-page="pagination.last_page"
       :total="pagination.total"
       @change="goToPage"
+    />
+
+    <RolePermissionsModal
+      v-if="viewingPermissionsOf"
+      :role="viewingPermissionsOf"
+      :can-edit="authStore.can('role-edit')"
+      @edit="goToEdit(viewingPermissionsOf)"
+      @close="viewingPermissionsOf = null"
     />
   </div>
 </template>

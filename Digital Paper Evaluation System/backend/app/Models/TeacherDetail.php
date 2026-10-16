@@ -24,11 +24,13 @@ class TeacherDetail extends Model implements AuditableContract
      * @var list<string>
      */
     protected $fillable = [
+        // The college main database's own id (set by "Sync Teacher").
+        'inserted_id',
         'user_id',
         'emp_code',
-        'department',
-        'department_id',
         'designation',
+        // delete_status from the main database's API (set by "Sync Teacher").
+        'deleted_from_main_db',
         'gender',
         'location',
         'about',
@@ -75,20 +77,13 @@ class TeacherDetail extends Model implements AuditableContract
             // encode/decode, ProfileController just deals in plain arrays.
             'face_descriptor' => 'array',
             'face_scan_applicable' => 'boolean',
+            'deleted_from_main_db' => 'boolean',
         ];
     }
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
-    }
-
-    // No database foreign key (project-wide rule) — `department` still
-    // holds the department's name as a denormalized copy for listing/search,
-    // this relation is just for convenience when the live record is needed.
-    public function department(): BelongsTo
-    {
-        return $this->belongsTo(Department::class);
     }
 
     public function creator(): BelongsTo

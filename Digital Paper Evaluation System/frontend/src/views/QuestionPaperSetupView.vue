@@ -35,7 +35,7 @@ const preparingPdf = ref(false)
 
 const fieldErrors = reactive({
   exam_year: '',
-  department_ids: [],
+  department_ids: '',
   course_id: '',
   exam_term_id: '',
   semester: '',

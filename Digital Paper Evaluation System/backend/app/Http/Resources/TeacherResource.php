@@ -27,9 +27,15 @@ class TeacherResource extends JsonResource
             'phone_no' => $this->phone_no,
             'is_active' => (bool) $this->is_active,
             'emp_code' => $this->teacherDetail?->emp_code,
-            'department' => $this->teacherDetail?->department,
-            'department_id' => $this->teacherDetail?->department_id,
+            // A teacher can be in several departments (teacher_department_mappings):
+            // `department` is their names joined ("Commerce, Law") for display/search.
+            'department' => $this->departmentNames(),
+            'department_ids' => $this->departments->pluck('id')->all(),
+            'departments' => $this->departments->map(fn ($d) => ['id' => $d->id, 'name' => $d->name])->values(),
             'designation' => $this->teacherDetail?->designation,
+            // Set by "Sync Teacher" — the college main database's own id / delete flag.
+            'inserted_id' => $this->teacherDetail?->inserted_id,
+            'deleted_from_main_db' => (bool) ($this->teacherDetail?->deleted_from_main_db ?? false),
             // Cheap boolean, safe on every list row — the photo itself
             // isn't included here (would bloat the paginated list
             // response); fetched on demand via TeacherFaceController::show()

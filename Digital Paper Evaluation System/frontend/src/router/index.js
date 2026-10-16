@@ -104,6 +104,19 @@ const router = createRouter({
           component: () => import('../views/AnswerSheetsView.vue'),
           meta: { title: 'Answer Sheet Upload' },
         },
+        // "Generate QR & Scan" sidebar menu.
+        {
+          path: 'qr/generate',
+          name: 'qr-generate',
+          component: () => import('../views/GenerateQrView.vue'),
+          meta: { title: 'Generate QR' },
+        },
+        {
+          path: 'qr/scan-papers',
+          name: 'qr-scan-papers',
+          component: () => import('../views/ScanPapersView.vue'),
+          meta: { title: 'Scan Papers' },
+        },
         {
           path: 'answer-sheets/upload',
           name: 'answer-sheets-upload',
@@ -447,6 +460,24 @@ const router = createRouter({
           name: 'master-exam-types-edit',
           component: () => import('../views/master/ExamTypeFormView.vue'),
           meta: { title: 'Edit Exam Type' },
+        },
+        {
+          path: 'master/exam-sub-types',
+          name: 'master-exam-sub-types',
+          component: () => import('../views/master/ExamSubTypesView.vue'),
+          meta: { title: 'Exam Sub Types' },
+        },
+        {
+          path: 'master/exam-sub-types/create',
+          name: 'master-exam-sub-types-create',
+          component: () => import('../views/master/ExamSubTypeFormView.vue'),
+          meta: { title: 'Add Exam Sub Type' },
+        },
+        {
+          path: 'master/exam-sub-types/:id/edit',
+          name: 'master-exam-sub-types-edit',
+          component: () => import('../views/master/ExamSubTypeFormView.vue'),
+          meta: { title: 'Edit Exam Sub Type' },
         },
       ],
     },

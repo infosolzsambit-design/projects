@@ -31,7 +31,7 @@ const { isOpen, isDesktop, isPinned, close } = useSidebar()
     <div class="page-wrapper flex flex-col min-w-0 min-h-screen" :class="{ 'sidebar-pinned': isPinned }">
       <AppHeader />
 
-      <main class="flex-1 bg-page-bg px-4 lg:px-8 py-6 lg:py-8">
+      <main class="flex-1 bg-page-bg px-4 lg:px-8 pt-3 lg:pt-4 pb-6 lg:pb-8">
         <RouterView />
       </main>
 

@@ -18,9 +18,11 @@ class DepartmentResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'inserted_id' => $this->inserted_id,
             'name' => $this->name,
             'code' => $this->code,
             'short_description' => $this->short_description,
+            'deleted_from_main_db' => (bool) $this->deleted_from_main_db,
             'status' => (bool) $this->status,
             'created_by' => $this->created_by,
             'updated_by' => $this->updated_by,

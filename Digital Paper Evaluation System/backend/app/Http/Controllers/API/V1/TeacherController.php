@@ -3,19 +3,21 @@
 namespace App\Http\Controllers\API\V1;
 
 use App\Http\Controllers\Controller;
-use App\Services\UserNotificationService;
 use App\Http\Requests\Teacher\StoreTeacherRequest;
 use App\Http\Requests\Teacher\UpdateTeacherRequest;
 use App\Http\Resources\TeacherResource;
 use App\Models\AnswerSheet;
-use App\Models\Department;
+use App\Models\MainDbSyncConfig;
 use App\Models\QuestionAnswerSheetMapping;
 use App\Models\Role;
 use App\Models\TeacherDetail;
 use App\Models\User;
 use App\Services\AssignTeacherService;
 use App\Services\AuditLogService;
+use App\Services\MainDbApiService;
 use App\Services\TeacherReassignMailService;
+use App\Services\TeacherSyncService;
+use App\Services\UserNotificationService;
 use App\Traits\ApiResponse;
 use App\Traits\HasDepartmentScope;
 use App\Traits\HasExamTypeScope;
@@ -28,6 +30,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
 
 // NOTE: no permission gating yet — same as StudentController/CourseController,
 // deferred until permissions are set up per module. Placed flat under
@@ -48,15 +51,15 @@ class TeacherController extends Controller
      *  - ?id=5             → single record
      *  - ?status=deleted   → only soft-deleted teachers
      *  - ?search=          → matches name/email/phone_no/emp_code/department/designation
-     *  - ?department_id=   → only teachers in that department (see
+     *  - ?department_id=   → only teachers in that department (any of theirs — see
      *    AssignTeacherView.vue's own admin-editable department filter —
      *    independent of ?department_scope= below)
      *  - ?has_assignments=yes|no → only teachers with (or without) any
      *    answer sheet currently allocated to them (see
      *    AssignedTeachersView.vue) — "yes" is also exam-year-scoped for
      *    anyone but a super admin (see HasExamYearScope)
-     *  - ?department_scope=self → only teachers in the *calling user's own*
-     *    department, for anyone but a super admin (see HasDepartmentScope)
+     *  - ?department_scope=self → only teachers sharing a department with
+     *    the *calling user*, for anyone but a super admin (see HasDepartmentScope)
      *    — sent by AssignTeacherView.vue's teacher picker and
      *    AssignedTeachersView.vue; the plain Teachers master list never
      *    sends this and stays unrestricted
@@ -119,9 +122,9 @@ class TeacherController extends Controller
         if ($onlyDeleted) {
             $query->onlyTrashed()
                 ->whereHas('teacherDetail', fn ($q) => $q->withTrashed())
-                ->with(['teacherDetail' => fn ($q) => $q->withTrashed()]);
+                ->with(['teacherDetail' => fn ($q) => $q->withTrashed(), 'departments:id,name']);
         } else {
-            $query->whereHas('teacherDetail')->with('teacherDetail');
+            $query->whereHas('teacherDetail')->with(['teacherDetail', 'departments:id,name']);
         }
 
         if ($request->filled('id')) {
@@ -145,9 +148,9 @@ class TeacherController extends Controller
                 $q->where('name', 'like', "%{$search}%")
                     ->orWhere('email', 'like', "%{$search}%")
                     ->orWhere('phone_no', 'like', "%{$search}%")
+                    ->orWhereHas('departments', fn ($q2) => $q2->where('name', 'like', "%{$search}%"))
                     ->orWhereHas('teacherDetail', function ($q2) use ($search) {
-                        $q2->where('department', 'like', "%{$search}%")
-                            ->orWhere('designation', 'like', "%{$search}%")
+                        $q2->where('designation', 'like', "%{$search}%")
                             ->orWhere('emp_code', 'like', "%{$search}%");
                     });
                 // Prefix match, not "contains" — "active" is itself a
@@ -179,8 +182,9 @@ class TeacherController extends Controller
             }
         }
 
+        // A teacher in several departments matches any of them.
         if ($request->filled('department_id')) {
-            $query->whereHas('teacherDetail', fn ($q) => $q->where('department_id', $request->integer('department_id')));
+            $query->whereHas('departments', fn ($q) => $q->where('departments.id', $request->integer('department_id')));
         }
 
         if ($request->filled('department_scope') && $request->string('department_scope')->toString() === 'self') {
@@ -191,7 +195,8 @@ class TeacherController extends Controller
                 // everyone (see HasDepartmentScope's own docblock).
                 $query->whereRaw('1 = 0');
             } elseif ($departmentScope !== null) {
-                $query->whereHas('teacherDetail', fn ($q) => $q->where('department_id', $departmentScope));
+                // Teachers sharing any department with the caller.
+                $query->whereHas('departments', fn ($q) => $q->whereIn('departments.id', $departmentScope));
             }
         }
 
@@ -271,27 +276,19 @@ class TeacherController extends Controller
                 );
             }
 
-            // department_id is what's actually selected (a native dropdown
-            // sourced from the Department master list — see
-            // designed_files/form.html's "Department (Select)" pattern);
-            // `department` is kept alongside as the name at the time it was
-            // picked, so listing/search/exports never need to join out to
-            // departments for it.
-            $department = Department::find($data['department_id']);
-
             TeacherDetail::create([
                 'user_id' => $user->id,
                 'emp_code' => $data['emp_code'],
-                'department_id' => $department->id,
-                'department' => $department->name,
                 'designation' => $data['designation'],
             ]);
+            // A teacher can be in several departments (teacher_department_mappings).
+            $user->departments()->sync($data['department_ids']);
 
             return $user;
         });
 
         return $this->success(
-            new TeacherResource($teacher->fresh('teacherDetail')),
+            new TeacherResource($teacher->fresh(['teacherDetail', 'departments'])),
             'Teacher created successfully.',
             201,
         );
@@ -303,7 +300,7 @@ class TeacherController extends Controller
             return $this->notFound('No teacher found.');
         }
 
-        return $this->success(new TeacherResource($teacher->load('teacherDetail')), 'Teacher retrieved successfully.');
+        return $this->success(new TeacherResource($teacher->load(['teacherDetail', 'departments'])), 'Teacher retrieved successfully.');
     }
 
     /**
@@ -696,19 +693,17 @@ class TeacherController extends Controller
                 $teacher->update($userData);
             }
 
-            $detailData = array_intersect_key($data, array_flip(['emp_code', 'department_id', 'designation', 'face_scan_applicable']));
-            if (array_key_exists('department_id', $detailData)) {
-                // Re-derive the denormalized name from whatever department
-                // was actually (re-)selected, same as store().
-                $detailData['department'] = Department::find($detailData['department_id'])->name;
-            }
+            $detailData = array_intersect_key($data, array_flip(['emp_code', 'designation', 'face_scan_applicable']));
             if ($detailData !== []) {
                 $teacher->teacherDetail->update($detailData);
+            }
+            if (array_key_exists('department_ids', $data)) {
+                $teacher->departments()->sync($data['department_ids']);
             }
         });
 
         return $this->success(
-            new TeacherResource($teacher->fresh('teacherDetail')),
+            new TeacherResource($teacher->fresh(['teacherDetail', 'departments'])),
             'Teacher updated successfully.',
         );
     }
@@ -738,7 +733,24 @@ class TeacherController extends Controller
             TeacherDetail::withTrashed()->where('user_id', $teacher->id)->restore();
         });
 
-        return $this->success(new TeacherResource($teacher->fresh('teacherDetail')), 'Teacher restored successfully.');
+        return $this->success(new TeacherResource($teacher->fresh(['teacherDetail', 'departments'])), 'Teacher restored successfully.');
+    }
+
+    /**
+     * POST /teachers/sync — "Sync Teacher": see TeacherSyncService. The
+     * request (method / path / params — by default POST DataApi/teacher
+     * with delete_status=1) is the Sync modal's MainDbSyncConfig.
+     */
+    public function sync(MainDbApiService $mainDb, TeacherSyncService $syncer): JsonResponse
+    {
+        try {
+            $config = MainDbSyncConfig::forEntity('teachers');
+            $remote = $mainDb->fetch($config->path, $config->method, $config->queryParams());
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
+
+        return $this->success($syncer->sync($remote), 'Teachers synced successfully.');
     }
 
     /**

@@ -7,11 +7,15 @@ use App\Http\Requests\ExamType\StoreExamTypeRequest;
 use App\Http\Requests\ExamType\UpdateExamTypeRequest;
 use App\Http\Resources\ExamTypeResource;
 use App\Models\ExamType;
+use App\Models\MainDbSyncConfig;
+use App\Services\MainDbApiService;
+use App\Services\MainDbSyncService;
 use App\Traits\ApiResponse;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 // NOTE: no permission gating yet — every authenticated user (auth:sanctum,
 // applied at the route-group level) can manage exam types for now.
@@ -186,5 +190,34 @@ class ExamTypeController extends Controller
         $examType->restore();
 
         return $this->success(new ExamTypeResource($examType), 'Exam type restored successfully.');
+    }
+
+    /**
+     * POST /exam-types/sync — see MainDbSyncService (matched by inserted_id;
+     * new → added, existing → updated/restored, gone → soft-deleted; hand-
+     * added exam types untouched). Deleted-in-main-database types
+     * ("delete_status": "0") are kept here, just flagged
+     * (deleted_from_main_db). Names aren't forced unique here — the main
+     * database is the source.
+     */
+    public function sync(MainDbApiService $mainDb, MainDbSyncService $syncer): JsonResponse
+    {
+        try {
+            $config = MainDbSyncConfig::forEntity('exam-types');
+            $remote = $mainDb->fetch($config->path, $config->method, $config->queryParams());
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
+
+        $summary = $syncer->sync(ExamType::class, $remote, function (array $row) {
+            $name = trim((string) ($row['name'] ?? ''));
+
+            return $name === '' ? null : [
+                'name' => Str::limit($name, 255, ''),
+                'deleted_from_main_db' => MainDbSyncService::isDeletedInMainDb($row),
+            ];
+        }, 'exam-types');
+
+        return $this->success($summary, 'Exam types synced successfully.');
     }
 }

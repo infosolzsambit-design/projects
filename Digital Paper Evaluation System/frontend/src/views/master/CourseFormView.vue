@@ -123,7 +123,7 @@ function validate() {
   if (!form.name.trim()) fieldErrors.name = 'Name is required.'
   if (!form.code.trim()) fieldErrors.code = 'Code is required.'
   if (!form.type.trim()) fieldErrors.type = 'Type is required.'
-  else if (form.type.trim().length > 50) fieldErrors.type = 'Type may not be longer than 50 characters.'
+  else if (form.type.trim().length > 100) fieldErrors.type = 'Type may not be longer than 100 characters.'
   return FIELD_ORDER.every((key) => !fieldErrors[key])
 }
 
@@ -236,7 +236,7 @@ function cancel() {
                 :ref="(el) => (fieldRefs.type.value = el)"
                 v-model="form.type"
                 type="text"
-                maxlength="50"
+                maxlength="100"
                 list="course-type-options"
                 placeholder="e.g. Theory, Practical, T, P"
                 @input="clearFieldError('type')"

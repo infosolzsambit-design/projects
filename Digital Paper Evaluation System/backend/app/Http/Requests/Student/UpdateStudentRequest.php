@@ -19,8 +19,8 @@ class UpdateStudentRequest extends FormRequest
     {
         return [
             'name' => ['sometimes', 'required', 'string', 'max:255'],
-            'roll_no' => ['sometimes', 'required', 'string', 'max:50', Rule::unique('students', 'roll_no')->ignore($this->route('student')?->id)->whereNull('deleted_at')],
-            'semester' => ['sometimes', 'required', 'integer', 'min:1'],
+            'registration_no' => ['sometimes', 'required', 'string', 'max:50', Rule::unique('students', 'registration_no')->ignore($this->route('student')?->id)->whereNull('deleted_at')],
+            'batch' => ['sometimes', 'nullable', 'string', 'max:20'],
             'program_name' => ['nullable', 'string', 'max:255', Rule::exists('programs', 'name')->whereNull('deleted_at')],
             'status' => ['sometimes', 'boolean'],
         ];

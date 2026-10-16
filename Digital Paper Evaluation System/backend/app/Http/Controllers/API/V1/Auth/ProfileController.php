@@ -31,7 +31,7 @@ class ProfileController extends Controller
     public function show(Request $request): JsonResponse
     {
         return $this->success(
-            new ProfileResource($request->user()->load(['roles', 'teacherDetail'])),
+            new ProfileResource($request->user()->load(['roles', 'teacherDetail', 'departments'])),
             'Profile retrieved successfully.',
         );
     }
@@ -55,7 +55,7 @@ class ProfileController extends Controller
         });
 
         return $this->success(
-            new ProfileResource($user->fresh()->load(['roles', 'teacherDetail'])),
+            new ProfileResource($user->fresh()->load(['roles', 'teacherDetail', 'departments'])),
             'Profile updated successfully.',
         );
     }
@@ -94,7 +94,7 @@ class ProfileController extends Controller
         );
 
         return $this->success(
-            new ProfileResource($user->fresh()->load(['roles', 'teacherDetail'])),
+            new ProfileResource($user->fresh()->load(['roles', 'teacherDetail', 'departments'])),
             'Profile photo saved successfully.',
         );
     }
@@ -127,7 +127,7 @@ class ProfileController extends Controller
         );
 
         return $this->success(
-            new ProfileResource($user->fresh()->load(['roles', 'teacherDetail'])),
+            new ProfileResource($user->fresh()->load(['roles', 'teacherDetail', 'departments'])),
             'E-sign saved successfully.',
         );
     }

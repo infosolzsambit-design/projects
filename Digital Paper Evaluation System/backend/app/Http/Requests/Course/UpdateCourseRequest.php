@@ -22,7 +22,7 @@ class UpdateCourseRequest extends FormRequest
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             // Unique only together with name + type — see after().
             'code' => ['sometimes', 'required', 'string', 'max:50'],
-            'type' => ['sometimes', 'required', 'string', 'max:50'],
+            'type' => ['sometimes', 'required', 'string', 'max:100'],
             'status' => ['sometimes', 'boolean'],
         ];
     }

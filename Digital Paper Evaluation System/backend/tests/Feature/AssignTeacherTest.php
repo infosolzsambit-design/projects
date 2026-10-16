@@ -313,6 +313,43 @@ class AssignTeacherTest extends TestCase
         $this->assertSame(0, AnswerSheet::whereNotNull('teacher_id')->count());
     }
 
+    public function test_a_packet_whose_scan_is_not_complete_cannot_be_assigned(): void
+    {
+        $this->actingAdmin();
+        ['mapping' => $mapping, 'filters' => $filters] = $this->mappingWithPendingSheets(3, ['is_scan_complete' => false]);
+        $teacherA = TeacherDetail::factory()->create()->user_id;
+        $teacherB = TeacherDetail::factory()->create()->user_id;
+
+        // Distribute: 0 pending.
+        $this->withApiKey()->postJson('/api/v1/assign-teacher', [
+            ...$filters,
+            ...$this->evaluationWindow(),
+            'assignments' => [['teacher_id' => $teacherA, 'quantity' => 1]],
+        ])->assertStatus(422)->assertJsonPath('errors.assignments.0', 'Only 0 answer sheet(s) are still pending for this search — 1 were requested.');
+
+        // Pool: nothing pending either.
+        $this->withApiKey()->postJson('/api/v1/assign-teacher', [
+            ...$filters,
+            ...$this->evaluationWindow(),
+            'mode' => 'pool',
+            'teacher_ids' => [$teacherA, $teacherB],
+        ])->assertStatus(422);
+
+        $this->assertSame(0, AnswerSheet::whereNotNull('teacher_id')->orWhereNotNull('answer_sheet_pool_id')->count());
+
+        // Not on the Answer Sheets list (Assign Teacher's own source) until scanned…
+        $this->withApiKey()->getJson('/api/v1/answer-sheet-mappings')->assertOk()->assertJsonCount(0, 'data.items');
+
+        // …then it is, and can be assigned.
+        $mapping->update(['is_scan_complete' => true]);
+        $this->withApiKey()->getJson('/api/v1/answer-sheet-mappings')->assertOk()->assertJsonPath('data.items.0.pending_answer_sheet_count', 3);
+        $this->withApiKey()->postJson('/api/v1/assign-teacher', [
+            ...$filters,
+            ...$this->evaluationWindow(),
+            'assignments' => [['teacher_id' => $teacherA, 'quantity' => 3]],
+        ])->assertOk();
+    }
+
     public function test_assign_rejects_when_no_packet_matches_the_filters(): void
     {
         $this->actingAdmin();

@@ -21,9 +21,10 @@ class StoreStudentRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             // No DB-unique constraint (project-wide rule — see
             // emp_code/packet_code elsewhere) — enforced here instead so a
-            // soft-deleted student's old roll number can be reused.
-            'roll_no' => ['required', 'string', 'max:50', Rule::unique('students', 'roll_no')->whereNull('deleted_at')],
-            'semester' => ['required', 'integer', 'min:1'],
+            // soft-deleted student's old registration number can be reused.
+            'registration_no' => ['required', 'string', 'max:50', Rule::unique('students', 'registration_no')->whereNull('deleted_at')],
+            // Admission batch (year), e.g. 2024 — optional.
+            'batch' => ['nullable', 'string', 'max:20'],
             // Must match an existing (non-deleted) program's name exactly —
             // kept as a name rather than program_id since that's how it was
             // asked for, but this stops it drifting from the programs table.

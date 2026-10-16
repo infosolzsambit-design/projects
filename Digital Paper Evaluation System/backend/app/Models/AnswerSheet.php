@@ -258,11 +258,14 @@ class AnswerSheet extends Model implements AuditableContract
      * A pooled sheet has no teacher until a pool teacher starts it, but it
      * is already handed out, so it must never be offered for assignment
      * again (Assign Teacher, "Pending to assign" counts, dashboard).
+     * Only sheets of a scanned packet (is_scan_complete = 1) — a Generate QR
+     * packet can't be assigned, and counts 0, until its scan is complete.
      */
     public function scopeAwaitingAssignment(Builder $query): Builder
     {
         return $query->whereNull($query->qualifyColumn('teacher_id'))
-            ->whereNull($query->qualifyColumn('answer_sheet_pool_id'));
+            ->whereNull($query->qualifyColumn('answer_sheet_pool_id'))
+            ->whereIn($query->qualifyColumn('question_answer_sheet_mapping_id'), QuestionAnswerSheetMapping::select('id')->where('is_scan_complete', true));
     }
 
     /**

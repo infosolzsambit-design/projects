@@ -7,11 +7,15 @@ use App\Http\Requests\Department\StoreDepartmentRequest;
 use App\Http\Requests\Department\UpdateDepartmentRequest;
 use App\Http\Resources\DepartmentResource;
 use App\Models\Department;
+use App\Models\MainDbSyncConfig;
+use App\Services\MainDbApiService;
+use App\Services\MainDbSyncService;
 use App\Traits\ApiResponse;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 // NOTE: no permission gating yet — every authenticated user (auth:sanctum,
 // applied at the route-group level) can manage departments for now.
@@ -198,5 +202,39 @@ class DepartmentController extends Controller
         $department->restore();
 
         return $this->success(new DepartmentResource($department), 'Department restored successfully.');
+    }
+
+    /**
+     * POST /departments/sync — see MainDbSyncService (matched by inserted_id;
+     * new → added, existing → updated/restored, gone → soft-deleted; hand-
+     * added departments untouched). The main database also sends the
+     * departments it has deleted ("delete_status": "0") — kept here, just
+     * flagged (deleted_from_main_db). Names aren't forced unique here — the
+     * main database is the source.
+     */
+    public function sync(MainDbApiService $mainDb, MainDbSyncService $syncer): JsonResponse
+    {
+        try {
+            $config = MainDbSyncConfig::forEntity('departments');
+            $remote = $mainDb->fetch($config->path, $config->method, $config->queryParams());
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
+
+        $summary = $syncer->sync(Department::class, $remote, function (array $row) {
+            $name = trim((string) ($row['name'] ?? ''));
+            if ($name === '') {
+                return null;
+            }
+            $code = trim((string) ($row['code'] ?? ''));
+
+            return [
+                'name' => Str::limit($name, 255, ''),
+                'code' => $code === '' ? null : Str::limit($code, 50, ''),
+                'deleted_from_main_db' => MainDbSyncService::isDeletedInMainDb($row),
+            ];
+        }, 'departments');
+
+        return $this->success($summary, 'Departments synced successfully.');
     }
 }

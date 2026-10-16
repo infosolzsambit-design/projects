@@ -28,8 +28,8 @@ class StudentBulkUploadTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/students/bulk/validate', [
             'rows' => [
-                ['name' => 'Alice', 'roll_no' => 'R1', 'semester' => '3', 'program_name' => $program->name],
-                ['name' => 'Bob', 'roll_no' => 'R2', 'semester' => '1', 'program_name' => ''],
+                ['name' => 'Alice', 'registration_no' => 'R1', 'batch' => '2024', 'program_name' => $program->name],
+                ['name' => 'Bob', 'registration_no' => 'R2', 'batch' => '2024', 'program_name' => ''],
             ],
         ]);
 
@@ -41,64 +41,64 @@ class StudentBulkUploadTest extends TestCase
         $this->actingAdmin();
 
         $response = $this->withApiKey()->postJson('/api/v1/students/bulk/validate', [
-            'rows' => [['name' => '', 'roll_no' => 'R1', 'semester' => '1', 'program_name' => '']],
+            'rows' => [['name' => '', 'registration_no' => 'R1', 'batch' => '2024', 'program_name' => '']],
         ]);
 
         $response->assertOk()->assertJsonPath('data.all_valid', false);
         $this->assertSame('Name is required.', $response->json('data.rows.0.errors.name'));
     }
 
-    public function test_validate_flags_a_blank_roll_no(): void
+    public function test_validate_flags_a_blank_registration_no(): void
     {
         $this->actingAdmin();
 
         $response = $this->withApiKey()->postJson('/api/v1/students/bulk/validate', [
-            'rows' => [['name' => 'Alice', 'roll_no' => '', 'semester' => '1', 'program_name' => '']],
+            'rows' => [['name' => 'Alice', 'registration_no' => '', 'batch' => '2024', 'program_name' => '']],
         ]);
 
         $response->assertOk()->assertJsonPath('data.all_valid', false);
-        $this->assertSame('Roll number is required.', $response->json('data.rows.0.errors.roll_no'));
+        $this->assertSame('Registration number is required.', $response->json('data.rows.0.errors.registration_no'));
     }
 
-    public function test_validate_flags_duplicate_roll_no_within_the_same_upload(): void
+    public function test_validate_flags_duplicate_registration_no_within_the_same_upload(): void
     {
         $this->actingAdmin();
 
         $response = $this->withApiKey()->postJson('/api/v1/students/bulk/validate', [
             'rows' => [
-                ['name' => 'Alice', 'roll_no' => 'DUPE', 'semester' => '1', 'program_name' => ''],
-                ['name' => 'Bob', 'roll_no' => 'dupe', 'semester' => '1', 'program_name' => ''],
+                ['name' => 'Alice', 'registration_no' => 'DUPE', 'batch' => '2024', 'program_name' => ''],
+                ['name' => 'Bob', 'registration_no' => 'dupe', 'batch' => '2024', 'program_name' => ''],
             ],
         ]);
 
         $response->assertOk()->assertJsonPath('data.all_valid', false);
-        $this->assertSame('Duplicate roll number within this upload.', $response->json('data.rows.0.errors.roll_no'));
-        $this->assertSame('Duplicate roll number within this upload.', $response->json('data.rows.1.errors.roll_no'));
+        $this->assertSame('Duplicate registration number within this upload.', $response->json('data.rows.0.errors.registration_no'));
+        $this->assertSame('Duplicate registration number within this upload.', $response->json('data.rows.1.errors.registration_no'));
     }
 
-    public function test_validate_flags_a_roll_no_already_used_by_an_existing_student(): void
+    public function test_validate_flags_a_registration_no_already_used_by_an_existing_student(): void
     {
         $this->actingAdmin();
-        Student::factory()->create(['roll_no' => 'TAKEN1']);
+        Student::factory()->create(['registration_no' => 'TAKEN1']);
 
         $response = $this->withApiKey()->postJson('/api/v1/students/bulk/validate', [
-            'rows' => [['name' => 'Alice', 'roll_no' => 'TAKEN1', 'semester' => '1', 'program_name' => '']],
+            'rows' => [['name' => 'Alice', 'registration_no' => 'TAKEN1', 'batch' => '2024', 'program_name' => '']],
         ]);
 
         $response->assertOk()->assertJsonPath('data.all_valid', false);
-        $this->assertSame('This roll number is already in use.', $response->json('data.rows.0.errors.roll_no'));
+        $this->assertSame('This registration number is already in use.', $response->json('data.rows.0.errors.registration_no'));
     }
 
-    public function test_validate_flags_a_non_numeric_semester(): void
+    public function test_validate_flags_a_too_long_batch(): void
     {
         $this->actingAdmin();
 
         $response = $this->withApiKey()->postJson('/api/v1/students/bulk/validate', [
-            'rows' => [['name' => 'Alice', 'roll_no' => 'R1', 'semester' => 'abc', 'program_name' => '']],
+            'rows' => [['name' => 'Alice', 'registration_no' => 'R1', 'batch' => str_repeat('9', 21), 'program_name' => '']],
         ]);
 
         $response->assertOk()->assertJsonPath('data.all_valid', false);
-        $this->assertSame('Semester must be a whole number of at least 1.', $response->json('data.rows.0.errors.semester'));
+        $this->assertSame('Batch may not be longer than 20 characters.', $response->json('data.rows.0.errors.batch'));
     }
 
     public function test_validate_flags_a_program_name_that_does_not_exist(): void
@@ -106,7 +106,7 @@ class StudentBulkUploadTest extends TestCase
         $this->actingAdmin();
 
         $response = $this->withApiKey()->postJson('/api/v1/students/bulk/validate', [
-            'rows' => [['name' => 'Alice', 'roll_no' => 'R1', 'semester' => '2', 'program_name' => 'Nonexistent Program']],
+            'rows' => [['name' => 'Alice', 'registration_no' => 'R1', 'batch' => '2024', 'program_name' => 'Nonexistent Program']],
         ]);
 
         $response->assertOk()->assertJsonPath('data.all_valid', false);
@@ -118,7 +118,7 @@ class StudentBulkUploadTest extends TestCase
         $this->actingAdmin();
 
         $response = $this->withApiKey()->postJson('/api/v1/students/bulk/validate', [
-            'rows' => [['name' => 'Alice', 'roll_no' => 'R1', 'semester' => '2', 'program_name' => '']],
+            'rows' => [['name' => 'Alice', 'registration_no' => 'R1', 'batch' => '2024', 'program_name' => '']],
         ]);
 
         $response->assertOk()->assertJsonPath('data.all_valid', true);
@@ -131,14 +131,14 @@ class StudentBulkUploadTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/students/bulk/store', [
             'rows' => [
-                ['name' => 'Bulk Student One', 'roll_no' => 'BS1', 'semester' => '1', 'program_name' => $program->name],
-                ['name' => 'Bulk Student Two', 'roll_no' => 'BS2', 'semester' => '2', 'program_name' => ''],
+                ['name' => 'Bulk Student One', 'registration_no' => 'BS1', 'batch' => '2024', 'program_name' => $program->name],
+                ['name' => 'Bulk Student Two', 'registration_no' => 'BS2', 'batch' => '', 'program_name' => ''],
             ],
         ]);
 
         $response->assertStatus(201)->assertJsonPath('data.created_count', 2);
-        $this->assertDatabaseHas('students', ['name' => 'Bulk Student One', 'roll_no' => 'BS1', 'semester' => 1, 'program_name' => $program->name]);
-        $this->assertDatabaseHas('students', ['name' => 'Bulk Student Two', 'roll_no' => 'BS2', 'semester' => 2, 'program_name' => null]);
+        $this->assertDatabaseHas('students', ['name' => 'Bulk Student One', 'registration_no' => 'BS1', 'batch' => '2024', 'program_name' => $program->name]);
+        $this->assertDatabaseHas('students', ['name' => 'Bulk Student Two', 'registration_no' => 'BS2', 'batch' => null, 'program_name' => null]);
     }
 
     public function test_store_rejects_the_whole_batch_when_any_row_is_invalid(): void
@@ -147,8 +147,8 @@ class StudentBulkUploadTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/students/bulk/store', [
             'rows' => [
-                ['name' => 'Valid Student', 'roll_no' => 'VS1', 'semester' => '1', 'program_name' => ''],
-                ['name' => '', 'roll_no' => 'VS2', 'semester' => '1', 'program_name' => ''],
+                ['name' => 'Valid Student', 'registration_no' => 'VS1', 'batch' => '2024', 'program_name' => ''],
+                ['name' => '', 'registration_no' => 'VS2', 'batch' => '2024', 'program_name' => ''],
             ],
         ]);
 

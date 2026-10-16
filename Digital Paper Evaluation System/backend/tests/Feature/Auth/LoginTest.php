@@ -121,10 +121,9 @@ class LoginTest extends TestCase
     public function test_login_response_includes_the_users_own_department(): void
     {
         $department = Department::factory()->create(['name' => 'Computer Science']);
-        $detail = TeacherDetail::factory()->create([
-            'department_id' => $department->id,
-            'department' => $department->name,
-        ]);
+        $law = Department::factory()->create(['name' => 'Law']);
+        $detail = TeacherDetail::factory()->create();
+        $detail->user->departments()->sync([$department->id, $law->id]);
         $detail->user->update(['password' => 'Password!23']);
 
         $response = $this->withApiKey()->postJson('/api/v1/login', [
@@ -133,32 +132,30 @@ class LoginTest extends TestCase
         ]);
 
         $response->assertOk()
-            ->assertJsonPath('data.user.department_id', $department->id)
-            ->assertJsonPath('data.user.department', 'Computer Science');
+            ->assertJsonPath('data.user.departments', [['id' => $department->id, 'name' => 'Computer Science'], ['id' => $law->id, 'name' => 'Law']])
+            ->assertJsonPath('data.user.department', 'Computer Science, Law');
     }
 
-    public function test_user_can_login_with_username_instead_of_email(): void
+    public function test_username_is_not_accepted_for_login(): void
     {
         $user = User::factory()->create(['password' => 'Password!23']);
 
-        $response = $this->withApiKey()->postJson('/api/v1/login', [
+        // Login is by email only.
+        $this->withApiKey()->postJson('/api/v1/login', [
             'login' => $user->username,
             'password' => 'Password!23',
-        ]);
-
-        $response->assertOk()->assertJsonPath('status', true);
+        ])->assertStatus(401)->assertJson(['status' => false, 'message' => 'Invalid credentials.']);
     }
 
-    public function test_user_can_login_with_phone_number_instead_of_email(): void
+    public function test_phone_number_is_not_accepted_for_login(): void
     {
         $user = User::factory()->create(['password' => 'Password!23', 'phone_no' => '9876543210']);
 
-        $response = $this->withApiKey()->postJson('/api/v1/login', [
+        // Phone numbers aren't unique, so they can't identify an account.
+        $this->withApiKey()->postJson('/api/v1/login', [
             'login' => $user->phone_no,
             'password' => 'Password!23',
-        ]);
-
-        $response->assertOk()->assertJsonPath('status', true);
+        ])->assertStatus(401)->assertJson(['status' => false, 'message' => 'Invalid credentials.']);
     }
 
     public function test_login_fails_with_wrong_password(): void
@@ -190,7 +187,7 @@ class LoginTest extends TestCase
         $user = User::factory()->inactive()->create(['password' => 'Password!23']);
 
         $response = $this->withApiKey()->postJson('/api/v1/login', [
-            'login' => $user->username,
+            'login' => $user->email,
             'password' => 'Password!23',
         ]);
 

@@ -7,11 +7,15 @@ use App\Http\Requests\Course\StoreCourseRequest;
 use App\Http\Requests\Course\UpdateCourseRequest;
 use App\Http\Resources\CourseResource;
 use App\Models\Course;
+use App\Models\MainDbSyncConfig;
+use App\Services\MainDbApiService;
+use App\Services\MainDbSyncService;
 use App\Traits\ApiResponse;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 // NOTE: no permission gating yet — every authenticated user (auth:sanctum,
 // applied at the route-group level) can manage courses for now. Per-action
@@ -217,5 +221,41 @@ class CourseController extends Controller
         $course->restore();
 
         return $this->success(new CourseResource($course), 'Course restored successfully.');
+    }
+
+    /**
+     * POST /courses/sync — see MainDbSyncService (matched by inserted_id;
+     * new → added, existing → updated/restored, gone → soft-deleted; hand-
+     * added courses untouched). Deleted-in-main-database courses
+     * ("delete_status": "0") are kept here, just flagged
+     * (deleted_from_main_db). The Name + Code + Type duplicate check isn't
+     * applied — the main database is the source. "credit_point" isn't
+     * stored (no column for it).
+     */
+    public function sync(MainDbApiService $mainDb, MainDbSyncService $syncer): JsonResponse
+    {
+        try {
+            $config = MainDbSyncConfig::forEntity('courses');
+            $remote = $mainDb->fetch($config->path, $config->method, $config->queryParams());
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
+
+        $summary = $syncer->sync(Course::class, $remote, function (array $row) {
+            $name = trim((string) ($row['name'] ?? ''));
+            if ($name === '') {
+                return null;
+            }
+            $type = trim((string) ($row['type'] ?? ''));
+
+            return [
+                'name' => Str::limit($name, 255, ''),
+                'code' => Str::limit(trim((string) ($row['code'] ?? '')), 255, ''),
+                'type' => $type === '' ? null : Str::limit($type, 100, ''),
+                'deleted_from_main_db' => MainDbSyncService::isDeletedInMainDb($row),
+            ];
+        }, 'courses');
+
+        return $this->success($summary, 'Courses synced successfully.');
     }
 }

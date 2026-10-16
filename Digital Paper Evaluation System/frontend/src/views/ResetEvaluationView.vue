@@ -215,21 +215,21 @@ onMounted(async () => {
     </div>
 
     <!-- Search -->
-    <form class="bg-white rounded-2xl shadow-panel p-4 sm:p-5 mb-5 flex flex-col sm:flex-row sm:items-end gap-3" @submit.prevent="search">
-      <div class="flex-1 flex flex-col gap-1">
-        <label for="reset-barcode" class="text-[13px] text-label">Barcode</label>
+    <form class="bg-white rounded-2xl shadow-panel px-3 sm:px-4 py-2.5 sm:py-3 mb-3 flex flex-col sm:flex-row sm:items-end gap-2.5" @submit.prevent="search">
+      <div class="flex-1 flex flex-col gap-0.5">
+        <label for="reset-barcode" class="text-[11px] text-label">Barcode</label>
         <input
           id="reset-barcode"
           v-model="barcode"
           type="text"
           placeholder="Enter or scan the answer sheet barcode"
-          class="w-full h-10 px-3.5 rounded-xl bg-input-bg text-[13px] text-gray-800 outline-none border border-input-border focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 transition"
+          class="w-full h-8 px-3 rounded-xl bg-input-bg text-[12px] text-gray-800 outline-none border border-input-border focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 transition"
         />
       </div>
       <button
         type="submit"
         :disabled="searching"
-        class="h-10 min-w-[120px] inline-flex items-center justify-center gap-2 rounded-full bg-btn-gradient text-white text-[13px] font-semibold px-5 hover:opacity-90 transition-opacity disabled:opacity-60"
+        class="h-8 min-w-[110px] inline-flex items-center justify-center gap-1.5 rounded-full bg-btn-gradient text-white text-[12px] font-semibold px-4 hover:opacity-90 transition-opacity disabled:opacity-60"
       >
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
         {{ searching ? 'Searching…' : 'Search' }}

@@ -9,21 +9,21 @@ use Illuminate\Support\Str;
 /**
  * Backs the "Bulk Upload" flow on the Students list — same shape as
  * CourseBulkUploadService/DepartmentBulkUploadService: a CSV is parsed
- * client-side into plain rows (Name, Roll No, Semester, Program), validated
+ * client-side into plain rows (Name, Registration No, Batch, Program), validated
  * here (same rules StoreStudentRequest enforces one-by-one, plus a
- * duplicate-roll-no-within-the-same-upload check a single-row request
+ * duplicate-registration-no-within-the-same-upload check a single-row request
  * could never hit), and — once every row is valid — created here too,
  * inside a single transaction.
  */
 class StudentBulkUploadService
 {
     /**
-     * @param  list<array<string, mixed>>  $rows  each: {name, roll_no, semester, program_name}
+     * @param  list<array<string, mixed>>  $rows  each: {name, registration_no, batch, program_name}
      * @return list<array{row:int,valid:bool,errors:array<string,string>}>
      */
     public function validateRows(array $rows): array
     {
-        $rollNoCounts = collect($rows)->countBy(fn ($row) => Str::lower(trim((string) ($row['roll_no'] ?? ''))));
+        $registrationNoCounts = collect($rows)->countBy(fn ($row) => Str::lower(trim((string) ($row['registration_no'] ?? ''))));
 
         // One query for every program name actually referenced, instead of
         // one Program::where(...)->exists() per row.
@@ -41,7 +41,7 @@ class StudentBulkUploadService
 
         return collect($rows)
             ->values()
-            ->map(fn ($row, $index) => $this->validateRow($row, $index + 1, $rollNoCounts, $existingProgramNames))
+            ->map(fn ($row, $index) => $this->validateRow($row, $index + 1, $registrationNoCounts, $existingProgramNames))
             ->all();
     }
 
@@ -49,30 +49,29 @@ class StudentBulkUploadService
      * @param  array<string, mixed>  $row
      * @return array{row:int,valid:bool,errors:array<string,string>}
      */
-    private function validateRow(array $row, int $rowNumber, $rollNoCounts, $existingProgramNames): array
+    private function validateRow(array $row, int $rowNumber, $registrationNoCounts, $existingProgramNames): array
     {
         $errors = [];
         $name = trim((string) ($row['name'] ?? ''));
-        $rollNo = trim((string) ($row['roll_no'] ?? ''));
-        $semester = trim((string) ($row['semester'] ?? ''));
+        $registrationNo = trim((string) ($row['registration_no'] ?? ''));
+        $batch = trim((string) ($row['batch'] ?? ''));
         $programName = trim((string) ($row['program_name'] ?? ''));
 
         if ($name === '') {
             $errors['name'] = 'Name is required.';
         }
 
-        if ($rollNo === '') {
-            $errors['roll_no'] = 'Roll number is required.';
-        } elseif ($rollNoCounts->get(Str::lower($rollNo), 0) > 1) {
-            $errors['roll_no'] = 'Duplicate roll number within this upload.';
-        } elseif (Student::whereNull('deleted_at')->whereRaw('LOWER(roll_no) = ?', [Str::lower($rollNo)])->exists()) {
-            $errors['roll_no'] = 'This roll number is already in use.';
+        if ($registrationNo === '') {
+            $errors['registration_no'] = 'Registration number is required.';
+        } elseif ($registrationNoCounts->get(Str::lower($registrationNo), 0) > 1) {
+            $errors['registration_no'] = 'Duplicate registration number within this upload.';
+        } elseif (Student::whereNull('deleted_at')->whereRaw('LOWER(registration_no) = ?', [Str::lower($registrationNo)])->exists()) {
+            $errors['registration_no'] = 'This registration number is already in use.';
         }
 
-        if ($semester === '') {
-            $errors['semester'] = 'Semester is required.';
-        } elseif (! ctype_digit($semester) || (int) $semester < 1) {
-            $errors['semester'] = 'Semester must be a whole number of at least 1.';
+        // Batch is optional (e.g. 2024).
+        if (mb_strlen($batch) > 20) {
+            $errors['batch'] = 'Batch may not be longer than 20 characters.';
         }
 
         // Program is optional (see StoreStudentRequest's own nullable
@@ -100,8 +99,8 @@ class StudentBulkUploadService
     {
         return collect($rows)->values()->map(fn ($row) => Student::create([
             'name' => trim((string) ($row['name'] ?? '')),
-            'roll_no' => trim((string) ($row['roll_no'] ?? '')),
-            'semester' => (int) trim((string) ($row['semester'] ?? '')),
+            'registration_no' => trim((string) ($row['registration_no'] ?? '')),
+            'batch' => trim((string) ($row['batch'] ?? '')) ?: null,
             'program_name' => trim((string) ($row['program_name'] ?? '')) ?: null,
             'status' => true,
         ]))->all();

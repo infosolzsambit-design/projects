@@ -29,6 +29,14 @@ class QuestionAnswerSheetMappingFactory extends Factory
             'exam_type_id' => ExamType::factory(),
             'program_name' => fake()->randomElement(['B.Tech in Computer Science Engineering', 'B.Sc in Physics', 'B.A in English']),
             'packet_code' => 'PKT-'.fake()->unique()->numberBetween(1000, 9999),
+            // Like an uploaded packet (see QuestionAnswerSheetMappingController::store()).
+            'is_scan_complete' => true,
         ];
+    }
+
+    /** A Generate QR packet whose scan isn't complete yet. */
+    public function scanPending(): static
+    {
+        return $this->state(fn () => ['is_scan_complete' => false]);
     }
 }

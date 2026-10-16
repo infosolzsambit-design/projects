@@ -53,7 +53,7 @@ const saving = ref(false)
 const formError = ref('')
 
 const form = reactive({ ...props.initialForm })
-const fieldErrors = reactive({ exam_year: '', department_ids: [], course_id: '', exam_term_id: '', semester: '', full_marks: '', time_allotted: '' })
+const fieldErrors = reactive({ exam_year: '', department_ids: '', course_id: '', exam_term_id: '', semester: '', full_marks: '', time_allotted: '' })
 // Order matters — matches the form's own top-to-bottom field order, so the
 // first of these (in this order) that has an error is the one that gets
 // focused after a failed save. Scoped to these flat packet-detail fields

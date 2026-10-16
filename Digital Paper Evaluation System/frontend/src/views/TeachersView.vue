@@ -9,6 +9,7 @@ import Pagination from '../components/common/Pagination.vue'
 import FaceCaptureModal from '../components/common/FaceCaptureModal.vue'
 import FaceScanApplicableModal from '../components/common/FaceScanApplicableModal.vue'
 import RowActionMenu from '../components/common/RowActionMenu.vue'
+import MainDbSyncControl from '../components/common/MainDbSyncControl.vue'
 
 const router = useRouter()
 const { confirmDialog } = useConfirm()
@@ -222,7 +223,7 @@ function retakeFromView() {
   </div>
   <div v-else>
     <!-- Breadcrumb + page action -->
-    <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-5 flex items-center justify-between gap-3">
+    <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-2.5 flex items-center justify-between gap-3">
       <div class="flex items-center gap-3">
         <RouterLink to="/dashboard" class="inline-flex items-center gap-2 text-[13px] sm:text-sm text-gray-700 hover:text-brand-blue">
           <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5z" /></svg>
@@ -231,15 +232,16 @@ function retakeFromView() {
         <span class="w-px h-4 bg-gray-300 shrink-0"></span>
         <span class="text-[13px] sm:text-sm text-gray-700">Teacher List</span>
       </div>
-      <div v-if="authStore.can('teacher-add')" class="flex items-center gap-2">
-        <RouterLink
+      <div class="flex items-center gap-2">
+        <MainDbSyncControl v-if="authStore.can('teacher-sync')" entity="teachers" endpoint="/teachers/sync" button-label="Sync Teacher" @synced="fetchTeachers(1)" />
+        <RouterLink v-if="authStore.can('teacher-add')"
           :to="{ name: 'teachers-bulk-upload' }"
           class="h-8 shrink-0 inline-flex items-center justify-center gap-2 rounded-xl border border-input-border bg-white text-[13px] font-semibold text-gray-700 px-4 sm:px-5 hover:border-brand-blue hover:text-brand-blue transition-colors"
         >
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
           Bulk Upload
         </RouterLink>
-        <button
+        <button v-if="authStore.can('teacher-add')"
           type="button"
           class="h-8 shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-btn-gradient text-white text-[13px] font-semibold px-4 sm:px-5 hover:opacity-90 transition-opacity"
           @click="goToCreate"
@@ -255,28 +257,28 @@ function retakeFromView() {
     <!-- Section title bar, matching designed_files/subject-list.html's
          colored info bar directly above its table — search/filter live here
          on the right, same as the reference's "Available : 37" pill. -->
-    <section class="relative bg-subject-header rounded-t-2xl rounded-b-none px-4 sm:px-5 py-4 mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <section class="relative bg-subject-header rounded-t-2xl rounded-b-none px-4 sm:px-5 py-2 mb-1.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
       <div class="flex items-center gap-3 min-w-0">
-        <span class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
-          <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <span class="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
+          <svg class="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M22 10v6M2 10l10-5 10 5-10 5-10-5z" />
             <path d="M6 12v5c0 1.66 2.69 3 6 3s6-1.34 6-3v-5" />
           </svg>
         </span>
-        <h2 class="text-white text-[16px] sm:text-lg font-medium truncate">All Teachers</h2>
+        <h2 class="text-white text-[15px] font-medium truncate">All Teachers</h2>
       </div>
       <div class="flex items-center gap-2" @click.stop>
-        <span class="inline-flex items-center rounded-[10px] bg-white/15 text-white text-[11px] sm:text-[12px] px-3.5 py-2 shrink-0 whitespace-nowrap">Total : {{ pagination.total }}</span>
+        <span class="inline-flex items-center rounded-[10px] bg-white/15 text-white text-[11px] sm:text-[12px] px-3 py-1.5 shrink-0 whitespace-nowrap">Total : {{ pagination.total }}</span>
         <input
           v-model="search"
           type="text"
           placeholder="Search teachers…"
-          class="w-full sm:w-56 h-10 px-3.5 rounded-lg bg-white text-sm text-gray-800 outline-none border border-transparent focus:border-white/60 transition"
+          class="w-full sm:w-56 h-8 px-3.5 rounded-lg bg-white text-sm text-gray-800 outline-none border border-transparent focus:border-white/60 transition"
           @keyup.enter="runSearch"
         />
         <button
           type="button"
-          class="h-10 w-10 shrink-0 rounded-lg bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors"
+          class="h-8 w-8 shrink-0 rounded-lg bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors"
           aria-label="Search"
           @click="runSearch"
         >
@@ -285,7 +287,7 @@ function retakeFromView() {
         <div class="relative">
           <button
             type="button"
-            class="h-10 shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[13px] font-medium px-3.5 transition-colors"
+            class="h-8 shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[13px] font-medium px-3.5 transition-colors"
             :aria-expanded="showFilter"
             @click="toggleFilter"
           >
@@ -343,10 +345,12 @@ function retakeFromView() {
           <thead>
             <tr class="bg-subject-header text-white text-[12px] font-medium">
               <th class="px-4 py-1.5 font-medium rounded-tl-2xl w-px whitespace-nowrap">#</th>
+              <th class="px-4 py-1.5 font-medium whitespace-nowrap">Ref Id</th>
               <th class="px-4 py-1.5 font-medium">Name</th>
               <th class="px-4 py-1.5 font-medium">Contact</th>
               <th class="px-4 py-1.5 font-medium">Department</th>
               <th class="px-4 py-1.5 font-medium">Designation</th>
+              <th class="px-4 py-1.5 font-medium whitespace-nowrap">Is Deleted From API</th>
               <th class="px-4 py-1.5 font-medium" v-if="authStore.can('teacher-face-scan')">Face Scan</th>
               <th class="px-4 py-1.5 font-medium" v-if="authStore.can('teacher-status-change')">Status</th>
               <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap" v-if="authStore.can('teacher-edit') || authStore.can('teacher-delete')">Action</th>
@@ -354,10 +358,10 @@ function retakeFromView() {
           </thead>
           <tbody class="bg-white">
             <tr v-if="loading">
-              <td colspan="8" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
+              <td colspan="10" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
             </tr>
             <tr v-else-if="!teachers.length">
-              <td colspan="8" class="px-4 py-8 text-center text-sm text-muted">No teachers found.</td>
+              <td colspan="10" class="px-4 py-8 text-center text-sm text-muted">No teachers found.</td>
             </tr>
             <tr
               v-for="(teacher, index) in teachers"
@@ -366,10 +370,12 @@ function retakeFromView() {
               class="text-[12px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0"
             >
               <td class="px-4 py-1">
-                <span class="inline-flex items-center justify-center min-w-[40px] rounded-md status-gradient-border px-2 py-0.5 text-[11px] font-medium">
+                <span class="inline-flex items-center justify-center min-w-[40px] rounded-md status-gradient-border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap">
                   # {{ (pagination.current_page - 1) * pagination.per_page + index + 1 }}
                 </span>
               </td>
+              <!-- inserted_id: the college main database's own id (Sync Teacher) -->
+              <td class="px-4 py-1">{{ teacher.inserted_id ?? '—' }}</td>
               <!-- Name with the Emp Code below it. -->
               <td class="px-4 py-1.5">
                 <p class="font-semibold text-gray-900 leading-snug">{{ teacher.name }}</p>
@@ -391,8 +397,18 @@ function retakeFromView() {
                   </p>
                 </div>
               </td>
-              <td class="px-4 py-1">{{ teacher.department || '—' }}</td>
+              <!-- A teacher can be in several departments: one per line, the first two + "+N more" (hover for all). -->
+              <td class="px-4 py-1.5" :title="teacher.departments?.length > 2 ? teacher.department : ''">
+                <template v-if="teacher.departments?.length">
+                  <p v-for="d in teacher.departments.slice(0, 2)" :key="d.id" class="leading-snug">{{ d.name }}</p>
+                  <p v-if="teacher.departments.length > 2" class="text-[11px] font-semibold text-brand-blue leading-snug cursor-help">+{{ teacher.departments.length - 2 }} more</p>
+                </template>
+                <template v-else>—</template>
+              </td>
               <td class="px-4 py-1">{{ teacher.designation || '—' }}</td>
+              <td class="px-4 py-1">
+                <span :class="teacher.deleted_from_main_db ? 'text-brand font-semibold' : 'text-gray-500'">{{ teacher.deleted_from_main_db ? 'Yes' : 'No' }}</span>
+              </td>
               <td v-if="authStore.can('teacher-face-scan')" class="px-4 py-1" @click.stop>
                 <button
                   v-if="teacher.has_face_profile"

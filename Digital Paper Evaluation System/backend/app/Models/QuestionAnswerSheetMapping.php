@@ -37,10 +37,16 @@ class QuestionAnswerSheetMapping extends Model implements AuditableContract
         'semester',
         'exam_term_id',
         'exam_type_id',
+        // Set by Generate QR (QrCodeController::generate()) — our own ids, not Ref Ids.
+        'exam_sub_type_id',
+        'exam_year',
+        'batch',
         'program_name',
         'department_id',
         'department_name',
         'packet_code',
+        // 1 = scan complete, 0 = not yet (Generate QR creates packets at 0).
+        'is_scan_complete',
     ];
 
     /**
@@ -50,6 +56,7 @@ class QuestionAnswerSheetMapping extends Model implements AuditableContract
     {
         return [
             'semester' => 'integer',
+            'is_scan_complete' => 'boolean',
         ];
     }
 
@@ -122,6 +129,11 @@ class QuestionAnswerSheetMapping extends Model implements AuditableContract
     public function examType(): BelongsTo
     {
         return $this->belongsTo(ExamType::class);
+    }
+
+    public function examSubType(): BelongsTo
+    {
+        return $this->belongsTo(ExamSubType::class)->withTrashed();
     }
 
     public function answerSheets(): HasMany

@@ -7,11 +7,15 @@ use App\Http\Requests\ExamTerm\StoreExamTermRequest;
 use App\Http\Requests\ExamTerm\UpdateExamTermRequest;
 use App\Http\Resources\ExamTermResource;
 use App\Models\ExamTerm;
+use App\Models\MainDbSyncConfig;
+use App\Services\MainDbApiService;
+use App\Services\MainDbSyncService;
 use App\Traits\ApiResponse;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 // NOTE: no permission gating yet — every authenticated user (auth:sanctum,
 // applied at the route-group level) can manage exam terms for now.
@@ -186,5 +190,34 @@ class ExamTermController extends Controller
         $examTerm->restore();
 
         return $this->success(new ExamTermResource($examTerm), 'Exam term restored successfully.');
+    }
+
+    /**
+     * POST /exam-terms/sync — see MainDbSyncService (matched by inserted_id;
+     * new → added, existing → updated/restored, gone → soft-deleted; hand-
+     * added exam terms untouched). Deleted-in-main-database terms
+     * ("delete_status": "0") are kept here, just flagged
+     * (deleted_from_main_db). Names aren't forced unique here — the main
+     * database is the source.
+     */
+    public function sync(MainDbApiService $mainDb, MainDbSyncService $syncer): JsonResponse
+    {
+        try {
+            $config = MainDbSyncConfig::forEntity('exam-terms');
+            $remote = $mainDb->fetch($config->path, $config->method, $config->queryParams());
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
+
+        $summary = $syncer->sync(ExamTerm::class, $remote, function (array $row) {
+            $name = trim((string) ($row['name'] ?? ''));
+
+            return $name === '' ? null : [
+                'name' => Str::limit($name, 255, ''),
+                'deleted_from_main_db' => MainDbSyncService::isDeletedInMainDb($row),
+            ];
+        }, 'exam-terms');
+
+        return $this->success($summary, 'Exam terms synced successfully.');
     }
 }

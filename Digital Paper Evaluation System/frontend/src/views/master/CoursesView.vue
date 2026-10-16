@@ -7,6 +7,7 @@ import { useConfirm } from '../../composables/useConfirm'
 import { useToast } from '../../composables/useToast'
 import Pagination from '../../components/common/Pagination.vue'
 import RowActionMenu from '../../components/common/RowActionMenu.vue'
+import MainDbSyncControl from '../../components/common/MainDbSyncControl.vue'
 
 const router = useRouter()
 const toast = useToast()
@@ -137,7 +138,7 @@ onMounted(async () => {
   </div>
   <div v-else>
     <!-- Breadcrumb + page action -->
-    <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-5 flex items-center justify-between gap-3">
+    <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-2.5 flex items-center justify-between gap-3">
       <div class="flex items-center gap-3">
         <RouterLink to="/dashboard"
           class="inline-flex items-center gap-2 text-[13px] sm:text-sm text-gray-700 hover:text-brand-blue">
@@ -149,8 +150,9 @@ onMounted(async () => {
         <span class="w-px h-4 bg-gray-300 shrink-0"></span>
         <span class="text-[13px] sm:text-sm text-gray-700">Course List</span>
       </div>
-      <div v-if="authStore.can('course-add')" class="flex items-center gap-2">
-        <RouterLink  :to="{ name: 'master-courses-bulk-upload' }"
+      <div  class="flex items-center gap-2">
+        <MainDbSyncControl v-if="authStore.can('course-sync')" entity="courses" endpoint="/courses/sync" button-label="Sync Course" @synced="fetchCourses(1)" />
+        <RouterLink v-if="authStore.can('course-add')" :to="{ name: 'master-courses-bulk-upload' }"
           class="h-8 shrink-0 inline-flex items-center justify-center gap-2 rounded-xl border border-input-border bg-white text-[13px] font-semibold text-gray-700 px-4 sm:px-5 hover:border-brand-blue hover:text-brand-blue transition-colors">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -159,7 +161,7 @@ onMounted(async () => {
           </svg>
           Bulk Upload
         </RouterLink>
-        <button type="button"
+        <button v-if="authStore.can('course-add')" type="button"
           class="h-8 shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-btn-gradient text-white text-[13px] font-semibold px-4 sm:px-5 hover:opacity-90 transition-opacity"
           @click="goToCreate">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -177,27 +179,27 @@ onMounted(async () => {
          colored info bar directly above its table — search/filter live here
          on the right, same as the reference's "Available : 37" pill. -->
     <section
-      class="relative bg-subject-header rounded-t-2xl rounded-b-none px-4 sm:px-5 py-4 mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      class="relative bg-subject-header rounded-t-2xl rounded-b-none px-4 sm:px-5 py-2 mb-1.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
       <div class="flex items-center gap-3 min-w-0">
-        <span class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
-          <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <span class="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
+          <svg class="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             <polyline points="14 2 14 8 20 8" />
             <line x1="8" y1="13" x2="16" y2="13" />
             <line x1="8" y1="17" x2="16" y2="17" />
           </svg>
         </span>
-        <h2 class="text-white text-[16px] sm:text-lg font-medium truncate">All Courses</h2>
+        <h2 class="text-white text-[15px] font-medium truncate">All Courses</h2>
       </div>
       <div class="flex items-center gap-2" @click.stop>
         <span
-          class="inline-flex items-center rounded-[10px] bg-white/15 text-white text-[11px] sm:text-[12px] px-3.5 py-2 shrink-0 whitespace-nowrap">Total
+          class="inline-flex items-center rounded-[10px] bg-white/15 text-white text-[11px] sm:text-[12px] px-3 py-1.5 shrink-0 whitespace-nowrap">Total
           : {{ pagination.total }}</span>
         <input v-model="search" type="text" placeholder="Search courses…"
-          class="w-full sm:w-56 h-10 px-3.5 rounded-lg bg-white text-sm text-gray-800 outline-none border border-transparent focus:border-white/60 transition"
+          class="w-full sm:w-56 h-8 px-3.5 rounded-lg bg-white text-sm text-gray-800 outline-none border border-transparent focus:border-white/60 transition"
           @keyup.enter="runSearch" />
         <button type="button"
-          class="h-10 w-10 shrink-0 rounded-lg bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors"
+          class="h-8 w-8 shrink-0 rounded-lg bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors"
           aria-label="Search" @click="runSearch">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="7" />
@@ -206,7 +208,7 @@ onMounted(async () => {
         </button>
         <div class="relative">
           <button type="button"
-            class="h-10 shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[13px] font-medium px-3.5 transition-colors"
+            class="h-8 shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[13px] font-medium px-3.5 transition-colors"
             :aria-expanded="showFilter" @click="toggleFilter">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
@@ -251,33 +253,40 @@ onMounted(async () => {
           <thead>
             <tr class="bg-subject-header text-white text-[12px] font-medium">
               <th class="px-4 py-1.5 font-medium rounded-tl-2xl w-px whitespace-nowrap">#</th>
+              <th class="px-4 py-1.5 font-medium whitespace-nowrap">Ref Id</th>
               <th class="px-4 py-1.5 font-medium">Name</th>
               <th class="px-4 py-1.5 font-medium">Code</th>
               <th class="px-4 py-1.5 font-medium">Type</th>
+              <th class="px-4 py-1.5 font-medium whitespace-nowrap">Is Deleted From API</th>
               <th class="px-4 py-1.5 font-medium" v-if="authStore.can('course-status-change')">Status</th>
               <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap" v-if="authStore.can('course-edit') || authStore.can('course-delete')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
             <tr v-if="loading">
-              <td colspan="6" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
+              <td colspan="8" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
             </tr>
             <tr v-else-if="!courses.length">
-              <td colspan="6" class="px-4 py-8 text-center text-sm text-muted">No courses found.</td>
+              <td colspan="8" class="px-4 py-8 text-center text-sm text-muted">No courses found.</td>
             </tr>
             <tr v-for="(course, index) in courses" v-else :key="course.id"
               class="text-[12px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0">
               <td class="px-4 py-1">
                 <span
-                  class="inline-flex items-center justify-center min-w-[40px] rounded-md status-gradient-border px-2 py-0.5 text-[11px] font-medium">
+                  class="inline-flex items-center justify-center min-w-[40px] rounded-md status-gradient-border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap">
                   # {{ (pagination.current_page - 1) * pagination.per_page + index + 1 }}
                 </span>
               </td>
+              <!-- inserted_id: the college main database's own id (Sync Course) -->
+              <td class="px-4 py-1">{{ course.inserted_id ?? '—' }}</td>
               <td class="px-4 py-1 font-semibold">{{ course.name }}</td>
               <td class="px-4 py-1">{{ course.code || '—' }}</td>
               <td class="px-4 py-1">
                 <span v-if="course.type" class="inline-flex items-center rounded-md bg-soft text-brand-blue px-2 py-0.5 text-[11px] font-semibold">{{ course.type }}</span>
                 <span v-else class="text-muted" title="No type yet — edit this course to add one">—</span>
+              </td>
+              <td class="px-4 py-1">
+                <span :class="course.deleted_from_main_db ? 'text-brand font-semibold' : 'text-gray-500'">{{ course.deleted_from_main_db ? 'Yes' : 'No' }}</span>
               </td>
               <td v-if="authStore.can('course-status-change')" class="px-4 py-1" @click.stop>
                 <button type="button" role="switch" :aria-checked="course.status" :disabled="togglingId === course.id"

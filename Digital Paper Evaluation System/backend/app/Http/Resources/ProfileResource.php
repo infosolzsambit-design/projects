@@ -48,7 +48,8 @@ class ProfileResource extends JsonResource
             'esign' => $detail?->esign,
             'emp_code' => $detail?->emp_code,
             'designation' => $detail?->designation,
-            'department' => $detail?->department,
+            // Their departments' names joined (a teacher can be in several).
+            'department' => $this->relationLoaded('departments') ? $this->departmentNames() : null,
             'created_at' => $this->created_at,
         ];
     }

@@ -108,7 +108,7 @@ watch(
   </div>
   <div v-else>
     <!-- Breadcrumb + page action -->
-    <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-3.5 mb-5 flex flex-wrap items-center justify-between gap-3">
+    <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-2.5 flex flex-wrap items-center justify-between gap-3">
       <div class="flex items-center gap-3">
         <RouterLink to="/dashboard" class="inline-flex items-center gap-2 text-[13px] sm:text-sm text-gray-700 hover:text-brand-blue">
           <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5z" /></svg>
@@ -159,12 +159,12 @@ watch(
 
     <template v-if="activeCourse">
       <!-- Active course header -->
-      <section class="relative bg-subject-header rounded-t-2xl rounded-b-none px-4 sm:px-5 py-4 mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <section class="relative bg-subject-header rounded-t-2xl rounded-b-none px-4 sm:px-5 py-2 mb-1.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div class="flex items-center gap-3 min-w-0">
-          <span class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
-            <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+          <span class="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
+            <svg class="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
           </span>
-          <h2 class="text-white text-[16px] sm:text-lg font-medium truncate">{{ activeCourse.course_code }} - {{ activeCourse.course_name }}{{ typeSuffix(activeCourse.course_type) }}</h2>
+          <h2 class="text-white text-[15px] font-medium truncate">{{ activeCourse.course_code }} - {{ activeCourse.course_name }}{{ typeSuffix(activeCourse.course_type) }}</h2>
         </div>
         <div class="flex flex-wrap items-center gap-2" @click.stop>
           <span class="inline-flex items-center rounded-[10px] bg-white/15 text-white text-[11px] sm:text-[12px] px-3.5 py-2">Problem : {{ activeCourse.problem_count }}</span>
@@ -173,7 +173,7 @@ watch(
             v-model="paperSearch"
             type="text"
             placeholder="Search unique number…"
-            class="w-full sm:w-48 h-10 px-3.5 rounded-lg bg-white text-sm text-gray-800 outline-none border border-transparent focus:border-white/60 transition"
+            class="w-full sm:w-48 h-8 px-3.5 rounded-lg bg-white text-sm text-gray-800 outline-none border border-transparent focus:border-white/60 transition"
           />
         </div>
       </section>

@@ -21,7 +21,6 @@ class TeacherDetailFactory extends Factory
         return [
             'user_id' => User::factory(),
             'emp_code' => fake()->unique()->bothify('EMP-####'),
-            'department' => fake()->randomElement(['Computer Science', 'Mathematics', 'Physics', 'English']),
             'designation' => fake()->randomElement(['Assistant Professor', 'Associate Professor', 'Professor', 'Lecturer']),
         ];
     }

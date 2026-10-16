@@ -58,8 +58,8 @@ class CourseBulkUploadService
 
         if ($type === '') {
             $errors['type'] = 'Type is required.';
-        } elseif (mb_strlen($type) > 50) {
-            $errors['type'] = 'Type may not be longer than 50 characters.';
+        } elseif (mb_strlen($type) > 100) {
+            $errors['type'] = 'Type may not be longer than 100 characters.';
         }
 
         if ($code === '') {

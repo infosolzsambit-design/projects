@@ -19,9 +19,11 @@ class StudentResource extends JsonResource
         return [
             'id' => $this->id,
             'name' => $this->name,
-            'roll_no' => $this->roll_no,
-            'semester' => $this->semester,
+            'inserted_id' => $this->inserted_id,
+            'registration_no' => $this->registration_no,
+            'batch' => $this->batch,
             'program_name' => $this->program_name,
+            'deleted_from_main_db' => (bool) $this->deleted_from_main_db,
             'status' => (bool) $this->status,
             'created_by' => $this->created_by,
             'updated_by' => $this->updated_by,

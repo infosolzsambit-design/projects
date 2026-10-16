@@ -49,7 +49,7 @@ class TeacherManagementTest extends TestCase
             'password' => 'Password!23',
             'password_confirmation' => 'Password!23',
             'emp_code' => 'EMP-0001',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Assistant Professor',
         ]);
 
@@ -58,16 +58,18 @@ class TeacherManagementTest extends TestCase
             ->assertJsonPath('data.email', 'rahul.kumar@example.com')
             ->assertJsonPath('data.emp_code', 'EMP-0001')
             ->assertJsonPath('data.department', 'Computer Science')
-            ->assertJsonPath('data.department_id', $department->id)
+            ->assertJsonPath('data.department_ids', [$department->id])
             ->assertJsonPath('data.designation', 'Assistant Professor')
             ->assertJsonPath('data.is_active', true);
 
         $this->assertDatabaseHas('users', ['email' => 'rahul.kumar@example.com']);
         $this->assertDatabaseHas('teacher_details', [
             'emp_code' => 'EMP-0001',
-            'department' => 'Computer Science',
-            'department_id' => $department->id,
             'designation' => 'Assistant Professor',
+        ]);
+        $this->assertDatabaseHas('teacher_department_mappings', [
+            'user_id' => $response->json('data.id'),
+            'department_id' => $department->id,
         ]);
     }
 
@@ -83,7 +85,7 @@ class TeacherManagementTest extends TestCase
             'password' => 'Password!23',
             'password_confirmation' => 'Password!23',
             'emp_code' => 'EMP-0002',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Lecturer',
         ]);
 
@@ -106,7 +108,7 @@ class TeacherManagementTest extends TestCase
             'password' => 'Password!23',
             'password_confirmation' => 'Password!23',
             'emp_code' => 'EMP-0003',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Professor',
         ]);
 
@@ -124,7 +126,7 @@ class TeacherManagementTest extends TestCase
             'name' => 'No Emp Code',
             'email' => 'no.empcode@example.com',
             'phone_no' => '9876500024',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Lecturer',
         ]);
 
@@ -142,7 +144,7 @@ class TeacherManagementTest extends TestCase
             'email' => 'dup.empcode@example.com',
             'phone_no' => '9876500025',
             'emp_code' => 'EMP-DUPE',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Lecturer',
         ]);
 
@@ -162,14 +164,14 @@ class TeacherManagementTest extends TestCase
             'email' => 'reused.empcode@example.com',
             'phone_no' => '9876500026',
             'emp_code' => 'EMP-REUSE',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Lecturer',
         ]);
 
         $response->assertStatus(201);
     }
 
-    public function test_department_id_is_required(): void
+    public function test_department_ids_is_required(): void
     {
         $this->actingAdmin();
 
@@ -183,10 +185,10 @@ class TeacherManagementTest extends TestCase
             'designation' => 'Lecturer',
         ]);
 
-        $response->assertStatus(422)->assertJsonValidationErrors('department_id');
+        $response->assertStatus(422)->assertJsonValidationErrors('department_ids');
     }
 
-    public function test_department_id_must_reference_an_existing_non_deleted_department(): void
+    public function test_department_ids_must_reference_existing_non_deleted_departments(): void
     {
         $this->actingAdmin();
         $trashedDepartment = Department::factory()->create();
@@ -199,11 +201,11 @@ class TeacherManagementTest extends TestCase
             'password' => 'Password!23',
             'password_confirmation' => 'Password!23',
             'emp_code' => 'EMP-0005',
-            'department_id' => $trashedDepartment->id,
+            'department_ids' => [$trashedDepartment->id],
             'designation' => 'Lecturer',
         ]);
 
-        $response->assertStatus(422)->assertJsonValidationErrors('department_id');
+        $response->assertStatus(422)->assertJsonValidationErrors('department_ids.0');
     }
 
     public function test_designation_is_required(): void
@@ -218,7 +220,7 @@ class TeacherManagementTest extends TestCase
             'password' => 'Password!23',
             'password_confirmation' => 'Password!23',
             'emp_code' => 'EMP-0006',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
         ]);
 
         $response->assertStatus(422)->assertJsonValidationErrors('designation');
@@ -237,7 +239,7 @@ class TeacherManagementTest extends TestCase
             'password' => 'Password!23',
             'password_confirmation' => 'Password!23',
             'emp_code' => 'EMP-0007',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Lecturer',
         ]);
 
@@ -254,7 +256,7 @@ class TeacherManagementTest extends TestCase
             'email' => 'no.password@example.com',
             'phone_no' => '9876500020',
             'emp_code' => 'EMP-0008',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Lecturer',
         ]);
 
@@ -275,7 +277,7 @@ class TeacherManagementTest extends TestCase
             'password' => 'weak',
             'password_confirmation' => 'weak',
             'emp_code' => 'EMP-0009',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Lecturer',
         ]);
 
@@ -291,7 +293,7 @@ class TeacherManagementTest extends TestCase
             'email' => 'no.password.login@example.com',
             'phone_no' => '9876500022',
             'emp_code' => 'EMP-0010',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Lecturer',
         ]);
 
@@ -316,7 +318,7 @@ class TeacherManagementTest extends TestCase
             'password' => 'Password!23',
             'password_confirmation' => 'Password!23',
             'emp_code' => 'EMP-0011',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Lecturer',
         ]);
 
@@ -335,7 +337,7 @@ class TeacherManagementTest extends TestCase
             'password' => 'Password!23',
             'password_confirmation' => 'Password!23',
             'emp_code' => 'EMP-0012',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Lecturer',
         ]);
 
@@ -358,14 +360,14 @@ class TeacherManagementTest extends TestCase
             'password' => 'Password!23',
             'password_confirmation' => 'Password!23',
             'emp_code' => 'EMP-0013',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Lecturer',
         ]);
 
         $response->assertStatus(422)->assertJsonValidationErrors('phone_no');
     }
 
-    public function test_phone_no_must_be_unique(): void
+    public function test_phone_no_need_not_be_unique(): void
     {
         $this->actingAdmin();
         User::factory()->create(['phone_no' => '9876500009']);
@@ -378,11 +380,12 @@ class TeacherManagementTest extends TestCase
             'password' => 'Password!23',
             'password_confirmation' => 'Password!23',
             'emp_code' => 'EMP-0014',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Lecturer',
         ]);
 
-        $response->assertStatus(422)->assertJsonValidationErrors('phone_no');
+        // Login is by email only, so a shared phone number is fine.
+        $response->assertJsonMissingValidationErrors('phone_no')->assertStatus(201);
     }
 
     public function test_phone_no_matching_a_soft_deleted_users_is_allowed(): void
@@ -399,7 +402,7 @@ class TeacherManagementTest extends TestCase
             'password' => 'Password!23',
             'password_confirmation' => 'Password!23',
             'emp_code' => 'EMP-0015',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Lecturer',
         ]);
 
@@ -420,7 +423,7 @@ class TeacherManagementTest extends TestCase
             'password' => 'Password!23',
             'password_confirmation' => 'Password!23',
             'emp_code' => 'EMP-0016',
-            'department_id' => $department->id,
+            'department_ids' => [$department->id],
             'designation' => 'Lecturer',
         ]);
 
@@ -432,17 +435,21 @@ class TeacherManagementTest extends TestCase
         $this->actingAdmin();
         $physics = Department::factory()->create(['name' => 'Physics']);
         $chemistry = Department::factory()->create(['name' => 'Chemistry']);
-        $detail = TeacherDetail::factory()->create(['department' => 'Physics', 'department_id' => $physics->id]);
+        $maths = Department::factory()->create(['name' => 'Maths']);
+        $detail = TeacherDetail::factory()->create();
+        $detail->user->departments()->sync([$physics->id]);
 
+        // A teacher can be in several departments.
         $response = $this->withApiKey()->putJson("/api/v1/teachers/{$detail->user_id}", [
-            'department_id' => $chemistry->id,
+            'department_ids' => [$chemistry->id, $maths->id],
             'designation' => 'Senior Lecturer',
         ]);
 
         $response->assertOk()
-            ->assertJsonPath('data.department', 'Chemistry')
-            ->assertJsonPath('data.department_id', $chemistry->id)
+            ->assertJsonPath('data.department', 'Chemistry, Maths')
+            ->assertJsonPath('data.department_ids', [$chemistry->id, $maths->id])
             ->assertJsonPath('data.designation', 'Senior Lecturer');
+        $this->assertDatabaseMissing('teacher_department_mappings', ['user_id' => $detail->user_id, 'department_id' => $physics->id]);
     }
 
     public function test_admin_can_update_a_teachers_emp_code(): void
@@ -546,38 +553,45 @@ class TeacherManagementTest extends TestCase
         $this->actingAdmin();
         $cs = Department::factory()->create();
         $math = Department::factory()->create();
-        $csTeacher = TeacherDetail::factory()->create(['department_id' => $cs->id]);
-        TeacherDetail::factory()->create(['department_id' => $math->id]);
+        $csTeacher = TeacherDetail::factory()->create();
+        $csTeacher->user->departments()->sync([$math->id, $cs->id]); // in several — matches either
+        TeacherDetail::factory()->create()->user->departments()->sync([$math->id]);
 
         $response = $this->withApiKey()->getJson("/api/v1/teachers?department_id={$cs->id}");
 
         $response->assertOk();
         $ids = collect($response->json('data.items'))->pluck('id')->all();
         $this->assertEquals([$csTeacher->user_id], $ids);
+        $this->assertEqualsCanonicalizing([$math->id, $cs->id], $response->json('data.items.0.department_ids'));
     }
 
     /**
      * Backs AssignTeacherView.vue's teacher picker / AssignedTeachersView
-     * .vue — a non-super-admin caller only ever sees teachers in their
-     * OWN department (resolved from their own teacher_details row) when
-     * ?department_scope=self is sent, regardless of ?department_id=.
+     * .vue — a non-super-admin caller only ever sees teachers sharing one
+     * of their OWN departments when ?department_scope=self is sent,
+     * regardless of ?department_id=.
      */
     public function test_index_department_scope_self_restricts_a_non_super_admin_to_their_own_department(): void
     {
         $cs = Department::factory()->create();
         $math = Department::factory()->create();
 
-        $callerDetail = TeacherDetail::factory()->create(['department_id' => $cs->id]);
+        $physics = Department::factory()->create();
+        $callerDetail = TeacherDetail::factory()->create();
+        $callerDetail->user->departments()->sync([$cs->id, $physics->id]);
         Sanctum::actingAs($callerDetail->user);
 
-        $sameDeptTeacher = TeacherDetail::factory()->create(['department_id' => $cs->id]);
-        TeacherDetail::factory()->create(['department_id' => $math->id]); // must not appear
+        $sameDeptTeacher = TeacherDetail::factory()->create();
+        $sameDeptTeacher->user->departments()->sync([$cs->id]);
+        $otherOfMine = TeacherDetail::factory()->create();
+        $otherOfMine->user->departments()->sync([$math->id, $physics->id]); // shares Physics
+        TeacherDetail::factory()->create()->user->departments()->sync([$math->id]); // must not appear
 
         $response = $this->withApiKey()->getJson('/api/v1/teachers?department_scope=self');
 
         $response->assertOk();
         $ids = collect($response->json('data.items'))->pluck('id')->all();
-        $this->assertEqualsCanonicalizing([$callerDetail->user_id, $sameDeptTeacher->user_id], $ids);
+        $this->assertEqualsCanonicalizing([$callerDetail->user_id, $sameDeptTeacher->user_id, $otherOfMine->user_id], $ids);
     }
 
     public function test_index_department_scope_self_is_a_no_op_for_a_super_admin(): void

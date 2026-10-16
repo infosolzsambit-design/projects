@@ -32,10 +32,11 @@ function isActive(to, exact) {
 
 const masterItems = [
   { to: '/master/courses', label: 'Course', permission: 'course-list' },
-  { to: '/master/programs', label: 'Programs', permission: 'program-list' },
   { to: '/master/departments', label: 'Departments', permission: 'department-list' },
+  { to: '/master/programs', label: 'Programs', permission: 'program-list' },
   { to: '/master/exam-terms', label: 'Exam Term', permission: 'exam-term-list' },
   { to: '/master/exam-types', label: 'Exam Type', permission: 'exam-type-list' },
+  { to: '/master/exam-sub-types', label: 'Exam Sub Type' },
 ]
 const visibleMasterItems = computed(() => masterItems.filter((item) => !item.permission || authStore.can(item.permission)))
 
@@ -101,6 +102,32 @@ function updateEvaluateCourseMaxHeight() {
 
 watch([isOpen, evaluateCourseOpen], updateEvaluateCourseMaxHeight, { flush: 'post' })
 onMounted(() => nextTick(updateEvaluateCourseMaxHeight))
+
+// Same collapsible-submenu pattern as Master above, for the "Generate QR &
+// Scan" group. No permissions yet; Scan Papers has no page yet (to: null —
+// shown, but doesn't navigate).
+const qrItems = [
+  { to: '/qr/generate', label: 'Generate QR' },
+  { to: '/qr/scan-papers', label: 'Scan Papers' },
+]
+
+const qrActive = computed(() => route.path.startsWith('/qr/'))
+const qrOpen = ref(qrActive.value)
+watchEffect(() => {
+  if (qrActive.value) qrOpen.value = true
+})
+
+const qrSubmenuContent = ref(null)
+const qrMaxHeight = ref('0px')
+
+function updateQrMaxHeight() {
+  qrMaxHeight.value = !isOpen.value || !qrOpen.value
+    ? '0px'
+    : `${qrSubmenuContent.value?.scrollHeight ?? 200}px`
+}
+
+watch([isOpen, qrOpen], updateQrMaxHeight, { flush: 'post' })
+onMounted(() => nextTick(updateQrMaxHeight))
 
 // Same collapsible-submenu pattern as Master above, just for the
 // "Assign Teacher" group (the assign-and-distribute page itself, plus its
@@ -279,6 +306,42 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
         </svg>
         <span class="sidebar-label">Students</span>
       </RouterLink>
+
+      <button type="button" :aria-expanded="qrOpen" aria-controls="qr-submenu"
+        class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
+        :class="qrActive ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'"
+        @click="qrOpen = !qrOpen">
+        <svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3" />
+        </svg>
+        <span class="sidebar-label flex-1 text-left">Generate QR &amp; Scan</span>
+        <svg class="sidebar-chevron w-3.5 h-3.5 shrink-0 transition-transform duration-300 ease-in-out"
+          :class="{ 'rotate-180': qrOpen }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      <div id="qr-submenu" class="sidebar-submenu overflow-hidden transition-[max-height] duration-300 ease-in-out"
+        :style="{ maxHeight: qrMaxHeight }">
+        <div ref="qrSubmenuContent" class="mt-1 ml-4 space-y-1 pb-1">
+          <template v-for="item in qrItems" :key="item.label">
+            <RouterLink v-if="item.to" :to="item.to"
+              class="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors text-[12px] font-medium"
+              :class="route.path === item.to ? 'bg-white/15 text-white' : 'text-white/85 hover:bg-white/10'">
+              <span class="w-1.5 h-1.5 rounded-full bg-white/80 shrink-0"></span>
+              {{ item.label }}
+            </RouterLink>
+            <a v-else href="#"
+              class="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors text-[12px] font-medium text-white/85 hover:bg-white/10"
+              @click.prevent>
+              <span class="w-1.5 h-1.5 rounded-full bg-white/80 shrink-0"></span>
+              {{ item.label }}
+            </a>
+          </template>
+        </div>
+      </div>
 
       <RouterLink v-if="authStore.can('problem-list')" to="/problems"
         class="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"

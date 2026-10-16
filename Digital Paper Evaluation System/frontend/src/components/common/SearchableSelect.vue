@@ -21,6 +21,10 @@ const props = defineProps({
   // review table) — shorter toggle, smaller text, tighter list rows.
   // Default (false) is unchanged for the Teacher/Program forms.
   dense: { type: Boolean, default: false },
+  // Long option names wrap onto more lines in the list instead of being
+  // cut off with "…" — on by default everywhere; :wrap-options="false"
+  // brings back the one-line "…" list.
+  wrapOptions: { type: Boolean, default: true },
 })
 const emit = defineEmits(['update:modelValue', 'change'])
 
@@ -93,6 +97,16 @@ function select(option) {
   toggleButtonEl.value?.focus()
 }
 
+// The × next to the arrow (shown once something is picked) — back to
+// nothing selected, same as Select2's allowClear.
+const canClear = computed(() => !!selectedOption.value && !props.disabled && !props.loading)
+function clear() {
+  emit('update:modelValue', '')
+  emit('change', '')
+  close()
+  toggleButtonEl.value?.focus()
+}
+
 function onSearchKeydown(e) {
   if (e.key === 'ArrowDown') {
     e.preventDefault()
@@ -131,6 +145,9 @@ function onToggleKeydown(e) {
   if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
     e.preventDefault()
     open()
+  } else if ((e.key === 'Delete' || e.key === 'Backspace') && canClear.value) {
+    e.preventDefault()
+    clear()
   }
 }
 
@@ -150,11 +167,15 @@ defineExpose({ focus })
       type="button"
       :disabled="disabled || loading"
       class="w-full text-left outline-none border focus:ring-2 focus:ring-brand-blue/15 transition cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 relative rounded-xl bg-input-bg"
-      :class="[error ? 'border-brand' : 'border-input-border focus:border-brand-blue', dense ? 'h-8 pl-2.5 pr-7 text-[11px]' : 'h-10 pl-3 pr-9 text-[13px]']"
+      :class="[
+        error ? 'border-brand' : 'border-input-border focus:border-brand-blue',
+        dense ? 'h-8 pl-2.5 text-[11px]' : 'h-10 pl-3 text-[13px]',
+        canClear ? (dense ? 'pr-12' : 'pr-16') : (dense ? 'pr-7' : 'pr-9'),
+      ]"
       @click="isOpen ? close() : open()"
       @keydown="onToggleKeydown"
     >
-      <span class="block truncate" :class="selectedOption ? 'text-gray-800' : 'text-gray-400'">
+      <span class="block truncate" :class="selectedOption ? 'text-gray-800' : 'text-gray-400'" :title="wrapOptions && selectedOption ? selectedOption.name : undefined">
         {{ loading ? 'Loading…' : selectedOption ? selectedOption.name : placeholder }}
       </span>
       <svg
@@ -167,6 +188,19 @@ defineExpose({ focus })
       >
         <polyline points="6 9 12 15 18 9" />
       </svg>
+    </button>
+    <!-- Outside the toggle button (a button can't hold another button). -->
+    <button
+      v-if="canClear"
+      type="button"
+      class="absolute top-1/2 -translate-y-1/2 rounded-full text-gray-400 hover:text-brand hover:bg-white/80 transition-colors flex items-center justify-center"
+      :class="dense ? 'right-7 w-4 h-4' : 'right-9 w-5 h-5'"
+      aria-label="Clear selection"
+      title="Clear"
+      tabindex="-1"
+      @click.stop="clear"
+    >
+      <svg :class="dense ? 'w-3 h-3' : 'w-3.5 h-3.5'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
     </button>
 
     <div
@@ -190,9 +224,10 @@ defineExpose({ focus })
         <li
           v-for="(option, idx) in filteredOptions"
           :key="option.id"
-          class="cursor-pointer transition-colors truncate"
+          class="cursor-pointer transition-colors"
           :class="[
             dense ? 'px-2.5 py-1.5 text-[11px]' : 'px-3.5 py-2.5 text-[12px]',
+            wrapOptions ? 'whitespace-normal break-words leading-snug' : 'truncate',
             String(option.id) === String(modelValue) ? 'text-brand-blue font-semibold' : 'text-gray-700',
             idx === highlightedIndex ? 'bg-soft' : 'hover:bg-soft',
           ]"

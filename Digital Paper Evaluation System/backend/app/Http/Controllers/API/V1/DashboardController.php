@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\API\V1;
 
 use App\Http\Controllers\Controller;
+use App\Helpers\CourseLabel;
 use App\Models\AnswerSheet;
 use App\Models\Course;
 use App\Models\Department;
@@ -51,6 +52,9 @@ class DashboardController extends Controller
 
     private const COURSE_LIMIT = 5;
 
+    /** Rows shown on the teacher dashboard's two list cards before "See All". */
+    private const TEACHER_LIST_LIMIT = 5;
+
     public function adminSummary(Request $request): JsonResponse
     {
         $examYear = $this->examYearScope($request);
@@ -82,6 +86,200 @@ class DashboardController extends Controller
      * GET /dashboard/department-progress — "See All" behind Department
      * Wise Progress's own card, uncapped.
      */
+    /**
+     * GET /dashboard/teacher-summary — the logged-in teacher's own dashboard
+     * (designed_files/teacher_dashboard.png). Every figure covers only this
+     * teacher's own answer sheets (teacher_id = them; unstarted shared-pool
+     * sheets aren't theirs yet), scoped to the header's exam year / exam type
+     * the same way My Pending Course is. "Pending" is the app-wide rule —
+     * AnswerSheet::pendingSql(): not evaluated and no open problem.
+     */
+    public function teacherSummary(Request $request): JsonResponse
+    {
+        [$mine, $mineByCourse] = $this->teacherScopes($request);
+
+        $assigned = $mine()->count();
+        $evaluated = $mine()->whereNotNull('marks')->count();
+        $pending = $mine()->pendingEvaluation()->count();
+        $unsolved = $mine()->whereNull('marks')->withOpenIssue()->count();
+
+        // Time taken per evaluated sheet (consumed_time, seconds).
+        $time = $mine()->whereNotNull('marks')->where('consumed_time', '>', 0)
+            ->selectRaw('AVG(consumed_time) as avg_s, MAX(consumed_time) as max_s, MIN(consumed_time) as min_s')
+            ->first();
+        $activeDays = (int) $mine()->whereNotNull('evaluated_at')->selectRaw('COUNT(DISTINCT DATE(evaluated_at)) as d')->value('d');
+
+        // Last 7 days: completed that day, and still pending at the end of it.
+        $daily = [];
+        for ($i = 6; $i >= 0; $i--) {
+            $day = Carbon::today()->subDays($i);
+            $end = (clone $day)->endOfDay();
+            $daily[] = [
+                'label' => $day->format('M d'),
+                'completed' => $mine()->whereBetween('evaluated_at', [$day, $end])->count(),
+                'pending' => $mine()->where('assigned_at', '<=', $end)
+                    ->where(fn ($q) => $q->whereNull('evaluated_at')->orWhere('evaluated_at', '>', $end))
+                    ->count(),
+            ];
+        }
+
+        // This week, Monday to Sunday: evaluated per day.
+        $week = $this->teacherWeekData($mine, Carbon::now()->startOfWeek(Carbon::MONDAY));
+
+        // The two lists show the first few on the card, all in a "See All" modal.
+        [$coursePending, $coursePendingHasMore] = $this->limitedList($this->teacherCoursePendingQuery($mineByCourse), self::TEACHER_LIST_LIMIT);
+        [$recent, $recentHasMore] = $this->limitedList($this->teacherRecentQuery($mineByCourse), self::TEACHER_LIST_LIMIT);
+        $pendingSql = AnswerSheet::pendingSql();
+
+        return $this->success([
+            'kpis' => [
+                'assigned' => $assigned,
+                'evaluated' => $evaluated,
+                'pending' => $pending,
+                'problem' => $mine()->whereNotNull('issue_master_id')->count(),
+                'unsolved' => $unsolved,
+                'resolved' => $mine()->where('issue_status', 'resolved')->count(),
+                'pending_courses' => $mineByCourse()->whereRaw($pendingSql)->distinct()->count('c.id'),
+                'avg_consume_seconds' => $time?->avg_s !== null ? (int) round($time->avg_s) : null,
+                'max_consume_seconds' => $time?->max_s !== null ? (int) $time->max_s : null,
+                'min_consume_seconds' => $time?->min_s !== null ? (int) $time->min_s : null,
+                'avg_per_day' => $activeDays ? round($evaluated / $activeDays, 1) : 0,
+            ],
+            'daily' => $daily,
+            // Disjoint — completed + pending + problem = assigned.
+            'status' => ['completed' => $evaluated, 'pending' => $pending, 'problem' => $unsolved],
+            'course_pending' => $this->mapTeacherCourseRows($coursePending),
+            'course_pending_has_more' => $coursePendingHasMore,
+            'recent' => $this->mapTeacherRecentRows($recent),
+            'recent_has_more' => $recentHasMore,
+            'week' => $week['days'],
+            'week_start' => $week['week_start'],
+            'week_label' => $week['week_label'],
+        ], 'Teacher dashboard fetched successfully.');
+    }
+
+    /** GET /dashboard/teacher-course-pending — every course with pending sheets (teacher dashboard's "See All"). */
+    public function teacherCoursePending(Request $request): JsonResponse
+    {
+        [, $mineByCourse] = $this->teacherScopes($request);
+
+        return $this->success($this->mapTeacherCourseRows($this->teacherCoursePendingQuery($mineByCourse)->get()), 'Course wise pending evaluation fetched successfully.');
+    }
+
+    /** GET /dashboard/teacher-recent — every course with its window and pending count (teacher dashboard's "See All"). */
+    public function teacherRecent(Request $request): JsonResponse
+    {
+        [, $mineByCourse] = $this->teacherScopes($request);
+
+        return $this->success($this->mapTeacherRecentRows($this->teacherRecentQuery($mineByCourse)->get()), 'Recent evaluation activity fetched successfully.');
+    }
+
+    /**
+     * GET /dashboard/teacher-week?week_start=YYYY-MM-DD — evaluated per day for
+     * the week containing that date (Monday to Sunday), for the teacher
+     * dashboard's week picker. Defaults to the current week.
+     */
+    public function teacherWeek(Request $request): JsonResponse
+    {
+        $request->validate(['week_start' => ['nullable', 'date_format:Y-m-d']]);
+        [$mine] = $this->teacherScopes($request);
+        $date = $request->filled('week_start') ? Carbon::createFromFormat('Y-m-d', $request->string('week_start')->toString()) : Carbon::now();
+
+        return $this->success($this->teacherWeekData($mine, $date->startOfWeek(Carbon::MONDAY)->startOfDay()), 'Weekly performance fetched successfully.');
+    }
+
+    /**
+     * Evaluated count per day, Monday to Sunday, from $weekStart.
+     *
+     * @return array{week_start: string, week_label: string, is_current: bool, days: list<array{day: string, date: string, count: int}>}
+     */
+    private function teacherWeekData(Closure $mine, Carbon $weekStart): array
+    {
+        $days = [];
+        for ($i = 0; $i < 7; $i++) {
+            $day = (clone $weekStart)->addDays($i);
+            $days[] = [
+                'day' => $day->format('D'),
+                'date' => $day->format('M d'),
+                'count' => $mine()->whereBetween('evaluated_at', [$day, (clone $day)->endOfDay()])->count(),
+            ];
+        }
+        $weekEnd = (clone $weekStart)->addDays(6);
+
+        return [
+            'week_start' => $weekStart->format('Y-m-d'),
+            // "05 Oct – 11 Oct 2026" (year on both ends only across a year change).
+            'week_label' => $weekStart->format($weekStart->year === $weekEnd->year ? 'd M' : 'd M Y').' – '.$weekEnd->format('d M Y'),
+            'is_current' => $weekStart->isSameDay(Carbon::now()->startOfWeek(Carbon::MONDAY)),
+            'days' => $days,
+        ];
+    }
+
+    /**
+     * The logged-in teacher's own sheets (teacher_id = them), scoped to the
+     * header's exam year / exam type like My Pending Course — and the same
+     * joined to its packet + course for per-course figures.
+     *
+     * @return array{0: Closure(): Builder, 1: Closure(): Builder}
+     */
+    private function teacherScopes(Request $request): array
+    {
+        $teacherId = $request->user()->id;
+        $examYear = $this->examYearScope($request);
+        $examType = $this->examTypeScope($request);
+        $mine = fn () => AnswerSheet::query()
+            ->where('answer_sheets.teacher_id', $teacherId)
+            ->when($examYear !== null, fn ($q) => $q->whereHas('mapping.questionPaper', fn ($q2) => $q2->where('exam_year', $examYear)))
+            ->when($examType !== null, fn ($q) => $q->whereHas('mapping', fn ($q2) => $q2->where('exam_type_id', $examType)));
+        $mineByCourse = fn () => $mine()
+            ->join('question_answer_sheet_mappings as m', 'm.id', '=', 'answer_sheets.question_answer_sheet_mapping_id')
+            ->join('courses as c', 'c.id', '=', 'm.course_id')
+            ->whereNull('m.deleted_at');
+
+        return [$mine, $mineByCourse];
+    }
+
+    /** Courses with pending sheets, most pending first. */
+    private function teacherCoursePendingQuery(Closure $mineByCourse): Builder
+    {
+        $pendingSql = AnswerSheet::pendingSql();
+
+        return $mineByCourse()
+            ->groupBy('c.id', 'c.name', 'c.code', 'c.type')
+            ->havingRaw("SUM(CASE WHEN {$pendingSql} THEN 1 ELSE 0 END) > 0")
+            ->orderByRaw("SUM(CASE WHEN {$pendingSql} THEN 1 ELSE 0 END) DESC")
+            ->orderBy('c.name')
+            ->selectRaw("c.name as name, c.code as code, c.type as type, SUM(CASE WHEN {$pendingSql} THEN 1 ELSE 0 END) as pending");
+    }
+
+    /** Per course: evaluation window and pending count, most recently active first. */
+    private function teacherRecentQuery(Closure $mineByCourse): Builder
+    {
+        $pendingSql = AnswerSheet::pendingSql();
+
+        return $mineByCourse()
+            ->groupBy('c.id', 'c.name', 'c.code', 'c.type')
+            ->orderByRaw('MAX(COALESCE(answer_sheets.evaluated_at, answer_sheets.assigned_at)) DESC')
+            ->orderBy('c.name')
+            ->selectRaw("c.name as name, c.code as code, c.type as type, MIN(answer_sheets.evaluation_start_date) as start_date, MAX(answer_sheets.evaluation_end_date) as end_date, SUM(CASE WHEN {$pendingSql} THEN 1 ELSE 0 END) as pending");
+    }
+
+    private function mapTeacherCourseRows(iterable $rows): array
+    {
+        // Name (Code) – Type, the code left out when the course has none.
+        return collect($rows)->map(fn ($row) => ['name' => CourseLabel::full($row->name, $row->code, $row->type), 'pending' => (int) $row->pending])->values()->all();
+    }
+
+    private function mapTeacherRecentRows(iterable $rows): array
+    {
+        return collect($rows)->map(fn ($row) => [
+            'course' => CourseLabel::full($row->name, $row->code, $row->type),
+            'start' => $row->start_date ? Carbon::parse($row->start_date)->format('d M Y') : null,
+            'end' => $row->end_date ? Carbon::parse($row->end_date)->format('d M Y') : null,
+            'pending' => (int) $row->pending,
+        ])->values()->all();
+    }
+
     public function departments(Request $request): JsonResponse
     {
         $examYear = $this->examYearScope($request);

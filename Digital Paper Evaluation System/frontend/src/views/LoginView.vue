@@ -25,7 +25,7 @@ async function submit() {
   errorMessage.value = ''
   status.value = 'idle'
 
-  if (!login.value.trim()) loginError.value = 'Email or phone is required.'
+  if (!login.value.trim()) loginError.value = 'Email is required.'
   if (!password.value.trim()) passwordError.value = 'Password is required.'
   if (loginError.value || passwordError.value) return
 
@@ -75,8 +75,8 @@ async function submit() {
 
               <form class="flex flex-col gap-5 sm:gap-6" @submit.prevent="submit">
                 <div class="flex flex-col gap-2">
-                  <label for="login" class="text-[13px] text-label">Email or Phone</label>
-                  <input id="login" v-model="login" type="text" name="login" autocomplete="email" autofocus
+                  <label for="login" class="text-[13px] text-label">Email</label>
+                  <input id="login" v-model="login" type="email" name="login" autocomplete="email" autofocus
                     @input="loginError = ''"
                     class="w-full h-12 sm:h-[52px] px-4 rounded-xl bg-input-bg text-sm text-gray-800 outline-none border focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 transition"
                     :class="loginError ? 'border-brand' : 'border-input-border'" />

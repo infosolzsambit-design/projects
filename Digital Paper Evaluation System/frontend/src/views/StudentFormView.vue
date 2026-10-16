@@ -15,8 +15,8 @@ const isEdit = computed(() => !!studentId.value)
 
 const form = reactive({
   name: '',
-  roll_no: '',
-  semester: '',
+  registration_no: '',
+  batch: '',
   program_name: '',
 })
 
@@ -53,17 +53,17 @@ async function loadPrograms() {
 
 const fieldErrors = reactive({
   name: '',
-  roll_no: '',
-  semester: '',
+  registration_no: '',
+  batch: '',
   program_name: '',
 })
 // Order matters — the first of these (in this order) that has an error is
 // the one that gets focused after a failed validate()/submit.
-const FIELD_ORDER = ['name', 'roll_no', 'semester', 'program_name']
+const FIELD_ORDER = ['name', 'registration_no', 'batch', 'program_name']
 const fieldRefs = {
   name: ref(null),
-  roll_no: ref(null),
-  semester: ref(null),
+  registration_no: ref(null),
+  batch: ref(null),
   program_name: ref(null),
 }
 
@@ -89,8 +89,8 @@ async function loadStudent() {
     const res = await api.get(`/students/${studentId.value}`)
     const student = res.data.data
     form.name = student.name
-    form.roll_no = student.roll_no || ''
-    form.semester = student.semester ?? ''
+    form.registration_no = student.registration_no || ''
+    form.batch = student.batch || ''
     form.program_name = student.program_name || ''
     initialForm = { ...form }
   } catch (err) {
@@ -132,13 +132,9 @@ function applyServerErrors(err) {
 // instead of a browser validation bubble, like the rest of this app's forms.
 function validate() {
   if (!form.name.trim()) fieldErrors.name = 'Name is required.'
-  if (!form.roll_no.trim()) fieldErrors.roll_no = 'Roll number is required.'
+  if (!form.registration_no.trim()) fieldErrors.registration_no = 'Registration number is required.'
 
-  if (form.semester === '' || form.semester === null) {
-    fieldErrors.semester = 'Semester is required.'
-  } else if (!Number.isInteger(Number(form.semester)) || Number(form.semester) < 1) {
-    fieldErrors.semester = 'Enter a valid semester number.'
-  }
+  if (form.batch.trim().length > 20) fieldErrors.batch = 'Batch may not be longer than 20 characters.'
 
   return FIELD_ORDER.every((key) => !fieldErrors[key])
 }
@@ -154,7 +150,7 @@ async function submitForm() {
 
   saving.value = true
   try {
-    const payload = { ...form, semester: Number(form.semester), program_name: form.program_name || null }
+    const payload = { ...form, batch: form.batch.trim() || null, program_name: form.program_name || null }
     if (isEdit.value) {
       await api.put(`/students/${studentId.value}`, payload)
     } else {
@@ -213,7 +209,7 @@ function cancel() {
       <form v-else class="space-y-4" @submit.prevent="submitForm">
         <section class="bg-white rounded-[28px] shadow-card p-4 sm:p-5">
           <h2 class="text-[16px] sm:text-[18px] font-semibold text-gray-900 mb-1">Student Details</h2>
-          <p class="text-[13px] text-muted mb-3">Name, roll number, and semester are required. Program is optional.</p>
+          <p class="text-[13px] text-muted mb-3">Name and registration number are required. Batch and program are optional.</p>
 
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
             <div class="flex flex-col gap-1.5">
@@ -232,34 +228,34 @@ function cancel() {
               <p v-if="fieldErrors.name" class="text-[12px] text-brand">{{ fieldErrors.name }}</p>
             </div>
             <div class="flex flex-col gap-1.5">
-              <label for="roll_no" class="text-[13px] text-label">Roll No <span class="text-brand">*</span></label>
+              <label for="registration_no" class="text-[13px] text-label">Registration No <span class="text-brand">*</span></label>
               <input
-                id="roll_no"
-                :ref="(el) => (fieldRefs.roll_no.value = el)"
-                v-model="form.roll_no"
+                id="registration_no"
+                :ref="(el) => (fieldRefs.registration_no.value = el)"
+                v-model="form.registration_no"
                 type="text"
-                placeholder="e.g. 2024CS101"
-                @input="clearFieldError('roll_no')"
+                maxlength="50"
+                placeholder="e.g. 241005007087"
+                @input="clearFieldError('registration_no')"
                 class="w-full h-10 px-3 rounded-xl bg-input-bg text-sm text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition"
-                :class="fieldErrors.roll_no ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
+                :class="fieldErrors.registration_no ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
               />
-              <p v-if="fieldErrors.roll_no" class="text-[12px] text-brand">{{ fieldErrors.roll_no }}</p>
+              <p v-if="fieldErrors.registration_no" class="text-[12px] text-brand">{{ fieldErrors.registration_no }}</p>
             </div>
             <div class="flex flex-col gap-1.5">
-              <label for="semester" class="text-[13px] text-label">Semester <span class="text-brand">*</span></label>
+              <label for="batch" class="text-[13px] text-label">Batch</label>
               <input
-                id="semester"
-                :ref="(el) => (fieldRefs.semester.value = el)"
-                v-model="form.semester"
-                type="number"
-                min="1"
-                step="1"
-                placeholder="e.g. 3"
-                @input="clearFieldError('semester')"
+                id="batch"
+                :ref="(el) => (fieldRefs.batch.value = el)"
+                v-model="form.batch"
+                type="text"
+                maxlength="20"
+                placeholder="e.g. 2024"
+                @input="clearFieldError('batch')"
                 class="w-full h-10 px-3 rounded-xl bg-input-bg text-sm text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition"
-                :class="fieldErrors.semester ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
+                :class="fieldErrors.batch ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
               />
-              <p v-if="fieldErrors.semester" class="text-[12px] text-brand">{{ fieldErrors.semester }}</p>
+              <p v-if="fieldErrors.batch" class="text-[12px] text-brand">{{ fieldErrors.batch }}</p>
             </div>
             <div class="flex flex-col gap-1.5">
               <label for="program" class="text-[13px] text-label">Program</label>

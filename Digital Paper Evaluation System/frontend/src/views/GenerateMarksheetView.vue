@@ -393,7 +393,7 @@ function statusLabel(status) {
   </div>
   <div v-else>
     <!-- Breadcrumb -->
-    <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-5 flex items-center gap-3">
+    <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-2.5 flex items-center gap-3">
       <RouterLink to="/dashboard" class="inline-flex items-center gap-2 text-[13px] sm:text-sm text-gray-700 hover:text-brand-blue">
         <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5z" /></svg>
         Home
@@ -403,28 +403,29 @@ function statusLabel(status) {
     </div>
 
     <!-- Section title bar -->
-    <section class="bg-subject-header rounded-t-2xl rounded-b-none px-4 sm:px-5 py-4 mb-4 flex items-center gap-3">
-      <span class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
-        <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <section class="bg-subject-header rounded-t-2xl rounded-b-none px-4 sm:px-5 py-2 mb-1.5 flex items-center gap-3">
+      <span class="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
+        <svg class="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
           <polyline points="14 2 14 8 20 8" />
           <line x1="8" y1="13" x2="16" y2="13" />
           <line x1="8" y1="17" x2="13" y2="17" />
         </svg>
       </span>
-      <h2 class="text-white text-[16px] sm:text-lg font-medium truncate">Generate Marksheet</h2>
+      <h2 class="text-white text-[15px] font-medium truncate">Generate Marksheet</h2>
     </section>
 
     <!-- Search -->
-    <section class="bg-white rounded-[20px] shadow-card p-3 sm:p-4 mb-4">
-      <h3 class="text-[14px] sm:text-[15px] font-semibold text-gray-900 mb-2.5">Select Exam Details</h3>
+    <section class="bg-white rounded-[20px] shadow-card px-3 sm:px-4 py-2.5 sm:py-3 mb-4">
+      <h3 class="text-[14px] sm:text-[15px] font-semibold text-gray-900 mb-1.5">Select Exam Details</h3>
 
       <!-- Row 1: Program · Course · Exam Type · Exam Term (same layout as
            Assign Teacher — Program and Course wider). -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_1fr_1fr] gap-2.5">
-        <div class="flex flex-col gap-1">
-          <label for="gm_program" class="text-[12px] text-label">Program <span class="text-brand">*</span></label>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_1fr_1fr] gap-x-2.5 gap-y-1.5">
+        <div class="flex flex-col gap-0.5 min-w-0">
+          <label for="gm_program" class="text-[11px] text-label">Program <span class="text-brand">*</span></label>
           <SearchableSelect
+            dense
             id="gm_program"
             :ref="(el) => (fieldRefs.program_name.value = el)"
             v-model="filters.program_name"
@@ -435,12 +436,13 @@ function statusLabel(status) {
             search-placeholder="Search programs…"
             @change="clearFieldError('program_name')"
           />
-          <p v-if="fieldErrors.program_name" class="text-[11px] text-brand">{{ fieldErrors.program_name }}</p>
+          <p v-if="fieldErrors.program_name" class="text-[10.5px] text-brand leading-tight">{{ fieldErrors.program_name }}</p>
         </div>
 
-        <div class="flex flex-col gap-1">
-          <label for="gm_course" class="text-[12px] text-label">Course <span class="text-muted">(optional)</span></label>
+        <div class="flex flex-col gap-0.5 min-w-0">
+          <label for="gm_course" class="text-[11px] text-label">Course <span class="text-muted">(optional)</span></label>
           <SearchableSelect
+            dense
             id="gm_course"
             v-model="filters.course_id"
             :options="availableCourses"
@@ -450,9 +452,10 @@ function statusLabel(status) {
           />
         </div>
 
-        <div class="flex flex-col gap-1">
-          <label for="gm_exam_type" class="text-[12px] text-label">Exam Type <span class="text-brand">*</span></label>
+        <div class="flex flex-col gap-0.5 min-w-0">
+          <label for="gm_exam_type" class="text-[11px] text-label">Exam Type <span class="text-brand">*</span></label>
           <SearchableSelect
+            dense
             id="gm_exam_type"
             :ref="(el) => (fieldRefs.exam_type_id.value = el)"
             v-model="filters.exam_type_id"
@@ -463,12 +466,13 @@ function statusLabel(status) {
             search-placeholder="Search exam types…"
             @change="clearFieldError('exam_type_id')"
           />
-          <p v-if="fieldErrors.exam_type_id" class="text-[11px] text-brand">{{ fieldErrors.exam_type_id }}</p>
+          <p v-if="fieldErrors.exam_type_id" class="text-[10.5px] text-brand leading-tight">{{ fieldErrors.exam_type_id }}</p>
         </div>
 
-        <div class="flex flex-col gap-1">
-          <label for="gm_exam_term" class="text-[12px] text-label">Exam Term <span class="text-brand">*</span></label>
+        <div class="flex flex-col gap-0.5 min-w-0">
+          <label for="gm_exam_term" class="text-[11px] text-label">Exam Term <span class="text-brand">*</span></label>
           <SearchableSelect
+            dense
             id="gm_exam_term"
             :ref="(el) => (fieldRefs.exam_term_id.value = el)"
             v-model="filters.exam_term_id"
@@ -479,15 +483,16 @@ function statusLabel(status) {
             search-placeholder="Search exam terms…"
             @change="clearFieldError('exam_term_id')"
           />
-          <p v-if="fieldErrors.exam_term_id" class="text-[11px] text-brand">{{ fieldErrors.exam_term_id }}</p>
+          <p v-if="fieldErrors.exam_term_id" class="text-[10.5px] text-brand leading-tight">{{ fieldErrors.exam_term_id }}</p>
         </div>
       </div>
 
       <!-- Row 2: Department · Semester · Exam Year · Search -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_1fr_1fr] gap-2.5 mt-2.5">
-        <div class="flex flex-col gap-1">
-          <label for="gm_department" class="text-[12px] text-label">Department <span class="text-muted">(optional)</span></label>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_1fr_1fr] gap-x-2.5 gap-y-1.5 mt-1.5">
+        <div class="flex flex-col gap-0.5 min-w-0">
+          <label for="gm_department" class="text-[11px] text-label">Department <span class="text-muted">(optional)</span></label>
           <SearchableSelect
+            dense
             id="gm_department"
             v-model="filters.department_id"
             :options="availableDepartments"
@@ -497,9 +502,10 @@ function statusLabel(status) {
           />
         </div>
 
-        <div class="flex flex-col gap-1">
-          <label for="gm_semester" class="text-[12px] text-label">Semester <span class="text-brand">*</span></label>
+        <div class="flex flex-col gap-0.5 min-w-0">
+          <label for="gm_semester" class="text-[11px] text-label">Semester <span class="text-brand">*</span></label>
           <SearchableSelect
+            dense
             id="gm_semester"
             :ref="(el) => (fieldRefs.semester.value = el)"
             v-model="filters.semester"
@@ -509,28 +515,28 @@ function statusLabel(status) {
             search-placeholder="Search semesters…"
             @change="clearFieldError('semester')"
           />
-          <p v-if="fieldErrors.semester" class="text-[11px] text-brand">{{ fieldErrors.semester }}</p>
+          <p v-if="fieldErrors.semester" class="text-[10.5px] text-brand leading-tight">{{ fieldErrors.semester }}</p>
         </div>
 
-        <div class="flex flex-col gap-1">
-          <label for="gm_exam_year" class="text-[12px] text-label">Exam Year <span class="text-brand">*</span></label>
+        <div class="flex flex-col gap-0.5 min-w-0">
+          <label for="gm_exam_year" class="text-[11px] text-label">Exam Year <span class="text-brand">*</span></label>
           <input
             id="gm_exam_year"
             :ref="(el) => (fieldRefs.exam_year.value = el)"
             v-model="filters.exam_year"
             type="number"
-            class="w-full h-10 px-3 rounded-xl bg-input-bg text-sm text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition"
+            class="w-full h-8 px-2.5 rounded-xl bg-input-bg text-[11px] text-gray-800 outline-none border focus:ring-2 focus:ring-brand-blue/15 transition"
             :class="fieldErrors.exam_year ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
             @input="clearFieldError('exam_year')"
           />
-          <p v-if="fieldErrors.exam_year" class="text-[11px] text-brand">{{ fieldErrors.exam_year }}</p>
+          <p v-if="fieldErrors.exam_year" class="text-[10.5px] text-brand leading-tight">{{ fieldErrors.exam_year }}</p>
         </div>
 
-        <div class="flex flex-col gap-1">
-          <label class="text-[12px] text-label invisible" aria-hidden="true">Search</label>
+        <div class="flex flex-col gap-0.5 min-w-0">
+          <label class="text-[11px] text-label invisible" aria-hidden="true">Search</label>
           <button
             type="button"
-            class="h-10 inline-flex items-center justify-center gap-2 rounded-xl bg-btn-gradient text-white text-[13px] font-semibold px-6 hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed self-start"
+            class="h-8 inline-flex items-center justify-center gap-2 rounded-xl bg-btn-gradient text-white text-[12px] font-semibold px-4 hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed self-start"
             :disabled="searching"
             @click="runSearch"
           >

@@ -6,10 +6,12 @@ import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../../utils/api'
 import { useAuthStore } from '../../stores/auth'
+import { useExamTypeStore } from '../../stores/examType'
 import { useConfirm } from '../../composables/useConfirm'
 import { useToast } from '../../composables/useToast'
 import Pagination from '../../components/common/Pagination.vue'
 import RowActionMenu from '../../components/common/RowActionMenu.vue'
+import MainDbSyncControl from '../../components/common/MainDbSyncControl.vue'
 
 const router = useRouter()
 const { confirmDialog } = useConfirm()
@@ -120,6 +122,15 @@ async function removeExamType(examType) {
   }
 }
 
+// After "Sync Exam Type" (MainDbSyncControl): reload the list, and the
+// header's Examination picker (stores/examType.js loads its list once).
+function onExamTypesSynced() {
+  fetchExamTypes(1)
+  const examTypeStore = useExamTypeStore()
+  examTypeStore.loaded = false
+  examTypeStore.load()
+}
+
 // Guards against a false "no permission" flash on a hard refresh — see
 // master/CoursesView.vue for why.
 const permissionChecked = ref(false)
@@ -138,7 +149,7 @@ onMounted(async () => {
   </div>
   <div v-else>
     <!-- Breadcrumb + page action -->
-    <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-5 flex items-center justify-between gap-3">
+    <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-2.5 flex items-center justify-between gap-3">
       <div class="flex items-center gap-3">
         <RouterLink to="/dashboard" class="inline-flex items-center gap-2 text-[13px] sm:text-sm text-gray-700 hover:text-brand-blue">
           <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5z" /></svg>
@@ -147,8 +158,9 @@ onMounted(async () => {
         <span class="w-px h-4 bg-gray-300 shrink-0"></span>
         <span class="text-[13px] sm:text-sm text-gray-700">Exam Type List</span>
       </div>
-      <div v-if="authStore.can('exam-type-add')" class="flex items-center gap-2">
-        <button
+      <div class="flex items-center gap-2">
+        <MainDbSyncControl v-if="authStore.can('exam-type-sync')" entity="exam-types" label="exam types" endpoint="/exam-types/sync" button-label="Sync Exam Type" @synced="onExamTypesSynced" />
+        <button v-if="authStore.can('exam-type-add')"
           type="button"
           class="h-8 shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-btn-gradient text-white text-[13px] font-semibold px-4 sm:px-5 hover:opacity-90 transition-opacity"
           @click="goToCreate"
@@ -162,30 +174,30 @@ onMounted(async () => {
     <p v-if="loadError" class="text-[13px] text-brand mb-4">{{ loadError }}</p>
 
     <!-- Section title bar -->
-    <section class="relative bg-subject-header rounded-t-2xl rounded-b-none px-4 sm:px-5 py-4 mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <section class="relative bg-subject-header rounded-t-2xl rounded-b-none px-4 sm:px-5 py-2 mb-1.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
       <div class="flex items-center gap-3 min-w-0">
-        <span class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
-          <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <span class="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
+          <svg class="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="4" width="18" height="18" rx="2" />
             <line x1="16" y1="2" x2="16" y2="6" />
             <line x1="8" y1="2" x2="8" y2="6" />
             <line x1="3" y1="10" x2="21" y2="10" />
           </svg>
         </span>
-        <h2 class="text-white text-[16px] sm:text-lg font-medium truncate">All Exam Types</h2>
+        <h2 class="text-white text-[15px] font-medium truncate">All Exam Types</h2>
       </div>
       <div class="flex items-center gap-2" @click.stop>
-        <span class="inline-flex items-center rounded-[10px] bg-white/15 text-white text-[11px] sm:text-[12px] px-3.5 py-2 shrink-0 whitespace-nowrap">Total : {{ pagination.total }}</span>
+        <span class="inline-flex items-center rounded-[10px] bg-white/15 text-white text-[11px] sm:text-[12px] px-3 py-1.5 shrink-0 whitespace-nowrap">Total : {{ pagination.total }}</span>
         <input
           v-model="search"
           type="text"
           placeholder="Search exam types…"
-          class="w-full sm:w-56 h-10 px-3.5 rounded-lg bg-white text-sm text-gray-800 outline-none border border-transparent focus:border-white/60 transition"
+          class="w-full sm:w-56 h-8 px-3.5 rounded-lg bg-white text-sm text-gray-800 outline-none border border-transparent focus:border-white/60 transition"
           @keyup.enter="runSearch"
         />
         <button
           type="button"
-          class="h-10 w-10 shrink-0 rounded-lg bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors"
+          class="h-8 w-8 shrink-0 rounded-lg bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors"
           aria-label="Search"
           @click="runSearch"
         >
@@ -194,7 +206,7 @@ onMounted(async () => {
         <div class="relative">
           <button
             type="button"
-            class="h-10 shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[13px] font-medium px-3.5 transition-colors"
+            class="h-8 shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[13px] font-medium px-3.5 transition-colors"
             :aria-expanded="showFilter"
             @click="toggleFilter"
           >
@@ -239,17 +251,19 @@ onMounted(async () => {
           <thead>
             <tr class="bg-subject-header text-white text-[12px] font-medium">
               <th class="px-4 py-1.5 font-medium rounded-tl-2xl w-px whitespace-nowrap">#</th>
+              <th class="px-4 py-1.5 font-medium whitespace-nowrap">Ref Id</th>
               <th class="px-4 py-1.5 font-medium">Name</th>
+              <th class="px-4 py-1.5 font-medium whitespace-nowrap">Is Deleted From API</th>
               <th class="px-4 py-1.5 font-medium" v-if="authStore.can('exam-type-status-change')">Status</th>
               <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap" v-if="authStore.can('exam-type-edit') || authStore.can('exam-type-delete')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
             <tr v-if="loading">
-              <td colspan="4" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
+              <td colspan="6" class="px-4 py-8 text-center text-sm text-muted">Loading&hellip;</td>
             </tr>
             <tr v-else-if="!examTypes.length">
-              <td colspan="4" class="px-4 py-8 text-center text-sm text-muted">No exam types found.</td>
+              <td colspan="6" class="px-4 py-8 text-center text-sm text-muted">No exam types found.</td>
             </tr>
             <tr
               v-for="(examType, index) in examTypes"
@@ -258,11 +272,16 @@ onMounted(async () => {
               class="text-[12px] text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0"
             >
               <td class="px-4 py-1">
-                <span class="inline-flex items-center justify-center min-w-[40px] rounded-md status-gradient-border px-2 py-0.5 text-[11px] font-medium">
+                <span class="inline-flex items-center justify-center min-w-[40px] rounded-md status-gradient-border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap">
                   # {{ (pagination.current_page - 1) * pagination.per_page + index + 1 }}
                 </span>
               </td>
+              <!-- inserted_id: the college main database's own id (Sync Exam Type) -->
+              <td class="px-4 py-1">{{ examType.inserted_id ?? '—' }}</td>
               <td class="px-4 py-1 font-semibold">{{ examType.name }}</td>
+              <td class="px-4 py-1">
+                <span :class="examType.deleted_from_main_db ? 'text-brand font-semibold' : 'text-gray-500'">{{ examType.deleted_from_main_db ? 'Yes' : 'No' }}</span>
+              </td>
               <td v-if="authStore.can('exam-type-status-change')" class="px-4 py-1" @click.stop>
                 <button
                   type="button"

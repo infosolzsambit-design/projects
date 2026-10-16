@@ -1,38 +1,15 @@
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import * as XLSX from 'xlsx'
 import api from '../utils/api'
-import SearchableSelect from '../components/common/SearchableSelect.vue'
 import { useToast } from '../composables/useToast'
 
 const router = useRouter()
 const toast = useToast()
 
-// --- Departments, needed both to auto-match the CSV's plain-text
-// Department column and to power each row's dropdown in the review modal
-// (see SearchableSelect.vue — same jQuery-free Select2 equivalent used on
-// the single Add/Edit Teacher form).
-const availableDepartments = ref([])
-const departmentsLoading = ref(true)
-const departmentsError = ref('')
-
-async function loadDepartments() {
-  departmentsLoading.value = true
-  departmentsError.value = ''
-  try {
-    const res = await api.get('/departments', {
-      params: { status: 'all', is_active: 'yes', table_fields: ['name'] },
-    })
-    availableDepartments.value = res.data.data
-  } catch (err) {
-    departmentsError.value = err.response?.data?.message || 'Could not load departments.'
-  } finally {
-    departmentsLoading.value = false
-  }
-}
-
-onMounted(loadDepartments)
+// No Department column — a teacher can be in several departments, so
+// they're set afterwards on the Teacher form (or by "Sync Teacher").
 
 // --- CSV template download.
 function downloadTemplate() {
@@ -42,7 +19,6 @@ function downloadTemplate() {
       Email: 'demo@example.com',
       Phone: '9876543210',
       'Emp Code': 'EMP-0001',
-      Department: availableDepartments.value[0]?.name || 'Computer Science Engineering',
       Designation: 'Demo Designation',
     },
   ]
@@ -66,21 +42,13 @@ function makeRow(raw) {
   const emailKey = findColumn(keys, 'email')
   const phoneKey = findColumn(keys, 'phone')
   const empCodeKey = findColumn(keys, 'empcode') || findColumn(keys, 'employeecode') || findColumn(keys, 'code')
-  const departmentKey = findColumn(keys, 'department')
   const designationKey = findColumn(keys, 'designation')
-
-  const departmentText = departmentKey ? String(raw[departmentKey] ?? '').trim() : ''
-  // Best-effort auto-select — an exact (case-insensitive) name match gets
-  // pre-picked in the dropdown; anything else is left blank for the user
-  // to pick themselves in the review modal.
-  const matched = availableDepartments.value.find((d) => d.name.toLowerCase() === departmentText.toLowerCase())
 
   return reactive({
     name: nameKey ? String(raw[nameKey] ?? '').trim() : '',
     email: emailKey ? String(raw[emailKey] ?? '').trim() : '',
     phone_no: phoneKey ? String(raw[phoneKey] ?? '').replace(/\D/g, '').slice(0, 10) : '',
     emp_code: empCodeKey ? String(raw[empCodeKey] ?? '').trim() : '',
-    department_id: matched ? matched.id : '',
     designation: designationKey ? String(raw[designationKey] ?? '').trim() : '',
     errors: {},
     valid: null,
@@ -136,7 +104,7 @@ function setFieldRef(index, field, el) {
   if (!fieldRefs[index]) fieldRefs[index] = {}
   fieldRefs[index][field] = el
 }
-const ROW_FIELD_ORDER = ['name', 'email', 'phone_no', 'emp_code', 'department_id', 'designation']
+const ROW_FIELD_ORDER = ['name', 'email', 'phone_no', 'emp_code', 'designation']
 
 function focusFirstError() {
   const rowIndex = rows.value.findIndex((r) => r.valid === false)
@@ -170,7 +138,6 @@ function toPayload() {
     email: r.email,
     phone_no: r.phone_no,
     emp_code: r.emp_code,
-    department_id: r.department_id || null,
     designation: r.designation,
   }))
 }
@@ -267,8 +234,8 @@ function cancel() {
         <section class="bg-white rounded-[28px] shadow-card p-4 sm:p-5">
           <h2 class="text-[16px] sm:text-[18px] font-semibold text-gray-900 mb-1">1. Download the CSV template</h2>
           <p class="text-[13px] text-muted mb-3">
-            Columns: <span class="font-medium text-gray-700">Name, Email, Phone, Emp Code, Department, Designation</span>.
-            Department must match an existing department's name — it will be auto-selected in the review step if it does.
+            Columns: <span class="font-medium text-gray-700">Name, Email, Phone, Emp Code, Designation</span>.
+            Departments are added afterwards on each teacher's Edit page.
           </p>
           <button
             type="button"
@@ -286,17 +253,16 @@ function cancel() {
 
           <label
             class="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-input-border bg-page-bg/60 px-4 py-8 text-center cursor-pointer hover:border-brand-blue transition-colors"
-            :class="{ 'opacity-60 pointer-events-none': parsing || departmentsLoading }"
+            :class="{ 'opacity-60 pointer-events-none': parsing }"
           >
             <svg class="w-8 h-8 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
             <span class="text-sm font-medium text-gray-700">
-              {{ parsing ? 'Reading file…' : departmentsLoading ? 'Loading departments…' : 'Click to choose a .csv file' }}
+              {{ parsing ? 'Reading file…' : 'Click to choose a .csv file' }}
             </span>
             <span class="text-[12px] text-muted">Up to 500 rows per upload.</span>
-            <input type="file" accept=".csv" class="hidden" :disabled="parsing || departmentsLoading" @change="onFileChange" />
+            <input type="file" accept=".csv" class="hidden" :disabled="parsing" @change="onFileChange" />
           </label>
           <p v-if="fileError" class="text-[12px] text-brand mt-2">{{ fileError }}</p>
-          <p v-if="departmentsError" class="text-[12px] text-brand mt-2">{{ departmentsError }}</p>
         </section>
       </div>
     </div>
@@ -320,7 +286,7 @@ function cancel() {
 
         <div class="flex-1 overflow-y-auto overflow-x-hidden px-5 py-3">
           <div class="overflow-x-auto">
-            <table class="w-full min-w-[980px] text-left border-separate border-spacing-0">
+            <table class="w-full min-w-[790px] text-left border-separate border-spacing-0">
               <thead>
                 <tr class="bg-subject-header text-white text-[11px] font-medium">
                   <th class="px-2 py-1.5 rounded-tl-xl w-px whitespace-nowrap">#</th>
@@ -328,7 +294,6 @@ function cancel() {
                   <th class="px-2 py-1.5 min-w-[180px]">Email</th>
                   <th class="px-2 py-1.5 min-w-[110px]">Phone</th>
                   <th class="px-2 py-1.5 min-w-[110px]">Emp Code</th>
-                  <th class="px-2 py-1.5 min-w-[190px]">Department</th>
                   <th class="px-2 py-1.5 min-w-[140px]">Designation</th>
                   <th class="px-2 py-1.5 text-center min-w-[80px]">Status</th>
                   <th class="px-2 py-1.5 rounded-tr-xl w-8"></th>
@@ -385,20 +350,6 @@ function cancel() {
                       @input="markEdited(row, 'emp_code')"
                     />
                     <p v-if="row.errors.emp_code" class="text-[10px] text-brand mt-0.5">{{ row.errors.emp_code }}</p>
-                  </td>
-                  <td class="px-2 py-1.5">
-                    <SearchableSelect
-                      :ref="(el) => setFieldRef(index, 'department_id', el)"
-                      v-model="row.department_id"
-                      dense
-                      :options="availableDepartments"
-                      :loading="departmentsLoading"
-                      :error="!!row.errors.department_id"
-                      placeholder="Select department"
-                      search-placeholder="Search…"
-                      @change="markEdited(row, 'department_id')"
-                    />
-                    <p v-if="row.errors.department_id" class="text-[10px] text-brand mt-0.5">{{ row.errors.department_id }}</p>
                   </td>
                   <td class="px-2 py-1.5">
                     <input

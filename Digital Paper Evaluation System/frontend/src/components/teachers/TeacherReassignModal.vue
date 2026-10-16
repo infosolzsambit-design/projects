@@ -79,6 +79,8 @@ async function loadTeachers() {
         name: t.name,
         emp_code: t.emp_code || '',
         department: t.department || '—',
+        // A teacher can be in several departments — the filter matches any.
+        departmentNames: (t.departments || []).map((d) => d.name),
         allocated_answer_sheet_count: t.allocated_answer_sheet_count ?? 0,
         completed_answer_sheet_count: t.completed_answer_sheet_count ?? 0,
       }))
@@ -110,13 +112,12 @@ function selectCourse(row) {
   selectedRow.value = row
   reassignSearch.value = ''
   reassignRows.value = allOtherTeachers.value.map((t) => ({ ...t, selected: false, quantity: 0 }))
-  // Default the department filter to the teacher being reassigned *from*
-  // — most reassignments look for someone in the same department first —
-  // but only when someone in that department is actually available here;
-  // otherwise this would just silently show "No teachers found".
-  reassignDepartment.value = reassignRows.value.some((t) => t.department === props.teacher.department)
-    ? props.teacher.department
-    : ''
+  // Default the department filter to (the first of) the teacher being
+  // reassigned *from*'s departments — most reassignments look for someone
+  // in the same department first — but only one someone here is actually
+  // in; otherwise this would just silently show "No teachers found".
+  const ownDepartments = (props.teacher.departments || []).map((d) => d.name)
+  reassignDepartment.value = ownDepartments.find((name) => reassignRows.value.some((t) => t.departmentNames.includes(name))) || ''
   step.value = 'reassign'
 }
 
@@ -125,12 +126,12 @@ function backToCourses() {
   selectedRow.value = null
 }
 
-const reassignDepartments = computed(() => [...new Set(reassignRows.value.map((r) => r.department))].sort())
+const reassignDepartments = computed(() => [...new Set(reassignRows.value.flatMap((r) => r.departmentNames))].sort())
 const filteredReassignRows = computed(() => {
   const q = reassignSearch.value.trim().toLowerCase()
   const dept = reassignDepartment.value
   return reassignRows.value.filter((r) => {
-    if (dept && r.department !== dept) return false
+    if (dept && !r.departmentNames.includes(dept)) return false
     if (!q) return true
     return r.name.toLowerCase().includes(q) || r.department.toLowerCase().includes(q)
   })

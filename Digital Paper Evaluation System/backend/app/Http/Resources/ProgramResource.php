@@ -18,11 +18,13 @@ class ProgramResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'inserted_id' => $this->inserted_id,
             'name' => $this->name,
             'label' => $this->label,
             'department' => $this->department,
             'department_id' => $this->department_id,
             'code' => $this->code,
+            'deleted_from_main_db' => (bool) $this->deleted_from_main_db,
             'status' => (bool) $this->status,
             // Always eager-loaded as courses:id,name,code,type (see
             // ProgramController) — kept to just those fields here too, so

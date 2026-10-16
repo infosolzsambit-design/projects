@@ -6,15 +6,20 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Program\StoreProgramRequest;
 use App\Http\Requests\Program\UpdateProgramRequest;
 use App\Http\Resources\ProgramResource;
+use App\Models\Course;
 use App\Models\Department;
+use App\Models\MainDbSyncConfig;
 use App\Models\Program;
 use App\Services\AuditLogService;
+use App\Services\MainDbApiService;
+use App\Services\MainDbSyncService;
 use App\Traits\ApiResponse;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 // NOTE: no permission gating yet — every authenticated user (auth:sanctum,
 // applied at the route-group level) can manage programs for now. Per-action
@@ -280,5 +285,71 @@ class ProgramController extends Controller
         $program->restore();
 
         return $this->success(new ProgramResource($program), 'Program restored successfully.');
+    }
+
+    /**
+     * POST /programs/sync — see MainDbSyncService (matched by inserted_id;
+     * new → added, existing → updated/restored, gone → soft-deleted; hand-
+     * added programs untouched). The API's department_id and course_ids are
+     * the main database's own ids, so they're matched to our departments /
+     * courses by their inserted_id — sync Departments and Courses first.
+     *  - department: an unknown (or empty) department_id leaves it blank;
+     *  - courses: a non-empty course_ids sets the program's course mapping
+     *    to exactly those (ids we don't have are ignored); an empty one
+     *    leaves the mapping as it is here.
+     * The API sends no code: new programs start with an empty one, and a
+     * code entered here is never overwritten. Deleted-in-main-database
+     * programs ("delete_status": "0") are kept, just flagged
+     * (deleted_from_main_db). The Name + Code + Label duplicate check isn't
+     * applied — the main database is the source.
+     */
+    public function sync(MainDbApiService $mainDb, MainDbSyncService $syncer): JsonResponse
+    {
+        try {
+            $config = MainDbSyncConfig::forEntity('programs');
+            $remote = $mainDb->fetch($config->path, $config->method, $config->queryParams());
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), 422);
+        }
+
+        // main database id → our department / course
+        $departments = Department::withTrashed()->whereNotNull('inserted_id')->get(['id', 'inserted_id', 'name'])->keyBy('inserted_id');
+        $courseIds = Course::withTrashed()->whereNotNull('inserted_id')->pluck('id', 'inserted_id');
+
+        $summary = $syncer->sync(
+            Program::class,
+            $remote,
+            function (array $row) use ($departments) {
+                $name = trim((string) ($row['name'] ?? ''));
+                if ($name === '') {
+                    return null;
+                }
+                $label = trim((string) ($row['label'] ?? ''));
+                $remoteDepartment = trim((string) ($row['department_id'] ?? ''));
+                $department = is_numeric($remoteDepartment) ? $departments->get((int) $remoteDepartment) : null;
+
+                return [
+                    'name' => Str::limit($name, 255, ''),
+                    'label' => $label === '' ? null : Str::limit($label, 20, ''),
+                    'department_id' => $department?->id,
+                    'department' => $department?->name ?? '',
+                    'deleted_from_main_db' => MainDbSyncService::isDeletedInMainDb($row),
+                ];
+            },
+            'programs',
+            ['code' => ''],
+            function (Program $program, array $row) use ($courseIds) {
+                $remote = array_filter(array_map('trim', explode(',', (string) ($row['course_ids'] ?? ''))), 'is_numeric');
+                if ($remote === []) {
+                    return false;
+                }
+                $ids = collect($remote)->map(fn ($id) => $courseIds->get((int) $id))->filter()->unique()->values()->all();
+                $changes = $program->courses()->sync($ids);
+
+                return $changes['attached'] !== [] || $changes['detached'] !== [];
+            },
+        );
+
+        return $this->success($summary, 'Programs synced successfully.');
     }
 }

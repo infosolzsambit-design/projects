@@ -26,17 +26,16 @@ class AuthController extends Controller
     public function __construct(private readonly AuditLogService $auditLog) {}
 
     /**
-     * POST /login — accepts email, username, or phone number in "login".
+     * POST /login — by email only ("login" holds the email). Username and
+     * phone number aren't accepted: phone numbers aren't unique (teachers
+     * synced from the main database can share one).
      */
     public function login(LoginRequest $request): JsonResponse
     {
         $login = (string) $request->validated('login');
         $password = (string) $request->validated('password');
 
-        $user = User::where('email', $login)
-            ->orWhere('username', $login)
-            ->orWhere('phone_no', $login)
-            ->first();
+        $user = User::where('email', $login)->first();
 
         // Never reveal whether the account exists or why it failed —
         // same generic message for "no such user", "wrong password" and
@@ -90,7 +89,7 @@ class AuthController extends Controller
         return $this->success([
             'token' => $token,
             'token_type' => 'Bearer',
-            'user' => $this->withEffectivePermissions($user->load(['roles', 'permissions', 'teacherDetail'])),
+            'user' => $this->withEffectivePermissions($user->load(['roles', 'permissions', 'teacherDetail', 'departments'])),
         ], 'Login successful.');
     }
 
@@ -197,7 +196,7 @@ class AuthController extends Controller
     public function me(Request $request): JsonResponse
     {
         return $this->success(
-            $this->withEffectivePermissions($request->user()->load(['roles', 'permissions', 'teacherDetail'])),
+            $this->withEffectivePermissions($request->user()->load(['roles', 'permissions', 'teacherDetail', 'departments'])),
             'Current user retrieved successfully.',
         );
     }

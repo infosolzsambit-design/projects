@@ -24,7 +24,7 @@ class StoreCourseRequest extends FormRequest
             // (see after() and Course::hasDuplicate()).
             'code' => ['required', 'string', 'max:50'],
             // e.g. T / P / Theory / Practical — free text.
-            'type' => ['required', 'string', 'max:50'],
+            'type' => ['required', 'string', 'max:100'],
             'status' => ['sometimes', 'boolean'],
         ];
     }

@@ -24,7 +24,11 @@ class ExamType extends Model implements AuditableContract
      * @var list<string>
      */
     protected $fillable = [
+        // The college main database's own id (set by "Sync Exam Type").
+        'inserted_id',
         'name',
+        // delete_status from the main database's API (set by "Sync Exam Type").
+        'deleted_from_main_db',
         'status',
     ];
 
@@ -34,6 +38,7 @@ class ExamType extends Model implements AuditableContract
     protected function casts(): array
     {
         return [
+            'deleted_from_main_db' => 'boolean',
             'status' => 'boolean',
         ];
     }

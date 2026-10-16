@@ -28,18 +28,18 @@ class StudentManagementTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/students', [
             'name' => 'Rahul Kumar',
-            'roll_no' => 'RN-' . uniqid(),
-            'semester' => 3,
+            'registration_no' => 'RN-' . uniqid(),
+            'batch' => '2024',
             'program_name' => 'B.Tech in Computer Science Engineering',
         ]);
 
         $response->assertStatus(201)
             ->assertJsonPath('data.name', 'Rahul Kumar')
-            ->assertJsonPath('data.semester', 3)
+            ->assertJsonPath('data.batch', '2024')
             ->assertJsonPath('data.program_name', 'B.Tech in Computer Science Engineering')
             ->assertJsonPath('data.status', true);
 
-        $this->assertDatabaseHas('students', ['name' => 'Rahul Kumar', 'semester' => 3]);
+        $this->assertDatabaseHas('students', ['name' => 'Rahul Kumar', 'batch' => '2024']);
     }
 
     public function test_program_name_must_match_an_existing_program(): void
@@ -48,8 +48,8 @@ class StudentManagementTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/students', [
             'name' => 'Rahul Kumar',
-            'roll_no' => 'RN-' . uniqid(),
-            'semester' => 3,
+            'registration_no' => 'RN-' . uniqid(),
+            'batch' => '2024',
             'program_name' => 'Made Up Program That Does Not Exist',
         ]);
 
@@ -64,50 +64,50 @@ class StudentManagementTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/students', [
             'name' => 'Rahul Kumar',
-            'roll_no' => 'RN-' . uniqid(),
-            'semester' => 3,
+            'registration_no' => 'RN-' . uniqid(),
+            'batch' => '2024',
             'program_name' => 'Trashed Program',
         ]);
 
         $response->assertStatus(422)->assertJsonValidationErrors('program_name');
     }
 
-    public function test_roll_no_is_required(): void
+    public function test_registration_no_is_required(): void
     {
         $this->actingAdmin();
 
         $response = $this->withApiKey()->postJson('/api/v1/students', [
             'name' => 'Priya Singh',
-            'semester' => 1,
+            'batch' => '2024',
         ]);
 
-        $response->assertStatus(422)->assertJsonValidationErrors('roll_no');
+        $response->assertStatus(422)->assertJsonValidationErrors('registration_no');
     }
 
-    public function test_roll_no_must_be_unique(): void
+    public function test_registration_no_must_be_unique(): void
     {
         $this->actingAdmin();
-        Student::factory()->create(['roll_no' => 'TAKEN-1']);
+        Student::factory()->create(['registration_no' => 'TAKEN-1']);
 
         $response = $this->withApiKey()->postJson('/api/v1/students', [
             'name' => 'Priya Singh',
-            'roll_no' => 'TAKEN-1',
-            'semester' => 1,
+            'registration_no' => 'TAKEN-1',
+            'batch' => '2024',
         ]);
 
-        $response->assertStatus(422)->assertJsonValidationErrors('roll_no');
+        $response->assertStatus(422)->assertJsonValidationErrors('registration_no');
     }
 
-    public function test_roll_no_matching_a_soft_deleted_student_is_allowed(): void
+    public function test_registration_no_matching_a_soft_deleted_student_is_allowed(): void
     {
         $this->actingAdmin();
-        $trashed = Student::factory()->create(['roll_no' => 'REUSE-1']);
+        $trashed = Student::factory()->create(['registration_no' => 'REUSE-1']);
         $trashed->delete();
 
         $response = $this->withApiKey()->postJson('/api/v1/students', [
             'name' => 'Priya Singh',
-            'roll_no' => 'REUSE-1',
-            'semester' => 1,
+            'registration_no' => 'REUSE-1',
+            'batch' => '2024',
         ]);
 
         $response->assertStatus(201);
@@ -118,35 +118,27 @@ class StudentManagementTest extends TestCase
         $this->actingAdmin();
 
         $response = $this->withApiKey()->postJson('/api/v1/students', [
-            'roll_no' => 'RN-' . uniqid(),
-            'semester' => 1,
+            'registration_no' => 'RN-' . uniqid(),
+            'batch' => '2024',
         ]);
 
         $response->assertStatus(422)->assertJsonValidationErrors('name');
     }
 
-    public function test_semester_is_required(): void
+    public function test_batch_is_optional_and_at_most_20_characters(): void
     {
         $this->actingAdmin();
 
-        $response = $this->withApiKey()->postJson('/api/v1/students', [
+        $this->withApiKey()->postJson('/api/v1/students', [
             'name' => 'Priya Singh',
-        ]);
+            'registration_no' => 'RN-'.uniqid(),
+        ])->assertStatus(201)->assertJsonPath('data.batch', null);
 
-        $response->assertStatus(422)->assertJsonValidationErrors('semester');
-    }
-
-    public function test_semester_must_be_an_integer(): void
-    {
-        $this->actingAdmin();
-
-        $response = $this->withApiKey()->postJson('/api/v1/students', [
+        $this->withApiKey()->postJson('/api/v1/students', [
             'name' => 'Priya Singh',
-            'roll_no' => 'RN-' . uniqid(),
-            'semester' => '3rd Semester',
-        ]);
-
-        $response->assertStatus(422)->assertJsonValidationErrors('semester');
+            'registration_no' => 'RN-'.uniqid(),
+            'batch' => str_repeat('9', 21),
+        ])->assertStatus(422)->assertJsonValidationErrors('batch');
     }
 
     public function test_program_name_is_optional(): void
@@ -155,8 +147,8 @@ class StudentManagementTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/students', [
             'name' => 'Amit Verma',
-            'roll_no' => 'RN-' . uniqid(),
-            'semester' => 2,
+            'registration_no' => 'RN-' . uniqid(),
+            'batch' => '2024',
         ]);
 
         $response->assertStatus(201)->assertJsonPath('data.program_name', null);
@@ -173,8 +165,8 @@ class StudentManagementTest extends TestCase
 
         $response = $this->withApiKey()->postJson('/api/v1/students', [
             'name' => 'Rahul Kumar',
-            'roll_no' => 'RN-' . uniqid(),
-            'semester' => 5,
+            'registration_no' => 'RN-' . uniqid(),
+            'batch' => '2024',
         ]);
 
         $response->assertStatus(201);
@@ -184,15 +176,15 @@ class StudentManagementTest extends TestCase
     public function test_admin_can_update_a_student(): void
     {
         $this->actingAdmin();
-        $student = Student::factory()->create(['semester' => 1]);
+        $student = Student::factory()->create(['batch' => '2023']);
 
         $response = $this->withApiKey()->putJson("/api/v1/students/{$student->id}", [
-            'semester' => 2,
+            'batch' => '2024',
             'status' => false,
         ]);
 
         $response->assertOk()
-            ->assertJsonPath('data.semester', 2)
+            ->assertJsonPath('data.batch', '2024')
             ->assertJsonPath('data.status', false);
     }
 

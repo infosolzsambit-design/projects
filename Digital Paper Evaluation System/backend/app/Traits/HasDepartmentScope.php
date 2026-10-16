@@ -14,23 +14,24 @@ use Illuminate\Http\Request;
  *
  * A super admin (role id in config('roles.super_admin_id') — by id, never
  * by name) sees every department; anyone else only ever sees teachers in
- * their OWN department, resolved from their own teacher_details.
- * department_id — a department head is expected to have been created
- * through the Teacher module too (giving them that row), even if their
- * current role has since changed to something else. Enforced server-side
+ * their OWN departments (a teacher can be in several — see
+ * User::departments()) — a department head is expected to have been
+ * created through the Teacher module too (giving them those), even if
+ * their current role has since changed to something else. Enforced server-side
  * regardless of what the frontend sends, same reasoning as
  * HasExamYearScope.
  */
 trait HasDepartmentScope
 {
     /**
-     * @return int|false|null int = restrict to exactly this department id;
-     *                        false = a non-super-admin whose own account
-     *                        has no department set — matches nothing (the
-     *                        safe default; never silently "show everyone");
-     *                        null = super admin, no restriction at all.
+     * @return list<int>|false|null list = restrict to these department ids
+     *                              (teachers in any of them); false = a
+     *                              non-super-admin whose own account has no
+     *                              department — matches nothing (the safe
+     *                              default; never silently "show everyone");
+     *                              null = super admin, no restriction at all.
      */
-    protected function departmentScope(Request $request): int|false|null
+    protected function departmentScope(Request $request): array|false|null
     {
         $isSuperAdmin = $request->user()?->hasRole(config('roles.super_admin_id')) ?? false;
 
@@ -38,8 +39,8 @@ trait HasDepartmentScope
             return null;
         }
 
-        $departmentId = $request->user()?->teacherDetail?->department_id;
+        $departmentIds = $request->user()?->departments()->pluck('departments.id')->map(fn ($id) => (int) $id)->all() ?? [];
 
-        return $departmentId !== null ? (int) $departmentId : false;
+        return $departmentIds !== [] ? $departmentIds : false;
     }
 }

@@ -33,6 +33,13 @@ class QuestionAnswerSheetMappingResource extends JsonResource
             'department_id' => $this->department_id,
             'department_name' => $this->department_name,
             'packet_code' => $this->packet_code,
+            // Set by Generate QR: the packet's own exam year (e.g. "2025-2026"
+            // — exam_year above is the question paper's), batch and sub type.
+            'packet_exam_year' => $this->getAttribute('exam_year'),
+            'batch' => $this->batch,
+            'exam_sub_type_id' => $this->exam_sub_type_id,
+            'exam_sub_type_name' => $this->whenLoaded('examSubType', fn () => $this->examSubType?->name),
+            'is_scan_complete' => (bool) $this->is_scan_complete,
             // Set via ->withCount('answerSheets') on the query (index()/
             // show()) — a *count* query, not an eager-loaded collection, so
             // this stays cheap even for a packet with thousands of rows.

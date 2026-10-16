@@ -10,7 +10,7 @@ const toast = useToast()
 
 // --- CSV template download.
 function downloadTemplate() {
-  const sample = [{ Name: 'Demo Student', 'Roll No': 'ROLL001', Semester: 1, Program: '' }]
+  const sample = [{ Name: 'Demo Student', 'Registration No': '241005007087', Batch: '2024', Program: '' }]
   const worksheet = XLSX.utils.json_to_sheet(sample)
   const workbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Students')
@@ -28,14 +28,14 @@ function findColumn(keys, needle) {
 function makeRow(raw) {
   const keys = Object.keys(raw)
   const nameKey = findColumn(keys, 'name')
-  const rollNoKey = findColumn(keys, 'rollno')
-  const semesterKey = findColumn(keys, 'semester')
+  const registrationNoKey = findColumn(keys, 'registration') || findColumn(keys, 'regno')
+  const batchKey = findColumn(keys, 'batch')
   const programKey = findColumn(keys, 'program')
 
   return reactive({
     name: nameKey ? String(raw[nameKey] ?? '').trim() : '',
-    roll_no: rollNoKey ? String(raw[rollNoKey] ?? '').trim() : '',
-    semester: semesterKey ? String(raw[semesterKey] ?? '').trim() : '',
+    registration_no: registrationNoKey ? String(raw[registrationNoKey] ?? '').trim() : '',
+    batch: batchKey ? String(raw[batchKey] ?? '').trim() : '',
     program_name: programKey ? String(raw[programKey] ?? '').trim() : '',
     errors: {},
     valid: null,
@@ -88,7 +88,7 @@ function setFieldRef(index, field, el) {
   if (!fieldRefs[index]) fieldRefs[index] = {}
   fieldRefs[index][field] = el
 }
-const ROW_FIELD_ORDER = ['name', 'roll_no', 'semester', 'program_name']
+const ROW_FIELD_ORDER = ['name', 'registration_no', 'batch', 'program_name']
 
 function focusFirstError() {
   const rowIndex = rows.value.findIndex((r) => r.valid === false)
@@ -110,7 +110,7 @@ function removeRow(index) {
 }
 
 function toPayload() {
-  return rows.value.map((r) => ({ name: r.name, roll_no: r.roll_no, semester: r.semester, program_name: r.program_name }))
+  return rows.value.map((r) => ({ name: r.name, registration_no: r.registration_no, batch: r.batch, program_name: r.program_name }))
 }
 
 function applyResults(results) {
@@ -205,7 +205,7 @@ function cancel() {
         <section class="bg-white rounded-[28px] shadow-card p-4 sm:p-5">
           <h2 class="text-[16px] sm:text-[18px] font-semibold text-gray-900 mb-1">1. Download the CSV template</h2>
           <p class="text-[13px] text-muted mb-3">
-            Columns: <span class="font-medium text-gray-700">Name, Roll No, Semester, Program</span>. Name, Roll No, and Semester are required — Roll No must be unique, and Program is optional but must exactly match an existing program's name when given.
+            Columns: <span class="font-medium text-gray-700">Name, Registration No, Batch, Program</span>. Name and Registration No are required — Registration No must be unique. Batch (e.g. 2024) is optional, and Program is optional but must exactly match an existing program's name when given.
           </p>
           <button
             type="button"
@@ -259,8 +259,8 @@ function cancel() {
                 <tr class="bg-subject-header text-white text-[11px] font-medium">
                   <th class="px-2 py-1.5 rounded-tl-xl w-px whitespace-nowrap">#</th>
                   <th class="px-2 py-1.5 min-w-[180px]">Name</th>
-                  <th class="px-2 py-1.5 min-w-[120px]">Roll No</th>
-                  <th class="px-2 py-1.5 min-w-[100px]">Semester</th>
+                  <th class="px-2 py-1.5 min-w-[130px]">Registration No</th>
+                  <th class="px-2 py-1.5 min-w-[90px]">Batch</th>
                   <th class="px-2 py-1.5 min-w-[160px]">Program</th>
                   <th class="px-2 py-1.5 text-center min-w-[80px]">Status</th>
                   <th class="px-2 py-1.5 rounded-tr-xl w-8"></th>
@@ -282,25 +282,25 @@ function cancel() {
                   </td>
                   <td class="px-2 py-1.5">
                     <input
-                      :ref="(el) => setFieldRef(index, 'roll_no', el)"
-                      v-model="row.roll_no"
+                      :ref="(el) => setFieldRef(index, 'registration_no', el)"
+                      v-model="row.registration_no"
                       type="text"
                       class="w-full h-8 px-2 rounded-lg bg-input-bg text-[12px] outline-none border"
-                      :class="row.errors.roll_no ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
-                      @input="markEdited(row, 'roll_no')"
+                      :class="row.errors.registration_no ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
+                      @input="markEdited(row, 'registration_no')"
                     />
-                    <p v-if="row.errors.roll_no" class="text-[10px] text-brand mt-0.5">{{ row.errors.roll_no }}</p>
+                    <p v-if="row.errors.registration_no" class="text-[10px] text-brand mt-0.5">{{ row.errors.registration_no }}</p>
                   </td>
                   <td class="px-2 py-1.5">
                     <input
-                      :ref="(el) => setFieldRef(index, 'semester', el)"
-                      v-model="row.semester"
+                      :ref="(el) => setFieldRef(index, 'batch', el)"
+                      v-model="row.batch"
                       type="text"
                       class="w-full h-8 px-2 rounded-lg bg-input-bg text-[12px] outline-none border"
-                      :class="row.errors.semester ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
-                      @input="markEdited(row, 'semester')"
+                      :class="row.errors.batch ? 'border-brand' : 'border-input-border focus:border-brand-blue'"
+                      @input="markEdited(row, 'batch')"
                     />
-                    <p v-if="row.errors.semester" class="text-[10px] text-brand mt-0.5">{{ row.errors.semester }}</p>
+                    <p v-if="row.errors.batch" class="text-[10px] text-brand mt-0.5">{{ row.errors.batch }}</p>
                   </td>
                   <td class="px-2 py-1.5">
                     <input

@@ -375,4 +375,94 @@ class DashboardControllerTest extends TestCase
         $status = $response->json('data.evaluation_status');
         $this->assertSame(2, $status['total']);
     }
+
+    public function test_teacher_summary_counts_only_the_teachers_own_sheets(): void
+    {
+        $teacher = $this->actingUser();
+        $mapping = $this->mappingThisYear()['mapping'];
+        $other = TeacherDetail::factory()->create()->user_id;
+        $mine = ['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher->id, 'assigned_at' => now()->subDays(2)];
+
+        AnswerSheet::factory()->create($mine + ['marks' => 40, 'evaluated_at' => now(), 'consumed_time' => 600]);
+        AnswerSheet::factory()->create($mine + ['marks' => 35, 'evaluated_at' => now(), 'consumed_time' => 1200]);
+        AnswerSheet::factory()->create($mine + ['marks' => null]);                                                     // pending
+        AnswerSheet::factory()->create($mine + ['marks' => null, 'issue_master_id' => 1, 'issue_status' => 'open']);      // unsolved problem
+        AnswerSheet::factory()->create($mine + ['marks' => null, 'issue_master_id' => 1, 'issue_status' => 'resolved']);  // resolved → pending again
+        // Someone else's sheet — must never count.
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $other, 'marks' => 50, 'evaluated_at' => now()]);
+
+        $data = $this->withApiKey()->getJson('/api/v1/dashboard/teacher-summary?exam_year='.now()->year.'&exam_type_id='.$this->defaultExamTypeId())
+            ->assertOk()->json('data');
+
+        $k = $data['kpis'];
+        $this->assertSame([5, 2, 2, 2, 1, 1, 1], [$k['assigned'], $k['evaluated'], $k['pending'], $k['problem'], $k['unsolved'], $k['resolved'], $k['pending_courses']]);
+        $this->assertSame(900, $k['avg_consume_seconds']);
+        $this->assertSame(1200, $k['max_consume_seconds']);
+        $this->assertSame(600, $k['min_consume_seconds']);
+        $this->assertEquals(2, $k['avg_per_day']);
+        // Donut buckets are disjoint and add up to the assigned total.
+        $this->assertSame($k['assigned'], array_sum($data['status']));
+        // Today's point on the 7-day chart, and this week's bar.
+        $this->assertSame(2, end($data['daily'])['completed']);
+        $this->assertSame(2, collect($data['week'])->sum('count'));
+        $this->assertSame(2, $data['course_pending'][0]['pending']);
+        $this->assertSame(2, $data['recent'][0]['pending']);
+        // Name (Code) – Type.
+        $this->assertStringContainsString('('.$mapping->course->code.')', $data['recent'][0]['course']);
+    }
+
+    public function test_teacher_summary_is_empty_for_a_teacher_with_nothing_assigned(): void
+    {
+        $this->actingUser();
+
+        $data = $this->withApiKey()->getJson('/api/v1/dashboard/teacher-summary')->assertOk()->json('data');
+
+        $this->assertSame(0, $data['kpis']['assigned']);
+        $this->assertNull($data['kpis']['avg_consume_seconds']);
+        $this->assertSame([], $data['recent']);
+        $this->assertCount(7, $data['daily']);
+        $this->assertCount(7, $data['week']);
+    }
+
+    public function test_teacher_lists_show_five_on_the_card_and_all_in_see_all(): void
+    {
+        $teacher = $this->actingUser();
+        // 7 courses, each with one pending sheet for this teacher.
+        foreach (range(1, 7) as $n) {
+            $mapping = $this->mappingThisYear(['course_id' => \App\Models\Course::factory()->create(['name' => "Course {$n}"])->id])['mapping'];
+            AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher->id, 'marks' => null, 'assigned_at' => now()]);
+        }
+        $q = '?exam_year='.now()->year.'&exam_type_id='.$this->defaultExamTypeId();
+
+        $data = $this->withApiKey()->getJson('/api/v1/dashboard/teacher-summary'.$q)->assertOk()->json('data');
+        $this->assertCount(5, $data['course_pending']);
+        $this->assertTrue($data['course_pending_has_more']);
+        $this->assertCount(5, $data['recent']);
+        $this->assertTrue($data['recent_has_more']);
+
+        $this->withApiKey()->getJson('/api/v1/dashboard/teacher-course-pending'.$q)->assertOk()->assertJsonCount(7, 'data');
+        $this->withApiKey()->getJson('/api/v1/dashboard/teacher-recent'.$q)->assertOk()->assertJsonCount(7, 'data');
+    }
+
+    public function test_teacher_week_can_be_changed(): void
+    {
+        $teacher = $this->actingUser();
+        $mapping = $this->mappingThisYear()['mapping'];
+        $lastWeekWednesday = now()->startOfWeek()->subWeek()->addDays(2)->setTime(11, 0);
+        AnswerSheet::factory()->count(3)->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher->id, 'marks' => 30, 'evaluated_at' => $lastWeekWednesday]);
+        $q = 'exam_year='.now()->year.'&exam_type_id='.$this->defaultExamTypeId();
+
+        // Any date in last week → that week's Monday; Wednesday holds the 3.
+        $data = $this->withApiKey()->getJson('/api/v1/dashboard/teacher-week?'.$q.'&week_start='.$lastWeekWednesday->format('Y-m-d'))->assertOk()->json('data');
+        $this->assertSame(now()->startOfWeek()->subWeek()->format('Y-m-d'), $data['week_start']);
+        $this->assertFalse($data['is_current']);
+        $this->assertSame([0, 0, 3, 0, 0, 0, 0], array_column($data['days'], 'count'));
+
+        // Default = current week (nothing evaluated this week).
+        $current = $this->withApiKey()->getJson('/api/v1/dashboard/teacher-week?'.$q)->assertOk()->json('data');
+        $this->assertTrue($current['is_current']);
+        $this->assertSame(0, array_sum(array_column($current['days'], 'count')));
+
+        $this->withApiKey()->getJson('/api/v1/dashboard/teacher-week?week_start=not-a-date')->assertStatus(422);
+    }
 }

@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../utils/api'
-import SearchableSelect from '../components/common/SearchableSelect.vue'
+import SearchableMultiSelect from '../components/common/SearchableMultiSelect.vue'
 import EsignCropperModal from '../components/common/EsignCropperModal.vue'
 import { PASSWORD_RULES } from '../utils/passwordRules'
 import { useToast } from '../composables/useToast'
@@ -19,7 +19,7 @@ const form = reactive({
   email: '',
   phone_no: '',
   emp_code: '',
-  department_id: '',
+  department_ids: [], // a teacher can be in several departments
   designation: '',
   password: '',
   password_confirmation: '',
@@ -60,20 +60,20 @@ const fieldErrors = reactive({
   email: '',
   phone_no: '',
   emp_code: '',
-  department_id: '',
+  department_ids: '',
   designation: '',
   password: '',
   password_confirmation: '',
 })
 // Order matters — the first of these (in this order) that has an error is
 // the one that gets focused after a failed validate()/submit.
-const FIELD_ORDER = ['name', 'email', 'phone_no', 'emp_code', 'department_id', 'designation', 'password', 'password_confirmation']
+const FIELD_ORDER = ['name', 'email', 'phone_no', 'emp_code', 'department_ids', 'designation', 'password', 'password_confirmation']
 const fieldRefs = {
   name: ref(null),
   email: ref(null),
   phone_no: ref(null),
   emp_code: ref(null),
-  department_id: ref(null),
+  department_ids: ref(null),
   designation: ref(null),
   password: ref(null),
   password_confirmation: ref(null),
@@ -95,7 +95,7 @@ const showPasswordConfirm = ref(false)
 // whatever was actually loaded for edit (captured once loadTeacher()
 // finishes below). Not reactive on purpose — it's a fixed target, not
 // something that should track the form's own live edits.
-let initialForm = { ...form }
+let initialForm = { ...form, department_ids: [...form.department_ids] }
 
 async function loadTeacher() {
   loading.value = true
@@ -107,9 +107,9 @@ async function loadTeacher() {
     form.email = teacher.email
     form.phone_no = teacher.phone_no || ''
     form.emp_code = teacher.emp_code || ''
-    form.department_id = teacher.department_id || ''
+    form.department_ids = [...(teacher.department_ids || [])]
     form.designation = teacher.designation || ''
-    initialForm = { ...form }
+    initialForm = { ...form, department_ids: [...form.department_ids] }
   } catch (err) {
     loadError.value = err.response?.data?.message || 'Could not load this teacher.'
   } finally {
@@ -148,7 +148,7 @@ function onEsignSaved(data) {
 }
 
 function resetForm() {
-  Object.assign(form, initialForm)
+  Object.assign(form, initialForm, { department_ids: [...initialForm.department_ids] })
   formError.value = ''
   FIELD_ORDER.forEach((key) => (fieldErrors[key] = ''))
 }
@@ -165,7 +165,9 @@ function applyServerErrors(err) {
   const data = err.response?.data
   if (data?.errors) {
     Object.entries(data.errors).forEach(([field, messages]) => {
-      if (field in fieldErrors) fieldErrors[field] = messages[0]
+      // "department_ids.0" (one picked department is invalid) → the department field.
+      const key = field.startsWith('department_ids.') ? 'department_ids' : field
+      if (key in fieldErrors) fieldErrors[key] = messages[0]
     })
     if (FIELD_ORDER.some((key) => fieldErrors[key])) {
       focusFirstError()
@@ -203,7 +205,7 @@ function validate() {
   }
 
   if (!form.emp_code.trim()) fieldErrors.emp_code = 'Employee code is required.'
-  if (!form.department_id) fieldErrors.department_id = 'Department is required.'
+  if (!form.department_ids.length) fieldErrors.department_ids = 'Select at least one department.'
   if (!form.designation.trim()) fieldErrors.designation = 'Designation is required.'
 
   // Password is optional in both create and edit — a teacher can be made
@@ -261,7 +263,7 @@ function cancel() {
 <template>
   <div>
     <!-- Breadcrumb -->
-    <!-- <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-5 flex items-center gap-3">
+    <!-- <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-2.5 flex items-center gap-3">
       <RouterLink to="/dashboard" class="inline-flex items-center gap-2 text-[13px] sm:text-sm text-gray-700 hover:text-brand-blue">
         <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5z" /></svg>
         Home
@@ -383,20 +385,21 @@ function cancel() {
               <p v-if="fieldErrors.emp_code" class="text-[12px] text-brand">{{ fieldErrors.emp_code }}</p>
             </div>
             <div class="flex flex-col gap-1.5">
-              <label for="department" class="text-[13px] text-label">Department <span class="text-brand">*</span></label>
-              <SearchableSelect
+              <label for="department" class="text-[13px] text-label">Departments <span class="text-brand">*</span></label>
+              <!-- A teacher can be in several departments. -->
+              <SearchableMultiSelect
                 id="department"
-                :ref="(el) => (fieldRefs.department_id.value = el)"
-                v-model="form.department_id"
+                :ref="(el) => (fieldRefs.department_ids.value = el)"
+                v-model="form.department_ids"
                 :options="availableDepartments"
                 :loading="departmentsLoading"
-                :error="!!fieldErrors.department_id"
-                placeholder="Select department"
+                :error="!!fieldErrors.department_ids"
+                placeholder="Select departments"
                 search-placeholder="Search departments…"
-                @change="clearFieldError('department_id')"
+                @change="clearFieldError('department_ids')"
               />
               <p v-if="departmentsError" class="text-[12px] text-brand">{{ departmentsError }}</p>
-              <p v-else-if="fieldErrors.department_id" class="text-[12px] text-brand">{{ fieldErrors.department_id }}</p>
+              <p v-else-if="fieldErrors.department_ids" class="text-[12px] text-brand">{{ fieldErrors.department_ids }}</p>
             </div>
             <div class="flex flex-col gap-1.5">
               <label for="designation" class="text-[13px] text-label">Designation <span class="text-brand">*</span></label>

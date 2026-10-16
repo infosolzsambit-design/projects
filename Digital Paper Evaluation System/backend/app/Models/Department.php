@@ -24,9 +24,13 @@ class Department extends Model implements AuditableContract
      * @var list<string>
      */
     protected $fillable = [
+        // The college main database's own id (set by "Sync Department").
+        'inserted_id',
         'name',
         'code',
         'short_description',
+        // delete_status from the main database's API (set by "Sync Department").
+        'deleted_from_main_db',
         'status',
     ];
 
@@ -36,6 +40,7 @@ class Department extends Model implements AuditableContract
     protected function casts(): array
     {
         return [
+            'deleted_from_main_db' => 'boolean',
             'status' => 'boolean',
         ];
     }

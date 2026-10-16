@@ -8,6 +8,7 @@ use App\Traits\HasUserstamps;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -89,6 +90,24 @@ class User extends Authenticatable implements AuditableContract
     public function teacherDetail(): HasOne
     {
         return $this->hasOne(TeacherDetail::class);
+    }
+
+    /**
+     * A teacher's departments — a teacher can be in several
+     * (teacher_department_mappings; set on the Teacher form, bulk upload
+     * and "Sync Teacher").
+     */
+    public function departments(): BelongsToMany
+    {
+        return $this->belongsToMany(Department::class, 'teacher_department_mappings', 'user_id', 'department_id')
+            ->withTimestamps()
+            ->orderBy('departments.name');
+    }
+
+    /** The department names joined for display/search, e.g. "Commerce, Law". */
+    public function departmentNames(): string
+    {
+        return $this->departments->pluck('name')->implode(', ');
     }
 
     /**

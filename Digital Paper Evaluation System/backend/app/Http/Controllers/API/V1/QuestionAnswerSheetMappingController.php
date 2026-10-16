@@ -46,6 +46,10 @@ class QuestionAnswerSheetMappingController extends Controller
      *  - ?status=uploaded|empty → whether the packet has any rows at all
      *    yet (see storeRows()) — matches the "Uploaded"/"Empty" badge this
      *    same view already renders per row.
+     *  - ?is_scan_complete=1 (default) → scanned packets only — the Answer
+     *    Sheets list; Generate QR's packets stay out of it until scanned.
+     *    ?is_scan_complete=0 → only those still waiting for their scan (the
+     *    Scan Papers list, ScanPapersView.vue).
      */
     public function index(Request $request): JsonResponse
     {
@@ -54,8 +58,9 @@ class QuestionAnswerSheetMappingController extends Controller
             (int) config('pagination.max_per_page'),
         ));
 
-        $query = QuestionAnswerSheetMapping::with(['course', 'questionPaper', 'examTerm', 'examType', 'creator'])
-            ->withCount(['answerSheets', 'answerSheets as pending_answer_sheet_count' => fn ($q) => $q->awaitingAssignment(), 'answerSheets as in_pool_answer_sheet_count' => fn ($q) => $q->waitingInPool()]);
+        $query = QuestionAnswerSheetMapping::with(['course', 'questionPaper', 'examTerm', 'examType', 'examSubType', 'creator'])
+            ->withCount(['answerSheets', 'answerSheets as pending_answer_sheet_count' => fn ($q) => $q->awaitingAssignment(), 'answerSheets as in_pool_answer_sheet_count' => fn ($q) => $q->waitingInPool()])
+            ->where('is_scan_complete', $request->input('is_scan_complete', '1') !== '0');
 
         if ($search = $request->string('search')->toString()) {
             $query->where(function ($q) use ($search) {
@@ -239,6 +244,9 @@ class QuestionAnswerSheetMappingController extends Controller
         // Keep the department's name alongside its id (like program_name),
         // as it was at upload time.
         $data['department_name'] = Department::whereKey($data['department_id'])->value('name');
+        // An upload brings its scanned PDFs with it — scanned from the start
+        // (unlike a Generate QR packet, which starts at 0).
+        $data['is_scan_complete'] = true;
 
         $mapping = QuestionAnswerSheetMapping::create($data); // $data already carries every validated field, including exam_term_id
 

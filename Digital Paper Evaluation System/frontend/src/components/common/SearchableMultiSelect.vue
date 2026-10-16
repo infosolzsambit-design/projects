@@ -148,7 +148,7 @@ defineExpose({ focus })
         :key="option.id"
         class="inline-flex items-center gap-1 max-w-full rounded-lg bg-white border border-soft pl-2 pr-1 py-0.5 text-[12px] text-gray-800 shadow-sm"
       >
-        <span class="truncate">{{ option.name }}</span>
+        <span class="min-w-0 whitespace-normal break-words leading-snug">{{ option.name }}</span>
         <button
           type="button"
           class="w-4 h-4 shrink-0 rounded flex items-center justify-center text-gray-400 hover:text-brand hover:bg-brand/10"
@@ -192,18 +192,19 @@ defineExpose({ focus })
           :key="option.id"
           role="option"
           :aria-selected="isSelected(option)"
-          class="flex items-center gap-2.5 px-3.5 py-2.5 text-[12px] cursor-pointer transition-colors"
+          class="flex items-start gap-2.5 px-3.5 py-2.5 text-[12px] cursor-pointer transition-colors"
           :class="[isSelected(option) ? 'text-brand-blue font-semibold' : 'text-gray-700', idx === highlightedIndex ? 'bg-soft' : 'hover:bg-soft']"
           @mouseenter="highlightedIndex = idx"
           @mousedown.prevent="toggleOption(option)"
         >
           <span
-            class="w-4 h-4 shrink-0 rounded border flex items-center justify-center"
+            class="w-4 h-4 shrink-0 mt-px rounded border flex items-center justify-center"
             :class="isSelected(option) ? 'bg-brand-blue border-brand-blue text-white' : 'border-input-border bg-white'"
           >
             <svg v-if="isSelected(option)" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12" /></svg>
           </span>
-          <span class="truncate" v-html="highlight(option.name)"></span>
+          <!-- Full name, wrapping onto more lines — not cut off with "…". -->
+          <span class="min-w-0 whitespace-normal break-words leading-snug" v-html="highlight(option.name)"></span>
         </li>
       </ul>
       <div v-if="selectedOptions.length" class="flex items-center justify-between px-3.5 py-2 border-t border-soft text-[11.5px]">

@@ -24,10 +24,15 @@ class Student extends Model implements AuditableContract
      * @var list<string>
      */
     protected $fillable = [
+        // The college main database's own id (set by "Sync Student").
+        'inserted_id',
         'name',
-        'roll_no',
-        'semester',
+        'registration_no',
+        // Admission batch (year), e.g. "2024".
+        'batch',
         'program_name',
+        // delete_status from the main database's API (set by "Sync Student").
+        'deleted_from_main_db',
         'status',
     ];
 
@@ -37,7 +42,7 @@ class Student extends Model implements AuditableContract
     protected function casts(): array
     {
         return [
-            'semester' => 'integer',
+            'deleted_from_main_db' => 'boolean',
             'status' => 'boolean',
         ];
     }
