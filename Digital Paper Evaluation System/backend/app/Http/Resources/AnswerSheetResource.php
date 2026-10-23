@@ -102,6 +102,9 @@ class AnswerSheetResource extends JsonResource
             // Still waiting in a shared pool (nobody has started it yet) —
             // My Pending Course shows it with a "Pool" tag.
             'in_pool' => $this->answer_sheet_pool_id !== null && $this->teacher_id === null,
+            // From a shared pool at all (claimed or not) — My Pending Course's
+            // one-by-one rules only apply to sheets assigned to the teacher.
+            'from_pool' => $this->answer_sheet_pool_id !== null,
             'marks' => $this->marks,
             // Only present when the caller eager-loaded mapping.questionPaper
             // (see MyPendingCourseController::papers()) — everyone else gets

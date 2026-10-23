@@ -82,7 +82,8 @@
             <td align="center" style="{{ $td }} {{ $text }}">{{ $row['roll_no'] ?? '—' }}</td>
             <td align="center" style="{{ $td }} {{ $text }}">{{ $row['registration_no'] ?? '—' }}</td>
             <td align="center" style="{{ $td }}">{{ $row['total_marks'] ?? '—' }}</td>
-            <td align="center" style="{{ $td }} font-weight: bold; color: #16a34a;">{{ $row['obtained_marks'] ?? '—' }}</td>
+            {{-- Absent students: "AB", in red. --}}
+            <td align="center" style="{{ $td }} font-weight: bold; color: {{ ($row['absent'] ?? false) ? '#dc2626' : '#16a34a' }};">{{ $row['obtained_marks'] ?? '—' }}</td>
             <td align="center" style="{{ $td }}">{{ $row['lock_in_time'] ?? '—' }}</td>
             {{-- The course's own type (Courses master), e.g. Theory / Practical. --}}
             <td align="center" style="{{ $td }}">{{ $row['course_type'] ?: '—' }}</td>

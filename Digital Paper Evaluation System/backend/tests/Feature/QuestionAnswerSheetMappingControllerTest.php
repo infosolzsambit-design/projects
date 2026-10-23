@@ -307,7 +307,7 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
      * (here, a different course) is fine — uniqueness is per combination,
      * never global.
      */
-    public function test_a_barcode_can_be_reused_under_a_different_combination(): void
+    public function test_a_barcode_cannot_be_reused_in_another_packet_while_that_packet_exists(): void
     {
         Storage::fake('public');
         $this->actingAdmin();
@@ -318,12 +318,30 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
             'BC-REUSED' => UploadedFile::fake()->create('sheet1.pdf', 100, 'application/pdf'),
         ])->assertCreated();
 
-        $response = $this->postRows($mappingB, [$this->row('BC-REUSED', 'R3002')], [
+        // QR codes are unique across every packet (uploaded or Generate QR).
+        $this->postRows($mappingB, [$this->row('BC-REUSED', 'R3002')], [
             'BC-REUSED' => UploadedFile::fake()->create('sheet2.pdf', 100, 'application/pdf'),
-        ]);
+        ])->assertStatus(422)->assertJsonValidationErrors('rows');
+        $this->assertSame(0, $mappingB->answerSheets()->count());
 
-        $response->assertCreated();
-        $this->assertSame(1, $mappingB->answerSheets()->count());
+        $this->withApiKey()->postJson('/api/v1/answer-sheet-mappings/check-duplicate-barcodes', [
+            'program_name' => $mappingB->program_name,
+            'packet_code' => $mappingB->packet_code,
+            'question_paper_id' => $mappingB->question_paper_id,
+            'course_id' => $mappingB->course_id,
+            'exam_term_id' => $mappingB->exam_term_id,
+            'exam_type_id' => $mappingB->exam_type_id,
+            'semester' => $mappingB->semester,
+            'barcodes' => ['BC-REUSED', 'BC-FRESH'],
+        ])->assertOk()
+            ->assertJsonPath('data.duplicate_barcodes', [])
+            ->assertJsonPath('data.used_in_other_packets', ['BC-REUSED' => $mappingA->packet_code]);
+
+        // Once that packet is deleted, its codes are free again.
+        $mappingA->delete();
+        $this->postRows($mappingB, [$this->row('BC-REUSED', 'R3002')], [
+            'BC-REUSED' => UploadedFile::fake()->create('sheet2.pdf', 100, 'application/pdf'),
+        ])->assertCreated();
     }
 
     public function test_check_duplicate_barcodes_reports_only_the_ones_already_used_for_that_combination(): void

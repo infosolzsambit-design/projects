@@ -59,7 +59,7 @@ class QuestionAnswerSheetMappingController extends Controller
         ));
 
         $query = QuestionAnswerSheetMapping::with(['course', 'questionPaper', 'examTerm', 'examType', 'examSubType', 'creator'])
-            ->withCount(['answerSheets', 'answerSheets as pending_answer_sheet_count' => fn ($q) => $q->awaitingAssignment(), 'answerSheets as in_pool_answer_sheet_count' => fn ($q) => $q->waitingInPool()])
+            ->withCount(['answerSheets' => fn ($q) => $q->where('absent', false), 'answerSheets as absent_answer_sheet_count' => fn ($q) => $q->where('absent', true), 'answerSheets as pending_answer_sheet_count' => fn ($q) => $q->awaitingAssignment(), 'answerSheets as in_pool_answer_sheet_count' => fn ($q) => $q->waitingInPool()])
             ->where('is_scan_complete', $request->input('is_scan_complete', '1') !== '0');
 
         if ($search = $request->string('search')->toString()) {
@@ -105,7 +105,7 @@ class QuestionAnswerSheetMappingController extends Controller
     public function show(QuestionAnswerSheetMapping $questionAnswerSheetMapping): JsonResponse
     {
         return $this->success(
-            new QuestionAnswerSheetMappingResource($questionAnswerSheetMapping->loadCount(['answerSheets', 'answerSheets as pending_answer_sheet_count' => fn ($q) => $q->awaitingAssignment(), 'answerSheets as in_pool_answer_sheet_count' => fn ($q) => $q->waitingInPool()])->load(['course', 'questionPaper', 'examTerm', 'examType'])),
+            new QuestionAnswerSheetMappingResource($questionAnswerSheetMapping->loadCount(['answerSheets' => fn ($q) => $q->where('absent', false), 'answerSheets as absent_answer_sheet_count' => fn ($q) => $q->where('absent', true), 'answerSheets as pending_answer_sheet_count' => fn ($q) => $q->awaitingAssignment(), 'answerSheets as in_pool_answer_sheet_count' => fn ($q) => $q->waitingInPool()])->load(['course', 'questionPaper', 'examTerm', 'examType', 'examSubType', 'creator'])),
             'Answer sheet packet fetched successfully.',
         );
     }
@@ -130,7 +130,8 @@ class QuestionAnswerSheetMappingController extends Controller
         // teacher.teacherDetail — AnswerSheetRowsModal.vue's own "Evaluation
         // By" column shows the assigned teacher's emp code alongside their
         // name (see AnswerSheetResource's own teacher_emp_code field).
-        $query = $questionAnswerSheetMapping->answerSheets()->with('teacher.teacherDetail');
+        // Absent students' sheets aren't listed — same as the packet's Total.
+        $query = $questionAnswerSheetMapping->answerSheets()->where('absent', false)->with('teacher.teacherDetail');
 
         if ($search = $request->string('search')->toString()) {
             $query->where(function ($q) use ($search) {
@@ -185,6 +186,29 @@ class QuestionAnswerSheetMappingController extends Controller
      * *across* a different combination (a different question paper, say);
      * it's only a duplicate within the same one.
      */
+    /**
+     * Which of $barcodes a live answer sheet outside $exceptMappingIds
+     * already holds (any packet, uploaded or Generate QR) — QR code =>
+     * that packet's code. Deleted packets' codes are free again.
+     *
+     * @param  list<string>  $barcodes
+     * @return array<string, string>
+     */
+    public static function barcodesUsedElsewhere(array $barcodes, $exceptMappingIds): array
+    {
+        if ($barcodes === []) {
+            return [];
+        }
+
+        return AnswerSheet::query()
+            ->join('question_answer_sheet_mappings as m', 'm.id', '=', 'answer_sheets.question_answer_sheet_mapping_id')
+            ->whereNull('m.deleted_at')
+            ->whereNotIn('answer_sheets.question_answer_sheet_mapping_id', $exceptMappingIds)
+            ->whereIn('answer_sheets.subject_barcode', $barcodes)
+            ->pluck('m.packet_code', 'answer_sheets.subject_barcode')
+            ->all();
+    }
+
     public function checkDuplicateBarcodes(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -199,14 +223,21 @@ class QuestionAnswerSheetMappingController extends Controller
             'barcodes.*' => ['string'],
         ]);
 
+        $siblings = $this->siblingMappingIds($data);
         $duplicates = AnswerSheet::withTrashed()
-            ->whereIn('question_answer_sheet_mapping_id', $this->siblingMappingIds($data))
+            ->whereIn('question_answer_sheet_mapping_id', $siblings)
             ->whereIn('subject_barcode', $data['barcodes'])
             ->pluck('subject_barcode')
             ->unique()
             ->values();
 
-        return $this->success(['duplicate_barcodes' => $duplicates], 'Checked successfully.');
+        return $this->success([
+            'duplicate_barcodes' => $duplicates,
+            // A QR code is unique across every packet — uploaded or made by
+            // Generate QR — so one already in another (live) packet can't be
+            // uploaded again: QR code => that packet's code.
+            'used_in_other_packets' => self::barcodesUsedElsewhere($data['barcodes'], $siblings),
+        ], 'Checked successfully.');
     }
 
     /**

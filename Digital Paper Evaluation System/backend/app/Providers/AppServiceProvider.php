@@ -36,8 +36,14 @@ class AppServiceProvider extends ServiceProvider
             return $user->hasRole(config('roles.super_admin_id')) ? true : null;
         });
 
+        // Every page of the app fires ~8-10 API calls (profile, branding,
+        // notification counts, dropdown lists…), so 60 a minute was hit by
+        // just clicking through pages. Signed-in users get 300; anonymous
+        // requests stay at 60 per IP.
         RateLimiter::for('api', function (Request $request) {
-            return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
+            return $request->user()
+                ? Limit::perMinute(300)->by('user:'.$request->user()->id)
+                : Limit::perMinute(60)->by('ip:'.$request->ip());
         });
 
         RateLimiter::for('login', function (Request $request) {

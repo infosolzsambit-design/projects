@@ -17,6 +17,7 @@ import SearchableSelect from '../components/common/SearchableSelect.vue'
 import RowActionMenu from '../components/common/RowActionMenu.vue'
 import Pagination from '../components/common/Pagination.vue'
 import { useProgramsStore } from '../stores/programs'
+import { useProgramCourses } from '../composables/useProgramCourses'
 import { courseLabel } from '../utils/course'
 import { ordinal } from '../utils/ordinal'
 
@@ -234,9 +235,10 @@ const notCheckedTotal = computed(() => rows.value.reduce((sum, r) => sum + r.not
 
 // --- Marksheet download ---
 // Only offered once every sheet is evaluated and every roll number matches
-// (the server enforces the same rule).
+// (the server enforces the same rule). total_count is the present students
+// only — absent ones have no sheet to evaluate and print as AB.
 function marksheetReady(row) {
-  return row.total_count > 0 && row.evaluated_count === row.total_count && row.matched_count === row.total_count
+  return row.total_count + (row.absent_count || 0) > 0 && row.evaluated_count === row.total_count && row.matched_count === row.total_count
 }
 function notReadyReason(row) {
   const reasons = []
@@ -383,6 +385,9 @@ function statusLabel(status) {
   if (status === 'error') return 'Check failed'
   return null
 }
+
+// Course dropdown follows Program — its mapped courses, or every course if it has none.
+const courseOptions = useProgramCourses(filters, availableCourses)
 </script>
 
 <template>
@@ -445,7 +450,7 @@ function statusLabel(status) {
             dense
             id="gm_course"
             v-model="filters.course_id"
-            :options="availableCourses"
+            :options="courseOptions"
             :loading="loadingLists.courses"
             placeholder="All courses"
             search-placeholder="Search courses…"
@@ -648,6 +653,10 @@ function statusLabel(status) {
                 <div class="inline-grid grid-cols-[auto_auto_auto] gap-x-1.5 gap-y-0.5 text-[12px] leading-snug whitespace-nowrap">
                   <span class="text-muted">Total</span><span class="text-muted">:</span><span class="font-semibold text-gray-900">{{ row.total_count }}</span>
                   <span class="text-muted">Evaluated</span><span class="text-muted">:</span><span class="font-semibold text-success">{{ row.evaluated_count }}</span>
+                  <!-- Not in Total — no sheet to evaluate; AB on the marksheet. -->
+                  <template v-if="row.absent_count">
+                    <span class="text-muted">Absent</span><span class="text-muted">:</span><span class="font-semibold text-gray-500">{{ row.absent_count }}</span>
+                  </template>
                 </div>
               </td>
               <td class="px-3 py-2.5">

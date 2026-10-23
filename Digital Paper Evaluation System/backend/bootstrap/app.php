@@ -113,7 +113,10 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $exceptions->render(function (HttpExceptionInterface $e, Request $request) use ($responder) {
-            return $responder->error($e->getMessage() ?: 'Request failed.', $e->getStatusCode());
+            // Keep the exception's own headers — e.g. a 429's Retry-After,
+            // which the frontend waits on before retrying (utils/api.js).
+            return $responder->error($e->getMessage() ?: 'Request failed.', $e->getStatusCode())
+                ->withHeaders($e->getHeaders());
         });
 
         $exceptions->render(function (Throwable $e, Request $request) use ($responder) {

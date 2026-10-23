@@ -31,6 +31,7 @@ import DatePicker from '../components/common/DatePicker.vue'
 import TeacherAllocationModal from '../components/teachers/TeacherAllocationModal.vue'
 import SendAssignmentEmailModal from '../components/teachers/SendAssignmentEmailModal.vue'
 import { useProgramsStore } from '../stores/programs'
+import { useProgramCourses } from '../composables/useProgramCourses'
 import { courseLabel } from '../utils/course'
 import { ordinal } from '../utils/ordinal'
 
@@ -54,6 +55,9 @@ const filters = reactive({
   // (question_answer_sheet_mappings.department_id). Separate from the
   // teacher list's own department filter below.
   department_id: '',
+  // Optional — only that batch's packets (Generate QR makes one packet per
+  // batch; uploaded packets have no batch, so they don't match one).
+  batch: '',
 })
 const fieldErrors = reactive({ program_name: '', exam_term_id: '', exam_type_id: '', course_id: '', semester: '', exam_year: '' })
 const fieldRefs = {
@@ -305,6 +309,7 @@ function recomputeMatchingMappings() {
       String(m.course_id) === String(filters.course_id) &&
       Number(m.semester) === Number(filters.semester) &&
       (!filters.department_id || String(m.department_id) === String(filters.department_id)) &&
+      (!String(filters.batch).trim() || String(m.batch ?? '') === String(filters.batch).trim()) &&
       !!paper &&
       Number(paper.exam_year) === Number(filters.exam_year)
     )
@@ -538,6 +543,7 @@ function assignPapers() {
     semester: filters.semester,
     exam_year: filters.exam_year,
     department_id: filters.department_id || null,
+    batch: String(filters.batch).trim() || null,
     evaluation_start_date: evaluationStartDate.value,
     evaluation_end_date: evaluationEndDate.value,
     evaluation_time_per_sheet: timeValue ? Number(timeValue) : null,
@@ -574,6 +580,7 @@ function resetSearchForm() {
   filters.semester = ''
   filters.exam_year = new Date().getFullYear()
   filters.department_id = ''
+  filters.batch = ''
   fieldErrors.program_name = ''
   fieldErrors.exam_term_id = ''
   fieldErrors.exam_type_id = ''
@@ -593,6 +600,9 @@ function resetSearchForm() {
   searched.value = false
   matchingMappings.value = []
 }
+
+// Course dropdown follows Program — its mapped courses, or every course if it has none.
+const courseOptions = useProgramCourses(filters, availableCourses)
 </script>
 
 <template>
@@ -665,7 +675,7 @@ function resetSearchForm() {
               id="assign_course"
               :ref="(el) => (fieldRefs.course_id.value = el)"
               v-model="filters.course_id"
-              :options="availableCourses"
+              :options="courseOptions"
               :loading="coursesLoading"
               :error="!!fieldErrors.course_id"
               placeholder="Select course"
@@ -710,8 +720,8 @@ function resetSearchForm() {
           </div>
         </div>
 
-        <!-- Row 2: Semester · Exam Year · Department · Search -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_1fr_1fr] gap-x-2.5 gap-y-1.5 mt-1.5">
+        <!-- Row 2: Semester · Exam Year · Department · Batch · Search -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_1fr_0.7fr_auto] gap-x-2.5 gap-y-1.5 mt-1.5">
           <div class="flex flex-col gap-0.5 min-w-0">
             <label for="assign_semester" class="text-[11px] text-label">Semester <span class="text-brand">*</span></label>
             <SearchableSelect
@@ -753,6 +763,19 @@ function resetSearchForm() {
               :loading="packetDepartmentsLoading"
               placeholder="All departments"
               search-placeholder="Search departments…"
+            />
+          </div>
+
+          <div class="flex flex-col gap-0.5 min-w-0">
+            <label for="assign_batch" class="text-[11px] text-label">Batch</label>
+            <input
+              id="assign_batch"
+              v-model="filters.batch"
+              type="text"
+              inputmode="numeric"
+              maxlength="20"
+              placeholder="All batches"
+              class="w-full h-8 px-2.5 rounded-xl bg-input-bg text-[11px] text-gray-800 outline-none border border-input-border focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 transition"
             />
           </div>
 

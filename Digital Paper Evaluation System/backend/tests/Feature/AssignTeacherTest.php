@@ -152,6 +152,45 @@ class AssignTeacherTest extends TestCase
         $this->assertSame(0, AnswerSheet::where('question_answer_sheet_mapping_id', $artsMapping->id)->whereNotNull('teacher_id')->count());
     }
 
+    public function test_assign_with_a_batch_only_takes_that_batchs_packets(): void
+    {
+        $this->actingAdmin();
+        // Generate QR makes one packet per batch — same exam details otherwise.
+        ['mapping' => $batch2024, 'filters' => $filters] = $this->mappingWithPendingSheets(2, ['batch' => '2024']);
+        $batch2025 = QuestionAnswerSheetMapping::factory()->create([
+            'question_paper_id' => $batch2024->question_paper_id,
+            'course_id' => $batch2024->course_id,
+            'exam_term_id' => $batch2024->exam_term_id,
+            'exam_type_id' => $batch2024->exam_type_id,
+            'semester' => $batch2024->semester,
+            'program_name' => $batch2024->program_name,
+            'batch' => '2025',
+        ]);
+        AnswerSheet::factory()->count(3)->create(['question_answer_sheet_mapping_id' => $batch2025->id]);
+        $teacher = TeacherDetail::factory()->create()->user_id;
+
+        // Only 2 are pending in batch 2024 — asking for 3 is refused.
+        $this->withApiKey()->postJson('/api/v1/assign-teacher', [
+            ...$filters, ...$this->evaluationWindow(), 'batch' => '2024',
+            'assignments' => [['teacher_id' => $teacher, 'quantity' => 3]],
+        ])->assertStatus(422);
+
+        $this->withApiKey()->postJson('/api/v1/assign-teacher', [
+            ...$filters, ...$this->evaluationWindow(), 'batch' => ' 2024 ',
+            'assignments' => [['teacher_id' => $teacher, 'quantity' => 2]],
+        ])->assertOk();
+
+        $this->assertSame(2, AnswerSheet::where('question_answer_sheet_mapping_id', $batch2024->id)->where('teacher_id', $teacher)->count());
+        $this->assertSame(0, AnswerSheet::where('question_answer_sheet_mapping_id', $batch2025->id)->whereNotNull('teacher_id')->count());
+
+        // No batch → every batch's packet counts.
+        $this->withApiKey()->postJson('/api/v1/assign-teacher', [
+            ...$filters, ...$this->evaluationWindow(),
+            'assignments' => [['teacher_id' => $teacher, 'quantity' => 3]],
+        ])->assertOk();
+        $this->assertSame(3, AnswerSheet::where('question_answer_sheet_mapping_id', $batch2025->id)->where('teacher_id', $teacher)->count());
+    }
+
     public function test_assign_stamps_the_evaluation_window_on_every_assigned_sheet(): void
     {
         $this->actingAdmin();

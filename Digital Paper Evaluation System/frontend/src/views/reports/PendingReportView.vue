@@ -10,6 +10,7 @@ import { useAuthStore } from '../../stores/auth'
 import { useToast } from '../../composables/useToast'
 import SearchableSelect from '../../components/common/SearchableSelect.vue'
 import { useProgramsStore } from '../../stores/programs'
+import { useProgramCourses } from '../../composables/useProgramCourses'
 import { courseLabel } from '../../utils/course'
 import { ordinal } from '../../utils/ordinal'
 
@@ -248,6 +249,9 @@ async function downloadReport() {
     downloading.value = false
   }
 }
+
+// Course dropdown follows Program — its mapped courses, or every course if it has none.
+const courseOptions = useProgramCourses(filters, availableCourses)
 </script>
 
 <template>
@@ -311,7 +315,7 @@ async function downloadReport() {
             id="pdr_course"
             :ref="(el) => (fieldRefs.course_id.value = el)"
             v-model="filters.course_id"
-            :options="availableCourses"
+            :options="courseOptions"
             :loading="coursesLoading"
             :error="!!fieldErrors.course_id"
             placeholder="Select course"

@@ -228,6 +228,37 @@ class GenerateMarksheetControllerTest extends TestCase
         $this->withApiKey()->get($url)->assertOk();
     }
 
+    public function test_absent_students_do_not_block_the_marksheet_and_print_as_ab(): void
+    {
+        $course = Course::factory()->create(['code' => 'SCI601']);
+        $mapping = $this->mapping($course);
+        AnswerSheet::factory()->create([
+            'question_answer_sheet_mapping_id' => $mapping->id, 'marks' => 40, 'name' => 'Present Student',
+            'roll_no_check_status' => 'read', 'roll_no' => '231001101005', 'student_id_read' => '231001101005',
+        ]);
+        // Absent: never evaluated, never ID-checked (e.g. marked absent on Scan Papers → Complete).
+        AnswerSheet::factory()->create([
+            'question_answer_sheet_mapping_id' => $mapping->id, 'marks' => null, 'name' => 'Absent Student', 'absent' => true,
+            'roll_no_check_status' => null, 'roll_no' => '231001101006', 'pdf_path' => null,
+        ]);
+
+        // Summary: the absent one isn't in Total or any other count.
+        $this->withApiKey()->getJson('/api/v1/generate-marksheet?'.$this->query())
+            ->assertOk()
+            ->assertJsonPath('data.rows.0.total_count', 1)
+            ->assertJsonPath('data.rows.0.absent_count', 1)
+            ->assertJsonPath('data.rows.0.evaluated_count', 1)
+            ->assertJsonPath('data.rows.0.pending_count', 0)
+            ->assertJsonPath('data.rows.0.matched_count', 1)
+            ->assertJsonPath('data.rows.0.not_checked_count', 0);
+
+        // Export works, and lists the absent student as AB.
+        $html = $this->withApiKey()->get('/api/v1/generate-marksheet/export?'.$this->query(['course_id' => $course->id]).'&format=excel')
+            ->assertOk()->getContent();
+        $this->assertStringContainsString('Present Student', $html);
+        $this->assertMatchesRegularExpression('/Absent Student.*?>AB<\/td>/s', $html);
+    }
+
     public function test_export_downloads_the_marksheet_as_excel_or_pdf(): void
     {
         $course = Course::factory()->create(['name' => 'Physics II', 'code' => 'PH-102', 'type' => 'Practical']);

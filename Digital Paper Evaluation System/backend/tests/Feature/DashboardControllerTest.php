@@ -135,6 +135,11 @@ class DashboardControllerTest extends TestCase
         // Waiting in a shared pool — its own bucket, not "not assigned".
         $pool = \App\Models\AnswerSheetPool::create(['program_name' => $mapping->program_name, 'course_id' => $mapping->course_id, 'exam_term_id' => $mapping->exam_term_id, 'exam_type_id' => $mapping->exam_type_id, 'semester' => $mapping->semester, 'exam_year' => now()->year]);
         AnswerSheet::factory()->count(2)->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => null, 'marks' => null, 'answer_sheet_pool_id' => $pool->id]);
+        // Not answer sheets to evaluate — left out of Total and every bucket:
+        // an absent student's, and one in a Generate QR packet still being scanned.
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => null, 'marks' => null, 'absent' => true]);
+        $scanning = $this->mappingThisYear(['is_scan_complete' => false])['mapping'];
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $scanning->id, 'teacher_id' => null, 'marks' => null]);
 
         $response = $this->withApiKey()->getJson('/api/v1/dashboard/admin-summary');
 

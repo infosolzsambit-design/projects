@@ -47,6 +47,9 @@ class AssignTeacherController extends Controller
             // Optional — only the packets uploaded under this department
             // (question_answer_sheet_mappings.department_id) are assigned.
             'department_id' => ['nullable', 'integer', Rule::exists('departments', 'id')->whereNull('deleted_at')],
+            // Optional — only the packets of this batch (Generate QR makes one
+            // packet per batch; uploaded packets have none, so they don't match).
+            'batch' => ['nullable', 'string', 'max:20'],
             // Only a real teacher — a user with a (non-deleted)
             // teacher_details row — same check TeacherController::show()
             // makes, just expressed as a validation rule instead.
@@ -89,6 +92,7 @@ class AssignTeacherController extends Controller
             'semester' => $data['semester'],
             'exam_year' => $data['exam_year'],
             'department_id' => $data['department_id'] ?? null,
+            'batch' => isset($data['batch']) && trim($data['batch']) !== '' ? trim($data['batch']) : null,
         ];
 
         if ($isPool) {

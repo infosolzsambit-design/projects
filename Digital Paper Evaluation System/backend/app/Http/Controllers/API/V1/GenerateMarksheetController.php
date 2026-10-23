@@ -39,6 +39,7 @@ class GenerateMarksheetController extends Controller
         $filters = $this->validateFilters($request);
         $matched = StudentIdCheckService::matchedSql();
         $needsReview = StudentIdCheckService::needsReviewSql();
+        $present = 'answer_sheets.absent = 0';
 
         $rows = $this->scoped($filters)
             ->leftJoin('courses as c', 'c.id', '=', 'm.course_id')
@@ -49,13 +50,16 @@ class GenerateMarksheetController extends Controller
             ->selectRaw(
                 'c.id as course_id, c.name as course_name, c.code as course_code, c.type as course_type, '.
                 'term.name as exam_term_name, et.name as exam_type_name, m.semester as semester, '.
-                'COUNT(*) as total_count, '.
-                'SUM(CASE WHEN answer_sheets.marks IS NOT NULL THEN 1 ELSE 0 END) as evaluated_count, '.
-                'SUM(CASE WHEN '.AnswerSheet::pendingSql().' THEN 1 ELSE 0 END) as pending_count, '.
-                'SUM(CASE WHEN '.AnswerSheet::problemSql().' THEN 1 ELSE 0 END) as problem_count, '.
-                "SUM(CASE WHEN {$matched} THEN 1 ELSE 0 END) as matched_count, ".
-                "SUM(CASE WHEN {$needsReview} THEN 1 ELSE 0 END) as mismatched_count, ".
-                'SUM(CASE WHEN answer_sheets.roll_no_check_status IS NULL THEN 1 ELSE 0 END) as not_checked_count, '.
+                // Absent students' sheets aren't evaluated or ID-checked — every
+                // count below is of the present ones; absent_count lists them.
+                "SUM(CASE WHEN {$present} THEN 1 ELSE 0 END) as total_count, ".
+                'SUM(CASE WHEN answer_sheets.absent = 1 THEN 1 ELSE 0 END) as absent_count, '.
+                "SUM(CASE WHEN {$present} AND answer_sheets.marks IS NOT NULL THEN 1 ELSE 0 END) as evaluated_count, ".
+                "SUM(CASE WHEN {$present} AND ".AnswerSheet::pendingSql().' THEN 1 ELSE 0 END) as pending_count, '.
+                "SUM(CASE WHEN {$present} AND ".AnswerSheet::problemSql().' THEN 1 ELSE 0 END) as problem_count, '.
+                "SUM(CASE WHEN {$present} AND {$matched} THEN 1 ELSE 0 END) as matched_count, ".
+                "SUM(CASE WHEN {$present} AND {$needsReview} THEN 1 ELSE 0 END) as mismatched_count, ".
+                "SUM(CASE WHEN {$present} AND answer_sheets.roll_no_check_status IS NULL THEN 1 ELSE 0 END) as not_checked_count, ".
                 // The packets' own departments (chosen on Answer Sheet Upload) —
                 // usually one per course; every one is listed if not.
                 "GROUP_CONCAT(DISTINCT m.department_name ORDER BY m.department_name SEPARATOR '||') as department_names",
@@ -70,6 +74,7 @@ class GenerateMarksheetController extends Controller
                 'exam_type_name' => $row->exam_type_name,
                 'semester' => (int) $row->semester,
                 'total_count' => (int) $row->total_count,
+                'absent_count' => (int) $row->absent_count,
                 'evaluated_count' => (int) $row->evaluated_count,
                 'pending_count' => (int) $row->pending_count,
                 'problem_count' => (int) $row->problem_count,
@@ -92,6 +97,7 @@ class GenerateMarksheetController extends Controller
         $perPage = min((int) $request->input('per_page', 20), 100);
 
         $page = $this->scoped($filters)
+            ->where('answer_sheets.absent', false)
             ->whereRaw(StudentIdCheckService::needsReviewSql())
             ->orderBy('answer_sheets.id')
             ->select('answer_sheets.*')
@@ -128,6 +134,7 @@ class GenerateMarksheetController extends Controller
         $limit = min(max((int) $request->input('limit', 25), 1), 50);
 
         $sheets = $this->scoped($filters)
+            ->where('answer_sheets.absent', false)
             ->whereNull('answer_sheets.roll_no_check_status')
             ->whereNotNull('answer_sheets.pdf_path')
             ->orderBy('answer_sheets.id')
@@ -178,13 +185,17 @@ class GenerateMarksheetController extends Controller
         $readiness = $this->scoped($filters)
             ->selectRaw(
                 'COUNT(*) as total, '.
-                'SUM(CASE WHEN answer_sheets.marks IS NOT NULL THEN 1 ELSE 0 END) as evaluated, '.
-                'SUM(CASE WHEN '.StudentIdCheckService::matchedSql().' THEN 1 ELSE 0 END) as matched',
+                // Absent students have no answer sheet to evaluate — they're
+                // printed as AB, and only the present ones must be ready.
+                'SUM(CASE WHEN answer_sheets.absent = 0 THEN 1 ELSE 0 END) as present, '.
+                'SUM(CASE WHEN answer_sheets.absent = 0 AND answer_sheets.marks IS NOT NULL THEN 1 ELSE 0 END) as evaluated, '.
+                'SUM(CASE WHEN answer_sheets.absent = 0 AND '.StudentIdCheckService::matchedSql().' THEN 1 ELSE 0 END) as matched',
             )
             ->first();
         $total = (int) $readiness->total;
-        if ($total === 0 || (int) $readiness->evaluated < $total || (int) $readiness->matched < $total) {
-            return $this->error('The marksheet can be generated only when every answer sheet is evaluated and every roll number matches.', 422);
+        $present = (int) $readiness->present;
+        if ($total === 0 || (int) $readiness->evaluated < $present || (int) $readiness->matched < $present) {
+            return $this->error('The marksheet can be generated only when every answer sheet is evaluated and every roll number matches (absent students are shown as AB).', 422);
         }
 
         $rows = $this->scoped($filters)
@@ -197,7 +208,7 @@ class GenerateMarksheetController extends Controller
                 'term.name as exam_term_name', 'et.name as exam_type_name', 'm.semester',
                 'answer_sheets.subject_barcode', 'answer_sheets.barcode', 'answer_sheets.name as student_name',
                 'answer_sheets.roll_no', 'answer_sheets.registration_no', 'qp.full_marks',
-                'answer_sheets.marks', 'answer_sheets.evaluated_at',
+                'answer_sheets.marks', 'answer_sheets.evaluated_at', 'answer_sheets.absent',
             ])
             ->map(fn ($row) => [
                 'program_name' => $row->program_name,
@@ -213,8 +224,9 @@ class GenerateMarksheetController extends Controller
                 'roll_no' => $row->roll_no,
                 'registration_no' => $row->registration_no,
                 'total_marks' => $row->full_marks,
-                'obtained_marks' => $row->marks !== null ? rtrim(rtrim(number_format((float) $row->marks, 2, '.', ''), '0'), '.') : null,
-                'lock_in_time' => $row->evaluated_at ? Carbon::parse($row->evaluated_at)->format('d-m-Y h:i A') : null,
+                'obtained_marks' => $row->absent ? 'AB' : ($row->marks !== null ? rtrim(rtrim(number_format((float) $row->marks, 2, '.', ''), '0'), '.') : null),
+                'lock_in_time' => ! $row->absent && $row->evaluated_at ? Carbon::parse($row->evaluated_at)->format('d-m-Y h:i A') : null,
+                'absent' => (bool) $row->absent,
             ]);
 
         $first = $rows->first();
@@ -260,6 +272,7 @@ class GenerateMarksheetController extends Controller
     private function progress(array $filters): array
     {
         $counts = $this->scoped($filters)
+            ->where('answer_sheets.absent', false)
             ->whereNotNull('answer_sheets.pdf_path')
             ->selectRaw('COUNT(*) as total, SUM(CASE WHEN answer_sheets.roll_no_check_status IS NOT NULL THEN 1 ELSE 0 END) as checked')
             ->first();

@@ -48,7 +48,10 @@ class QuestionAnswerSheetMappingResource extends JsonResource
             // loading them all here just to show one page of a modal would
             // be exactly the "load everything at once" problem this whole
             // feature exists to avoid.
+            // Absent students' sheets aren't counted here — see
+            // absent_answer_sheet_count (marked absent by Scan Papers → Complete).
             'answer_sheet_count' => $this->answer_sheets_count,
+            'absent_answer_sheet_count' => $this->absent_answer_sheet_count,
             // Same ->withCount() pattern, constrained to teacher_id IS
             // NULL — the pool AssignTeacherService::assign() actually
             // draws from. Distinct from answer_sheet_count above once any

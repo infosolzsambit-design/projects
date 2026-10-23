@@ -3,6 +3,7 @@
 use App\Http\Controllers\API\V1\AnswerSheetPoolController;
 use App\Http\Controllers\API\V1\MainDbSyncController;
 use App\Http\Controllers\API\V1\QrCodeController;
+use App\Http\Controllers\API\V1\QrScanController;
 use App\Http\Controllers\API\V1\AssignTeacherController;
 use App\Http\Controllers\API\V1\AuditController;
 use App\Http\Controllers\API\V1\Auth\AuthController;
@@ -86,6 +87,8 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     // permission gate — see MyPendingCourseController's own docblock.
     Route::get('my-pending-courses', [MyPendingCourseController::class, 'subjects']);
     Route::get('my-pending-courses/papers', [MyPendingCourseController::class, 'papers']);
+    // The sheet this teacher has started but not completed — one at a time.
+    Route::get('my-pending-courses/in-progress', [MyPendingCourseController::class, 'inProgress']);
     Route::post('my-pending-courses/papers/{answer_sheet}/start-evaluation', [MyPendingCourseController::class, 'startEvaluation']);
     // Looked up by the one-time token start-evaluation just minted, not a
     // route-bound {answer_sheet} id — see showByToken()'s own docblock.
@@ -196,6 +199,12 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     Route::post('qr/generate', [QrCodeController::class, 'generate']);
     // Scan Papers → Print QR Code: a packet's QR numbers and students.
     Route::get('qr/packets/{question_answer_sheet_mapping}/codes', [QrCodeController::class, 'packetCodes']);
+    // Scan Papers → Scan: scan a packet's sheets one by one (QrScanController).
+    Route::get('qr/packets/{question_answer_sheet_mapping}/sheets', [QrScanController::class, 'sheets']);
+    Route::post('qr/packets/{question_answer_sheet_mapping}/scan', [QrScanController::class, 'scan']);
+    Route::post('qr/packets/{question_answer_sheet_mapping}/sheets/{answer_sheet}/confirm', [QrScanController::class, 'confirm']);
+    Route::delete('qr/packets/{question_answer_sheet_mapping}/sheets/{answer_sheet}/scan', [QrScanController::class, 'removeScan']);
+    Route::post('qr/packets/{question_answer_sheet_mapping}/complete', [QrScanController::class, 'complete']);
     Route::apiResource('departments', DepartmentController::class);
 
     Route::post('exam-terms/{exam_term}/restore', [ExamTermController::class, 'restore'])->withTrashed();

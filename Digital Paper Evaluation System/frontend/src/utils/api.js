@@ -32,6 +32,13 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+// 429 (Too Many Requests — the API's per-minute limit) is retried, up to
+// MAX_429_RETRIES times, after the wait the server asks for (Retry-After,
+// capped) — so a burst of page loads just slows down a moment instead of
+// failing (a failed /me used to show "You don't have permission").
+const MAX_429_RETRIES = 2
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
 // Centralized 401 handling: any expired/invalid token bounces to /login,
 // instead of every call site needing to check for it individually.
 api.interceptors.response.use(
@@ -39,8 +46,15 @@ api.interceptors.response.use(
     if (!response.config?.skipLoader) endRequest()
     return response
   },
-  (error) => {
+  async (error) => {
     if (!error.config?.skipLoader) endRequest()
+    const config = error.config
+    if (error.response?.status === 429 && config && (config.retried429 || 0) < MAX_429_RETRIES) {
+      config.retried429 = (config.retried429 || 0) + 1
+      const seconds = Number(error.response.headers?.['retry-after'])
+      await wait(Math.min(Number.isFinite(seconds) && seconds > 0 ? seconds : 2, 10) * 1000)
+      return api(config) // goes through the request interceptor again (loader + token)
+    }
     if (error.response?.status === 401) {
       localStorage.removeItem('auth_token')
       if (window.location.pathname !== '/login') {

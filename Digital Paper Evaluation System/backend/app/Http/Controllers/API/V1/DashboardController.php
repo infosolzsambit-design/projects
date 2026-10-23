@@ -60,6 +60,7 @@ class DashboardController extends Controller
         $examYear = $this->examYearScope($request);
         $examType = $this->examTypeScope($request);
         $sheetQuery = fn () => AnswerSheet::query()
+            ->inEvaluation()
             ->when($examYear !== null, fn ($q) => $q->whereHas('mapping.questionPaper', fn ($q2) => $q2->where('exam_year', $examYear)))
             ->when($examType !== null, fn ($q) => $q->whereHas('mapping', fn ($q2) => $q2->where('exam_type_id', $examType)));
 
@@ -298,6 +299,7 @@ class DashboardController extends Controller
         $examYear = $this->examYearScope($request);
         $examType = $this->examTypeScope($request);
         $sheetQuery = fn () => AnswerSheet::query()
+            ->inEvaluation()
             ->when($examYear !== null, fn ($q) => $q->whereHas('mapping.questionPaper', fn ($q2) => $q2->where('exam_year', $examYear)))
             ->when($examType !== null, fn ($q) => $q->whereHas('mapping', fn ($q2) => $q2->where('exam_type_id', $examType)));
         $rows = $this->teacherWorkloadQuery($sheetQuery)->get();
@@ -353,7 +355,8 @@ class DashboardController extends Controller
             'teachers' => TeacherDetail::count(),
             'students' => Student::count(),
             'question_papers' => QuestionPaper::count(),
-            'answer_sheets' => AnswerSheet::count(),
+            // Absent students' and still-being-scanned sheets aren't answer sheets to evaluate.
+            'answer_sheets' => AnswerSheet::inEvaluation()->count(),
         ];
     }
 
@@ -455,6 +458,9 @@ class DashboardController extends Controller
             ->join('programs', 'programs.name', '=', 'question_answer_sheet_mappings.program_name')
             ->join('departments', 'departments.id', '=', 'programs.department_id')
             ->whereNull('question_answer_sheet_mappings.deleted_at')
+            // Same as AnswerSheet::scopeInEvaluation() — not absent, packet scanned.
+            ->where('answer_sheets.absent', false)
+            ->where('question_answer_sheet_mappings.is_scan_complete', true)
             ->whereNull('programs.deleted_at')
             ->whereNull('departments.deleted_at');
 
@@ -589,7 +595,10 @@ class DashboardController extends Controller
             ->join('question_answer_sheet_mappings', 'question_answer_sheet_mappings.id', '=', 'answer_sheets.question_answer_sheet_mapping_id')
             ->join('courses', 'courses.id', '=', 'question_answer_sheet_mappings.course_id')
             ->whereNull('question_answer_sheet_mappings.deleted_at')
-            ->whereNull('courses.deleted_at');
+            ->whereNull('courses.deleted_at')
+            // Same as AnswerSheet::scopeInEvaluation() — not absent, packet scanned.
+            ->where('answer_sheets.absent', false)
+            ->where('question_answer_sheet_mappings.is_scan_complete', true);
 
         if ($examYear !== null) {
             $query->join('question_papers', 'question_papers.id', '=', 'question_answer_sheet_mappings.question_paper_id')

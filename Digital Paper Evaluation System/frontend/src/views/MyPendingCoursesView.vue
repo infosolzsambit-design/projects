@@ -124,6 +124,15 @@ function paperAction(paper) {
   // this is only a safety net (e.g. a stale row right after raising one).
   if (paper.blocks_evaluation) return { label: 'Issue Pending', disabled: true }
   const { state } = paperTimeStatus(paper)
+  // Assigned sheets go one by one, in list order (shared-pool sheets don't —
+  // the server enforces the same in startEvaluation()): while a started one
+  // isn't completed the others wait, and otherwise only the next one can start.
+  if (state === 'active' && !paper.from_pool) {
+    if (inProgress.value && inProgress.value.id !== paper.id) return { label: 'Start Evaluate', disabled: true }
+    if (!inProgress.value && !isDraft(paper) && nextAssigned.value && nextAssigned.value.id !== paper.id) {
+      return { label: 'Start Evaluate', disabled: true }
+    }
+  }
   if (state === 'active') return { label: isDraft(paper) ? 'Continue Evaluate' : 'Start Evaluate', disabled: false }
   if (checkingEvaluationId.value === paper.id) return { label: 'Checking…', disabled: true }
   if (state === 'closed') return { label: 'Evaluation Closed', disabled: true }
@@ -240,7 +249,26 @@ function selectCourse(course) {
   loadPapers(course)
 }
 
+// The first assigned (non-pool) sheet in this list that can be started now —
+// the only one Start Evaluate is open for when nothing is in progress.
+const nextAssigned = computed(() =>
+  papers.value.find((p) => !p.from_pool && !p.blocks_evaluation && paperTimeStatus(p).state === 'active') || null,
+)
+
+// The assigned sheet this teacher started but hasn't completed (any course)
+// — every other assigned sheet's Start Evaluate is locked until it's done.
+const inProgress = ref(null)
+async function loadInProgress() {
+  try {
+    const res = await api.get('/my-pending-courses/in-progress', { skipLoader: true })
+    inProgress.value = res.data.data.sheet
+  } catch {
+    inProgress.value = null // the server still enforces it on Start
+  }
+}
+
 async function loadPapers(course) {
+  loadInProgress()
   papersLoading.value = true
   papersError.value = ''
   papers.value = []
@@ -279,6 +307,7 @@ async function evaluate(paper) {
     faceScanPaper.value = paper
   } catch (err) {
     toast.error(err.response?.data?.message || 'Could not start evaluation for this paper.')
+    if (err.response?.data?.errors?.reason === 'in_progress') inProgress.value = err.response.data.errors.in_progress
     // 409 = another pool teacher started this sheet first — refresh so it
     // disappears from this list (staying on the same course).
     if (err.response?.status === 409) loadCourses(activeCourse.value?.course_id)

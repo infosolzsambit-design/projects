@@ -323,6 +323,72 @@ class MyPendingCourseControllerTest extends TestCase
         $response->assertStatus(404);
     }
 
+    public function test_a_teacher_evaluates_one_sheet_at_a_time(): void
+    {
+        $teacher = $this->actingTeacher();
+        $window = ['evaluation_start_date' => now()->subDay(), 'evaluation_end_date' => now()->addDay(), 'marks' => null, 'teacher_id' => $teacher->id];
+        $started = AnswerSheet::factory()->create($window + ['subject_barcode' => '10000001', 'barcode' => null, 'draft_marks' => 5]);
+        $next = AnswerSheet::factory()->create($window + ['subject_barcode' => '10000002', 'barcode' => null]);
+
+        // The started one is reported, and every other sheet is locked.
+        $this->withApiKey()->getJson('/api/v1/my-pending-courses/in-progress')
+            ->assertOk()->assertJsonPath('data.sheet.id', $started->id)->assertJsonPath('data.sheet.qr_code', '10000001');
+        $this->withApiKey()->postJson("/api/v1/my-pending-courses/papers/{$next->id}/start-evaluation")
+            ->assertStatus(422)
+            ->assertJsonPath('errors.reason', 'in_progress')
+            ->assertJsonPath('errors.in_progress.id', $started->id);
+        $this->assertNull($next->fresh()->evaluation_session_token);
+
+        // Continuing the started one is fine.
+        $this->withApiKey()->postJson("/api/v1/my-pending-courses/papers/{$started->id}/start-evaluation")->assertOk();
+
+        // Once it's completed, the next one can start.
+        $started->update(['marks' => 10]);
+        $this->withApiKey()->getJson('/api/v1/my-pending-courses/in-progress')->assertOk()->assertJsonPath('data.sheet', null);
+        $this->withApiKey()->postJson("/api/v1/my-pending-courses/papers/{$next->id}/start-evaluation")->assertOk();
+    }
+
+    public function test_sheets_are_started_in_list_order(): void
+    {
+        $teacher = $this->actingTeacher();
+        $mapping = QuestionAnswerSheetMapping::factory()->create(['exam_type_id' => $this->defaultExamTypeId()]);
+        $sheet = fn (string $qr, array $extra = []) => AnswerSheet::factory()->create(array_merge([
+            'question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher->id, 'marks' => null,
+            'subject_barcode' => $qr, 'barcode' => null, 'evaluation_start_date' => now()->subDay(), 'evaluation_end_date' => now()->addDay(),
+        ], $extra));
+        // First in the list, but its window hasn't opened — skipped, never blocks.
+        $sheet('10000000', ['evaluation_start_date' => now()->addDay(), 'evaluation_end_date' => now()->addDays(2)]);
+        [$first, $second, $third] = [$sheet('10000001'), $sheet('10000002'), $sheet('10000003')];
+
+        $this->withApiKey()->postJson("/api/v1/my-pending-courses/papers/{$second->id}/start-evaluation")
+            ->assertStatus(422)->assertJsonPath('errors.reason', 'not_next')->assertJsonPath('errors.next.qr_code', '10000001');
+        $this->withApiKey()->postJson("/api/v1/my-pending-courses/papers/{$first->id}/start-evaluation")->assertOk();
+
+        $first->update(['marks' => 10]);
+        $this->withApiKey()->postJson("/api/v1/my-pending-courses/papers/{$third->id}/start-evaluation")
+            ->assertStatus(422)->assertJsonPath('errors.next.qr_code', '10000002');
+        $this->withApiKey()->postJson("/api/v1/my-pending-courses/papers/{$second->id}/start-evaluation")->assertOk();
+    }
+
+    public function test_a_started_sheet_that_cannot_be_finished_now_does_not_block_the_others(): void
+    {
+        $teacher = $this->actingTeacher();
+        $open = ['evaluation_start_date' => now()->subDay(), 'evaluation_end_date' => now()->addDay(), 'marks' => null, 'teacher_id' => $teacher->id];
+        // Started, but its window has closed — can't be finished.
+        AnswerSheet::factory()->create(['evaluation_start_date' => now()->subDays(3), 'evaluation_end_date' => now()->subDay(), 'marks' => null, 'teacher_id' => $teacher->id, 'draft_marks' => 5]);
+        // Started, but waiting on an open issue.
+        AnswerSheet::factory()->create($open + ['draft_marks' => 5, 'issue_master_id' => IssueMaster::factory()->create()->id, 'issue_status' => 'open']);
+        // A shared-pool sheet this teacher started — pool sheets aren't one-by-one.
+        AnswerSheet::factory()->create($open + ['draft_marks' => 5, 'answer_sheet_pool_id' => 999]);
+        // Another teacher's started sheet.
+        AnswerSheet::factory()->create(['teacher_id' => User::factory()->create()->id, 'draft_marks' => 5] + array_diff_key($open, ['teacher_id' => 1]));
+
+        $next = AnswerSheet::factory()->create($open);
+
+        $this->withApiKey()->getJson('/api/v1/my-pending-courses/in-progress')->assertOk()->assertJsonPath('data.sheet', null);
+        $this->withApiKey()->postJson("/api/v1/my-pending-courses/papers/{$next->id}/start-evaluation")->assertOk();
+    }
+
     public function test_show_includes_the_real_question_paper_structure(): void
     {
         $teacher = $this->actingTeacher();

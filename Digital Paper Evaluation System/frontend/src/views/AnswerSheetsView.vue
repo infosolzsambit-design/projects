@@ -376,6 +376,11 @@ onMounted(async () => {
                   <span class="font-semibold text-gray-900">{{ mapping.answer_sheet_count }}</span>
                   <span class="text-muted">Pending to assign</span><span class="text-muted">:</span>
                   <span class="font-semibold" :class="mapping.pending_answer_sheet_count > 0 ? 'text-amber-600' : 'text-gray-900'">{{ mapping.pending_answer_sheet_count ?? 0 }}</span>
+                  <!-- Marked absent (no answer sheet) — not in Total, never assigned. -->
+                  <template v-if="mapping.absent_answer_sheet_count > 0">
+                    <span class="text-muted">Absent</span><span class="text-muted">:</span>
+                    <span class="font-semibold text-gray-500">{{ mapping.absent_answer_sheet_count }}</span>
+                  </template>
                   <!-- Waiting in a shared pool, not started by any teacher yet. -->
                   <template v-if="mapping.in_pool_answer_sheet_count > 0">
                     <span class="text-muted">In pool</span><span class="text-muted">:</span>
@@ -404,6 +409,15 @@ onMounted(async () => {
                     @click="openRowsModal(mapping)"
                   >
                     View Answer Sheets
+                  </button>
+                  <!-- Absent students' copies, scanned in late on the same Scan page. -->
+                  <button
+                    v-if="mapping.absent_answer_sheet_count > 0"
+                    type="button"
+                    class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors"
+                    @click="router.push({ name: 'qr-scan-packet', params: { id: mapping.id } })"
+                  >
+                    Scan Pending Copy
                   </button>
                 </RowActionMenu>
               </td>

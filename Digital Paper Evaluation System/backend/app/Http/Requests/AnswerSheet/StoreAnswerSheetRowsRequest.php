@@ -170,6 +170,13 @@ class StoreAnswerSheetRowsRequest extends FormRequest
                 $v->errors()->add('rows', 'QR code already uploaded for this Program/Packet Code/Question Paper/Course/Exam Term/Semester combination: '.implode(', ', $existingBarcodes).'.');
             }
 
+            // …and unique across every other live packet too (uploaded or
+            // made by Generate QR).
+            $elsewhere = QuestionAnswerSheetMappingController::barcodesUsedElsewhere($rowBarcodes, $siblingMappingIds);
+            if ($elsewhere) {
+                $v->errors()->add('rows', 'QR code already used in another packet: '.collect($elsewhere)->map(fn ($packet, $qr) => "{$qr} (packet {$packet})")->implode(', ').'.');
+            }
+
             $existingRollNos = AnswerSheet::withTrashed()
                 ->where('question_answer_sheet_mapping_id', $mapping->id)
                 ->whereIn('roll_no', $rollNos)

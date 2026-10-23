@@ -118,6 +118,12 @@ const router = createRouter({
           meta: { title: 'Scan Papers' },
         },
         {
+          path: 'qr/scan-papers/:id',
+          name: 'qr-scan-packet',
+          component: () => import('../views/ScanPacketView.vue'),
+          meta: { title: 'Scan' },
+        },
+        {
           path: 'answer-sheets/upload',
           name: 'answer-sheets-upload',
           component: () => import('../views/AnswerSheetUploadView.vue'),

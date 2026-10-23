@@ -134,6 +134,91 @@ class MyPendingCourseController extends Controller
     }
 
     /**
+     * GET /my-pending-courses/in-progress — the sheet this teacher has
+     * started but not completed (if any), so MyPendingCoursesView.vue can
+     * lock every other sheet's Start Evaluate until it's done (one at a
+     * time — enforced again in startEvaluation()).
+     */
+    public function inProgress(Request $request): JsonResponse
+    {
+        return $this->success(['sheet' => $this->inProgressSheet($request->user()->id)], 'In-progress sheet fetched successfully.');
+    }
+
+    /**
+     * The first sheet assigned to this teacher (not a shared-pool one), in
+     * the order My Pending Courses lists them (QR code), that they can start
+     * now in $sheet's course — same course, exam type and exam year, still
+     * pending, no open issue, evaluation window open. Sheets that can't be
+     * started yet are skipped, so they never hold up the rest.
+     */
+    private function nextSheetInOrder(int $teacherId, AnswerSheet $sheet): ?AnswerSheet
+    {
+        $mapping = $sheet->mapping()->with('questionPaper:id,exam_year')->first();
+        if (! $mapping) {
+            return null;
+        }
+        $now = now();
+
+        return AnswerSheet::query()
+            ->whereHas('mapping', function ($q) use ($mapping) {
+                $q->where('course_id', $mapping->course_id)->where('exam_type_id', $mapping->exam_type_id);
+                if ($mapping->questionPaper) {
+                    $q->whereHas('questionPaper', fn ($q2) => $q2->where('exam_year', $mapping->questionPaper->exam_year));
+                }
+            })
+            ->where('teacher_id', $teacherId)
+            ->whereNull('answer_sheet_pool_id')
+            ->whereNull('marks')
+            ->withoutOpenIssue()
+            ->where('evaluation_start_date', '<=', $now)
+            ->where('evaluation_end_date', '>=', $now)
+            ->orderByRaw("CHAR_LENGTH(COALESCE(NULLIF(barcode, ''), NULLIF(subject_barcode, ''), roll_no, ''))")
+            ->orderByRaw("COALESCE(NULLIF(barcode, ''), NULLIF(subject_barcode, ''), roll_no, '')")
+            ->orderBy('id')
+            ->first();
+    }
+
+    /**
+     * The teacher's started-but-not-completed assigned sheet (not a
+     * shared-pool one; draft marks saved, no
+     * final marks) that they can still finish: no open issue, and its
+     * evaluation window open right now. One whose window has closed or
+     * that's waiting on an issue doesn't block the others — otherwise the
+     * teacher would be stuck.
+     *
+     * @return array{id: int, qr_code: ?string, course_id: ?int, course_name: ?string, course_code: ?string}|null
+     */
+    private function inProgressSheet(int $teacherId, ?int $exceptId = null): ?array
+    {
+        $now = now();
+        $sheet = AnswerSheet::query()
+            ->with('mapping.course:id,name,code')
+            ->where('teacher_id', $teacherId)
+            ->whereNull('answer_sheet_pool_id')
+            ->whereNull('marks')
+            ->whereNotNull('draft_marks')
+            ->withoutOpenIssue()
+            ->where('evaluation_start_date', '<=', $now)
+            ->where('evaluation_end_date', '>=', $now)
+            ->whereHas('mapping')
+            ->when($exceptId, fn ($q) => $q->whereKeyNot($exceptId))
+            ->orderBy('id')
+            ->first();
+
+        if (! $sheet) {
+            return null;
+        }
+
+        return [
+            'id' => $sheet->id,
+            'qr_code' => $sheet->barcode ?: ($sheet->subject_barcode ?: $sheet->roll_no),
+            'course_id' => $sheet->mapping?->course_id,
+            'course_name' => $sheet->mapping?->course?->name,
+            'course_code' => $sheet->mapping?->course?->code,
+        ];
+    }
+
+    /**
      * POST /my-pending-courses/papers/{answer_sheet}/start-evaluation —
      * the API-driven check MyPendingCoursesView.vue's "Start Evaluate"
      * button fires before doing anything else, so the face-scan gate can
@@ -161,6 +246,33 @@ class MyPendingCourseController extends Controller
      */
     public function startEvaluation(Request $request, AnswerSheet $answerSheet): JsonResponse
     {
+        // Assigned sheets (not shared-pool ones) are evaluated one by one:
+        // another started one must be completed first…
+        $assigned = $answerSheet->answer_sheet_pool_id === null;
+        $open = $assigned ? $this->inProgressSheet($request->user()->id, $answerSheet->id) : null;
+        if ($open) {
+            $qr = $open['qr_code'];
+
+            return $this->error("Finish answer sheet {$qr} ({$open['course_name']}) first — evaluate one sheet at a time.", 422, [
+                'reason' => 'in_progress',
+                'in_progress' => $open,
+            ]);
+        }
+
+        // …and in list order: a sheet not started yet must be the next one
+        // that can be started in its course (same order as papers()).
+        if ($assigned && $answerSheet->draft_marks === null) {
+            $next = $this->nextSheetInOrder($request->user()->id, $answerSheet);
+            if ($next && $next->id !== $answerSheet->id) {
+                $qr = $next->barcode ?: ($next->subject_barcode ?: $next->roll_no);
+
+                return $this->error("Evaluate the sheets in order — start answer sheet {$qr} first.", 422, [
+                    'reason' => 'not_next',
+                    'next' => ['id' => $next->id, 'qr_code' => $qr],
+                ]);
+            }
+        }
+
         // A pool sheet another pool teacher already started (this teacher's
         // list was just out of date) — same message as losing the race below.
         if (

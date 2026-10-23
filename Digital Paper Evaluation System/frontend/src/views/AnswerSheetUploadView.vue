@@ -723,6 +723,13 @@ async function runValidation() {
             ? [`Already uploaded for this Program/Packet Code/Question Paper/Course/Exam Term/Semester combination: ${capList(duplicateBarcodes).join(', ')}.`]
             : [],
         })
+        // QR codes are unique across every packet (uploaded or Generate QR).
+        const usedElsewhere = Object.entries(dupeRes.data.data.used_in_other_packets || {}).map(([qr, packet]) => `${qr} (packet ${packet})`)
+        checks.push({
+          label: 'QR code not used in another packet',
+          status: usedElsewhere.length ? 'fail' : 'pass',
+          details: usedElsewhere.length ? [`Already used in another packet: ${capList(usedElsewhere).join(', ')}.`] : [],
+        })
       } catch (err) {
         checks.push({
           label: 'QR code not already uploaded for this combination',

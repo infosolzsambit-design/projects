@@ -34,8 +34,9 @@ use Illuminate\Validation\ValidationException;
 class AssignTeacherService
 {
     /**
-     * @param  array{program_name:string,exam_term_id:int,exam_type_id:int,course_id:int,semester:int,exam_year:int,department_id?:int|null}  $filters
+     * @param  array{program_name:string,exam_term_id:int,exam_type_id:int,course_id:int,semester:int,exam_year:int,department_id?:int|null,batch?:string|null}  $filters
      *   department_id (optional) — only packets uploaded under that department.
+     *   batch (optional) — only that batch's packets (Generate QR makes one per batch).
      * @param  list<array{teacher_id:int,quantity:int}>  $assignments
      * @return list<array{teacher_id:int,assigned_count:int}>
      *
@@ -193,6 +194,7 @@ class AssignTeacherService
             ->where('semester', $filters['semester'])
             ->whereHas('questionPaper', fn ($q) => $q->where('exam_year', $filters['exam_year']))
             ->when(! empty($filters['department_id']), fn ($q) => $q->where('department_id', $filters['department_id']))
+            ->when(! empty($filters['batch']), fn ($q) => $q->where('batch', $filters['batch']))
             ->pluck('id');
 
         if ($mappingIds->isEmpty()) {

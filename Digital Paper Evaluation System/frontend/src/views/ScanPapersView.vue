@@ -6,8 +6,9 @@
 // (and can then be assigned to teachers). Same shell as AnswerSheetsView.vue.
 // Row actions: "Print Student List" and "Print QR Code" each open a
 // printable A4 PDF (the student list / the QR labels — built in the browser,
-// utils/qrCodePdf.js); "Scan" does nothing yet.
+// utils/qrCodePdf.js); "Scan" opens the packet's scan page (ScanPacketView.vue).
 import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '../utils/api'
 import { useToast } from '../composables/useToast'
 import { buildQrCodePdf } from '../utils/qrCodePdf'
@@ -21,6 +22,8 @@ import { formatDateTime } from '../utils/date'
 // Program names display as "Name (Label)" — see stores/programs.js.
 const programsStore = useProgramsStore()
 programsStore.load().catch(() => {})
+
+const router = useRouter()
 
 const packets = ref([])
 const loading = ref(true)
@@ -212,10 +215,10 @@ onMounted(() => fetchPackets(1))
                     <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3" /></svg>
                     {{ printing === `${packet.id}-labels` ? 'Preparing…' : 'Print QR Code' }}
                   </button>
-                  <!-- Scan — not wired up yet. -->
                   <button
                     type="button"
                     class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors"
+                    @click="router.push({ name: 'qr-scan-packet', params: { id: packet.id } })"
                   >
                     <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" /><line x1="7" y1="12" x2="17" y2="12" /></svg>
                     Scan
