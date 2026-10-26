@@ -327,7 +327,7 @@ onMounted(async () => {
               <th class="px-4 py-1.5 font-medium">Ans Sheets</th>
               <th class="px-4 py-1.5 font-medium whitespace-nowrap">Uploaded By / At</th>
               <th class="px-4 py-1.5 font-medium">Status</th>
-              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap" v-if="authStore.can('answer-sheet-view')">Action</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap" v-if="authStore.can('answer-sheet-view') || authStore.can('scan-pending-copy')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
@@ -401,9 +401,10 @@ onMounted(async () => {
                   {{ mapping.answer_sheet_count > 0 ? 'Uploaded' : 'Empty' }}
                 </span>
               </td>
-              <td v-if="authStore.can('answer-sheet-view')" class="px-4 py-1 text-center relative" @click.stop>
+              <td v-if="authStore.can('answer-sheet-view') || authStore.can('scan-pending-copy')" class="px-4 py-1 text-center relative" @click.stop>
                 <RowActionMenu width="w-48">
                   <button
+                    v-if="authStore.can('answer-sheet-view')"
                     type="button"
                     class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors"
                     @click="openRowsModal(mapping)"
@@ -412,7 +413,7 @@ onMounted(async () => {
                   </button>
                   <!-- Absent students' copies, scanned in late on the same Scan page. -->
                   <button
-                    v-if="mapping.absent_answer_sheet_count > 0"
+                    v-if="mapping.absent_answer_sheet_count > 0 && authStore.can('scan-pending-copy')"
                     type="button"
                     class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors"
                     @click="router.push({ name: 'qr-scan-packet', params: { id: mapping.id } })"

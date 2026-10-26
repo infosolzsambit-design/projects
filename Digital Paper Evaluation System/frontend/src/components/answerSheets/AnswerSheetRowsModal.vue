@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import api, { resolveStorageUrl } from '../../utils/api'
+import { useAuthStore } from '../../stores/auth'
 import { useToast } from '../../composables/useToast'
 import { useConfirm } from '../../composables/useConfirm'
 import Pagination from '../common/Pagination.vue'
@@ -18,6 +19,7 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 const toast = useToast()
 const { confirmDialog } = useConfirm()
+const authStore = useAuthStore()
 
 const rows = ref([])
 const loading = ref(true)
@@ -206,6 +208,7 @@ onMounted(() => fetchRows(1))
                         No Answer Sheet
                       </span>
                       <button
+                        v-if="authStore.can('answer-sheet-upload-delete')"
                         type="button"
                         class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand transition-colors disabled:opacity-50"
                         :disabled="deletingId === row.id"

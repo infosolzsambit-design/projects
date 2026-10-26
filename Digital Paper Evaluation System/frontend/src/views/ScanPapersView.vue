@@ -10,6 +10,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../utils/api'
+import { useAuthStore } from '../stores/auth'
 import { useToast } from '../composables/useToast'
 import { buildQrCodePdf } from '../utils/qrCodePdf'
 import Pagination from '../components/common/Pagination.vue'
@@ -24,6 +25,7 @@ const programsStore = useProgramsStore()
 programsStore.load().catch(() => {})
 
 const router = useRouter()
+const authStore = useAuthStore()
 
 const packets = ref([])
 const loading = ref(true)
@@ -86,11 +88,23 @@ async function printPdf(packet, part) {
   }
 }
 
-onMounted(() => fetchPackets(1))
+// Guards against a false "no permission" flash on a hard refresh — see
+// master/CoursesView.vue for why.
+const permissionChecked = ref(false)
+onMounted(async () => {
+  if (!authStore.user) await authStore.fetchMe().catch(() => {})
+  permissionChecked.value = true
+  if (authStore.can('scan-paper-list')) fetchPackets(1)
+})
 </script>
 
 <template>
-  <div>
+  <p v-if="!permissionChecked" class="text-center text-sm text-muted py-10">Loading&hellip;</p>
+  <div v-else-if="!authStore.can('scan-paper-list')" class="bg-white rounded-2xl shadow-panel p-10 text-center">
+    <p class="text-[15px] font-semibold text-gray-900">You don't have permission to view this page.</p>
+    <p class="mt-1 text-[13px] text-muted">Contact an administrator if you think this is a mistake.</p>
+  </div>
+  <div v-else>
     <!-- Breadcrumb -->
     <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-2.5 flex items-center gap-3 min-h-[44px]">
       <RouterLink to="/dashboard" class="inline-flex items-center gap-2 text-[13px] sm:text-sm text-gray-700 hover:text-brand-blue">
@@ -151,7 +165,7 @@ onMounted(() => fetchPackets(1))
               <th class="px-4 py-1.5 font-medium whitespace-nowrap">Exam Year</th>
               <th class="px-4 py-1.5 font-medium whitespace-nowrap">QR Codes</th>
               <th class="px-4 py-1.5 font-medium">Generated</th>
-              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap">Action</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap" v-if="authStore.can('print-student-qr-list') || authStore.can('print-student-qr-code-list') || authStore.can('scan-answer-sheet')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
@@ -195,9 +209,10 @@ onMounted(() => fetchPackets(1))
                 <p class="leading-snug">{{ packet.created_by_name || '—' }}</p>
                 <p class="text-[11px] text-muted leading-snug">{{ formatDateTime(packet.created_at) }}</p>
               </td>
-              <td class="px-4 py-1.5 text-center relative" @click.stop>
+              <td class="px-4 py-1.5 text-center relative" @click.stop v-if="authStore.can('print-student-qr-list') || authStore.can('print-student-qr-code-list') || authStore.can('scan-answer-sheet')">
                 <RowActionMenu width="w-48">
                   <button
+                    v-if="authStore.can('print-student-qr-list')"
                     type="button"
                     class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors disabled:opacity-50"
                     :disabled="printing === `${packet.id}-list`"
@@ -207,6 +222,7 @@ onMounted(() => fetchPackets(1))
                     {{ printing === `${packet.id}-list` ? 'Preparing…' : 'Print Student List' }}
                   </button>
                   <button
+                    v-if="authStore.can('print-student-qr-code-list')"
                     type="button"
                     class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors disabled:opacity-50"
                     :disabled="printing === `${packet.id}-labels`"
@@ -216,6 +232,7 @@ onMounted(() => fetchPackets(1))
                     {{ printing === `${packet.id}-labels` ? 'Preparing…' : 'Print QR Code' }}
                   </button>
                   <button
+                    v-if="authStore.can('scan-answer-sheet')"
                     type="button"
                     class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors"
                     @click="router.push({ name: 'qr-scan-packet', params: { id: packet.id } })"

@@ -36,7 +36,7 @@ const masterItems = [
   { to: '/master/programs', label: 'Programs', permission: 'program-list' },
   { to: '/master/exam-terms', label: 'Exam Term', permission: 'exam-term-list' },
   { to: '/master/exam-types', label: 'Exam Type', permission: 'exam-type-list' },
-  { to: '/master/exam-sub-types', label: 'Exam Sub Type' },
+  { to: '/master/exam-sub-types', label: 'Exam Sub Type', permission: 'exam-sub-type-list' },
 ]
 const visibleMasterItems = computed(() => masterItems.filter((item) => !item.permission || authStore.can(item.permission)))
 
@@ -104,12 +104,12 @@ watch([isOpen, evaluateCourseOpen], updateEvaluateCourseMaxHeight, { flush: 'pos
 onMounted(() => nextTick(updateEvaluateCourseMaxHeight))
 
 // Same collapsible-submenu pattern as Master above, for the "Generate QR &
-// Scan" group. No permissions yet; Scan Papers has no page yet (to: null —
-// shown, but doesn't navigate).
+// Scan" group.
 const qrItems = [
-  { to: '/qr/generate', label: 'Generate QR' },
-  { to: '/qr/scan-papers', label: 'Scan Papers' },
+  { to: '/qr/generate', label: 'Generate QR', permission: 'generate-qr' },
+  { to: '/qr/scan-papers', label: 'Scan Papers', permission: 'scan-paper-list' },
 ]
+const visibleQrItems = computed(() => qrItems.filter((item) => !item.permission || authStore.can(item.permission)))
 
 const qrActive = computed(() => route.path.startsWith('/qr/'))
 const qrOpen = ref(qrActive.value)
@@ -307,7 +307,19 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
         <span class="sidebar-label">Students</span>
       </RouterLink>
 
-      <button type="button" :aria-expanded="qrOpen" aria-controls="qr-submenu"
+      <RouterLink v-if="authStore.can('question-paper-list')" to="/question-papers"
+        class="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
+        :class="isActive('/question-papers', false) ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'">
+        <svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="8" y1="13" x2="16" y2="13" />
+          <line x1="8" y1="17" x2="16" y2="17" />
+        </svg>
+        <span class="sidebar-label">Question Papers</span>
+      </RouterLink>
+
+      <button v-if="visibleQrItems.length" type="button" :aria-expanded="qrOpen" aria-controls="qr-submenu"
         class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
         :class="qrActive ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'"
         @click="qrOpen = !qrOpen">
@@ -326,7 +338,7 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
       <div id="qr-submenu" class="sidebar-submenu overflow-hidden transition-[max-height] duration-300 ease-in-out"
         :style="{ maxHeight: qrMaxHeight }">
         <div ref="qrSubmenuContent" class="mt-1 ml-4 space-y-1 pb-1">
-          <template v-for="item in qrItems" :key="item.label">
+          <template v-for="item in visibleQrItems" :key="item.label">
             <RouterLink v-if="item.to" :to="item.to"
               class="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors text-[12px] font-medium"
               :class="route.path === item.to ? 'bg-white/15 text-white' : 'text-white/85 hover:bg-white/10'">
@@ -342,28 +354,6 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
           </template>
         </div>
       </div>
-
-      <RouterLink v-if="authStore.can('problem-list')" to="/problems"
-        class="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
-        :class="isActive('/problems', false) ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'">
-        <span class="relative shrink-0">
-          <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-          </svg>
-          <!-- Still visible when the sidebar's collapsed to icons only
-               (no room for the pill badge below there) — a plain dot is
-               enough to say "something needs attention". -->
-          <span v-if="notificationsStore.unresolvedCount > 0" class="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-brand ring-2 ring-white/20"></span>
-        </span>
-        <span class="sidebar-label flex-1">Problems</span>
-        <span
-          v-if="notificationsStore.unresolvedCount > 0"
-          class="sidebar-label inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-brand text-white text-[10px] font-semibold leading-none"
-        >
-          {{ notificationsStore.unresolvedCount > 99 ? '99+' : notificationsStore.unresolvedCount }}
-        </span>
-      </RouterLink>
 
       <button v-if="visibleEvaluateCourseItems.length" type="button" :aria-expanded="evaluateCourseOpen" aria-controls="evaluate-course-submenu"
         class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
@@ -392,18 +382,6 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
           </RouterLink>
         </div>
       </div>
-
-      <RouterLink v-if="authStore.can('question-paper-list')" to="/question-papers"
-        class="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
-        :class="isActive('/question-papers', false) ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'">
-        <svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <polyline points="14 2 14 8 20 8" />
-          <line x1="8" y1="13" x2="16" y2="13" />
-          <line x1="8" y1="17" x2="16" y2="17" />
-        </svg>
-        <span class="sidebar-label">Question Papers</span>
-      </RouterLink>
 
       <RouterLink v-if="authStore.can('answer-sheet-list')" to="/answer-sheets"
         class="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
@@ -441,6 +419,28 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
           </RouterLink>
         </div>
       </div>
+
+      <RouterLink v-if="authStore.can('problem-list')" to="/problems"
+        class="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
+        :class="isActive('/problems', false) ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'">
+        <span class="relative shrink-0">
+          <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+          <!-- Still visible when the sidebar's collapsed to icons only
+               (no room for the pill badge below there) — a plain dot is
+               enough to say "something needs attention". -->
+          <span v-if="notificationsStore.unresolvedCount > 0" class="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-brand ring-2 ring-white/20"></span>
+        </span>
+        <span class="sidebar-label flex-1">Problems</span>
+        <span
+          v-if="notificationsStore.unresolvedCount > 0"
+          class="sidebar-label inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-brand text-white text-[10px] font-semibold leading-none"
+        >
+          {{ notificationsStore.unresolvedCount > 99 ? '99+' : notificationsStore.unresolvedCount }}
+        </span>
+      </RouterLink>
 
       <!-- No permission yet — to be added later. -->
       <RouterLink v-if="authStore.can('reset-evaluation')" to="/reset-evaluation"

@@ -1,10 +1,11 @@
 <script setup>
 // Clone of ExamTypesView.vue for the Exam Sub Type master — same shape,
 // /exam-sub-types instead of /exam-types, plus each sub type's Exam Type
-// and Exam Term (columns and filters). No permission checks yet.
+// and Exam Term (columns and filters). Page gated by 'exam-sub-type-list'.
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../../utils/api'
+import { useAuthStore } from '../../stores/auth'
 import { useConfirm } from '../../composables/useConfirm'
 import { useToast } from '../../composables/useToast'
 import Pagination from '../../components/common/Pagination.vue'
@@ -14,6 +15,7 @@ import MainDbSyncControl from '../../components/common/MainDbSyncControl.vue'
 const router = useRouter()
 const { confirmDialog } = useConfirm()
 const toast = useToast()
+const authStore = useAuthStore()
 
 const examSubTypes = ref([])
 const loading = ref(true)
@@ -139,14 +141,25 @@ async function removeExamSubType(examSubType) {
   }
 }
 
-onMounted(() => {
+// Guards against a false "no permission" flash on a hard refresh — see
+// master/CoursesView.vue for why.
+const permissionChecked = ref(false)
+onMounted(async () => {
+  if (!authStore.user) await authStore.fetchMe().catch(() => {})
+  permissionChecked.value = true
+  if (!authStore.can('exam-sub-type-list')) return
   fetchExamSubTypes(1)
   loadFilterLists()
 })
 </script>
 
 <template>
-  <div>
+  <p v-if="!permissionChecked" class="text-center text-sm text-muted py-10">Loading&hellip;</p>
+  <div v-else-if="!authStore.can('exam-sub-type-list')" class="bg-white rounded-2xl shadow-panel p-10 text-center">
+    <p class="text-[15px] font-semibold text-gray-900">You don't have permission to view this page.</p>
+    <p class="mt-1 text-[13px] text-muted">Contact an administrator if you think this is a mistake.</p>
+  </div>
+  <div v-else>
     <!-- Breadcrumb + page action -->
     <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-2.5 flex items-center justify-between gap-3">
       <div class="flex items-center gap-3">
@@ -158,8 +171,9 @@ onMounted(() => {
         <span class="text-[13px] sm:text-sm text-gray-700">Exam Sub Type List</span>
       </div>
       <div class="flex items-center gap-2">
-        <MainDbSyncControl entity="exam-sub-types" label="exam sub types" endpoint="/exam-sub-types/sync" button-label="Sync Exam Sub Type" @synced="fetchExamSubTypes(1)" />
+        <MainDbSyncControl v-if="authStore.can('exam-sub-type-sync')" entity="exam-sub-types" label="exam sub types" endpoint="/exam-sub-types/sync" button-label="Sync Exam Sub Type" @synced="fetchExamSubTypes(1)" />
         <button
+          v-if="authStore.can('exam-sub-type-add')"
           type="button"
           class="h-8 shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-btn-gradient text-white text-[13px] font-semibold px-4 sm:px-5 hover:opacity-90 transition-opacity"
           @click="goToCreate"
@@ -281,8 +295,8 @@ onMounted(() => {
               <th class="px-4 py-1.5 font-medium">Exam Type</th>
               <th class="px-4 py-1.5 font-medium">Exam Term</th>
               <th class="px-4 py-1.5 font-medium whitespace-nowrap">Is Deleted From API</th>
-              <th class="px-4 py-1.5 font-medium">Status</th>
-              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap">Action</th>
+              <th class="px-4 py-1.5 font-medium" v-if="authStore.can('exam-sub-type-status-change')">Status</th>
+              <th class="px-4 py-1.5 font-medium text-center rounded-tr-2xl w-px whitespace-nowrap" v-if="authStore.can('exam-sub-type-edit') || authStore.can('exam-sub-type-delete')">Action</th>
             </tr>
           </thead>
           <tbody class="bg-white">
@@ -311,7 +325,7 @@ onMounted(() => {
               <td class="px-4 py-1">
                 <span :class="examSubType.deleted_from_main_db ? 'text-brand font-semibold' : 'text-gray-500'">{{ examSubType.deleted_from_main_db ? 'Yes' : 'No' }}</span>
               </td>
-              <td class="px-4 py-1" @click.stop>
+              <td v-if="authStore.can('exam-sub-type-status-change')" class="px-4 py-1" @click.stop>
                 <button
                   type="button"
                   role="switch"
@@ -329,12 +343,13 @@ onMounted(() => {
                   ></span>
                 </button>
               </td>
-              <td class="px-4 py-1 text-center relative" @click.stop>
+              <td v-if="authStore.can('exam-sub-type-edit') || authStore.can('exam-sub-type-delete')" class="px-4 py-1 text-center relative" @click.stop>
                 <RowActionMenu>
-                  <button type="button" class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors" @click="goToEdit(examSubType)">
+                  <button v-if="authStore.can('exam-sub-type-edit')" type="button" class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand-blue transition-colors" @click="goToEdit(examSubType)">
                     Edit
                   </button>
                   <button
+                    v-if="authStore.can('exam-sub-type-delete')"
                     type="button"
                     class="w-full flex items-center gap-2 px-3.5 py-2 text-[13px] text-gray-700 hover:bg-soft hover:text-brand transition-colors disabled:opacity-50"
                     :disabled="deletingId === examSubType.id"

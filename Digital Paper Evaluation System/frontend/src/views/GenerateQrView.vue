@@ -7,9 +7,12 @@
 // (deleted_from_main_db = 1, i.e. the API's delete_status 0).
 import { computed, onMounted, reactive, ref } from 'vue'
 import api from '../utils/api'
+import { useAuthStore } from '../stores/auth'
 import { useToast } from '../composables/useToast'
 import SearchableSelect from '../components/common/SearchableSelect.vue'
 import GenerateQrCodeModal from '../components/qr/GenerateQrCodeModal.vue'
+
+const authStore = useAuthStore()
 
 // --- Dropdown lists (Ref Id → name) ---
 const lists = reactive({ examTerms: [], examTypes: [], examSubTypes: [], programs: [], courses: [], departments: [] })
@@ -29,7 +32,13 @@ async function loadList(key, endpoint, fields, toName) {
   }
 }
 
-onMounted(() => {
+// Guards against a false "no permission" flash on a hard refresh — see
+// master/CoursesView.vue for why.
+const permissionChecked = ref(false)
+onMounted(async () => {
+  if (!authStore.user) await authStore.fetchMe().catch(() => {})
+  permissionChecked.value = true
+  if (!authStore.can('generate-qr')) return
   loadList('examTerms', '/exam-terms', ['name'], (r) => r.name)
   loadList('examTypes', '/exam-types', ['name'], (r) => r.name)
   loadList('programs', '/programs', ['name', 'label'], (r) => (r.label ? `${r.name} (${r.label})` : r.name))
@@ -223,7 +232,12 @@ function resetSearch() {
 </script>
 
 <template>
-  <div>
+  <p v-if="!permissionChecked" class="text-center text-sm text-muted py-10">Loading&hellip;</p>
+  <div v-else-if="!authStore.can('generate-qr')" class="bg-white rounded-2xl shadow-panel p-10 text-center">
+    <p class="text-[15px] font-semibold text-gray-900">You don't have permission to view this page.</p>
+    <p class="mt-1 text-[13px] text-muted">Contact an administrator if you think this is a mistake.</p>
+  </div>
+  <div v-else>
     <!-- Breadcrumb -->
     <div class="bg-white rounded-2xl shadow-panel px-4 sm:px-5 py-2 mb-2.5 flex items-center gap-3 min-h-[44px]">
       <RouterLink to="/dashboard" class="inline-flex items-center gap-2 text-[13px] sm:text-sm text-gray-700 hover:text-brand-blue">
