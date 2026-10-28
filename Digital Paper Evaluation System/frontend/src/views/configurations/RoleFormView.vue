@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../../utils/api'
+import { permissionLabel, permissionMatches } from '../../utils/permission'
 import { useToast } from '../../composables/useToast'
 
 const route = useRoute()
@@ -80,7 +81,8 @@ const groupedPermissions = computed(() => {
   const groups = new Map() // groupId -> { name, sort_order, subGroups: Map(subGroupId -> { name, sort_order, items }) }
 
   for (const permission of availablePermissions.value) {
-    if (query && !permission.name.toLowerCase().includes(query)) continue
+    // By the stored name or how it's shown ("course status").
+    if (!permissionMatches(permission.name, query)) continue
 
     const group = permission.permission_group || UNGROUPED
     const subGroup = permission.permission_sub_group || UNGROUPED
@@ -330,6 +332,7 @@ function cancel() {
                     <label
                       v-for="permission in subGroup.items"
                       :key="permission.id"
+                      :title="permission.name"
                       class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium cursor-pointer select-none transition-colors"
                       :class="form.permission_ids.includes(permission.id)
                         ? 'bg-btn-gradient text-white border-transparent shadow-sm'
@@ -345,7 +348,7 @@ function cancel() {
                       <svg v-if="form.permission_ids.includes(permission.id)" class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
-                      {{ permission.name }}
+                      {{ permissionLabel(permission.name) }}
                     </label>
                   </div>
                 </div>

@@ -153,7 +153,7 @@ class AnswerBookTopSheetReportController extends Controller
 
 
     /**
-     * @return array{program_name: string, course_id: int, department_id: ?int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}
+     * @return array{program_name: string, course_id: int, department_id: ?int, exam_term_id: int, exam_type_id: int, exam_sub_type_id: ?int, semester: int, exam_year: int, teacher_id: ?int}
      */
     private function validateFilters(Request $request): array
     {
@@ -165,13 +165,14 @@ class AnswerBookTopSheetReportController extends Controller
             'exam_term_id' => ['required', 'integer', Rule::exists('exam_terms', 'id')->whereNull('deleted_at')],
             'exam_type_id' => ['required', 'integer', Rule::exists('exam_types', 'id')->whereNull('deleted_at')],
             'semester' => ['required', 'integer', 'min:1', 'max:12'],
+            'exam_sub_type_id' => ['nullable', 'integer', Rule::exists('exam_sub_types', 'id')],
             'exam_year' => ['required', 'integer', 'digits:4'],
             'teacher_id' => ['nullable', 'integer', Rule::exists('teacher_details', 'user_id')->whereNull('deleted_at')],
         ]);
     }
 
     /**
-     * @param  array{program_name: string, course_id: int, department_id: ?int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}  $filters
+     * @param  array{program_name: string, course_id: int, department_id: ?int, exam_term_id: int, exam_type_id: int, exam_sub_type_id: ?int, semester: int, exam_year: int, teacher_id: ?int}  $filters
      */
     private function baseQuery(array $filters): Builder
     {
@@ -184,6 +185,8 @@ class AnswerBookTopSheetReportController extends Controller
             ->where('m.exam_term_id', $filters['exam_term_id'])
             ->where('m.exam_type_id', $filters['exam_type_id'])
             ->where('m.semester', $filters['semester'])
+            // Optional — the packet's exam sub type (set by Generate QR).
+            ->when(! empty($filters['exam_sub_type_id']), fn ($q) => $q->where('m.exam_sub_type_id', $filters['exam_sub_type_id']))
             ->where('qp.exam_year', $filters['exam_year']);
 
         if (! empty($filters['department_id'])) {
@@ -198,7 +201,7 @@ class AnswerBookTopSheetReportController extends Controller
     }
 
     /**
-     * @param  array{program_name: string, course_id: int, department_id: ?int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}  $filters
+     * @param  array{program_name: string, course_id: int, department_id: ?int, exam_term_id: int, exam_type_id: int, exam_sub_type_id: ?int, semester: int, exam_year: int, teacher_id: ?int}  $filters
      * @return list<array<string, mixed>>
      */
     private function rows(array $filters): array
@@ -248,7 +251,7 @@ class AnswerBookTopSheetReportController extends Controller
     }
 
     /**
-     * @param  array{program_name: string, course_id: int, department_id: ?int, exam_term_id: int, exam_type_id: int, semester: int, exam_year: int, teacher_id: ?int}  $filters
+     * @param  array{program_name: string, course_id: int, department_id: ?int, exam_term_id: int, exam_type_id: int, exam_sub_type_id: ?int, semester: int, exam_year: int, teacher_id: ?int}  $filters
      */
     private function evaluatedSheetsQuery(array $filters): Builder
     {

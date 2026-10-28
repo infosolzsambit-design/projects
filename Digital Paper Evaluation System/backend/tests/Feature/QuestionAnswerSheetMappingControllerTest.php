@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AnswerSheet;
 use App\Models\Course;
+use App\Models\ExamSubType;
 use App\Models\ExamTerm;
 use App\Models\ExamType;
 use App\Models\Program;
@@ -40,8 +41,7 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
             'department_id' => $this->paperDepartment($paper),
             'course_id' => $course->id,
             'semester' => 5,
-            'exam_term_id' => ExamTerm::factory()->create()->id,
-            'exam_type_id' => ExamType::factory()->create()->id,
+            ...$this->examSession(),
             'program_name' => $program->name,
             'packet_code' => 'PKT-001',
         ]);
@@ -49,6 +49,24 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
         $response->assertCreated();
 
         return QuestionAnswerSheetMapping::findOrFail($response->json('data.id'));
+    }
+
+    /**
+     * An exam term + exam type + one of their exam sub types — the upload
+     * must pick a sub type of the chosen type and term.
+     *
+     * @return array{exam_term_id: int, exam_type_id: int, exam_sub_type_id: int}
+     */
+    private function examSession(): array
+    {
+        $term = ExamTerm::factory()->create();
+        $type = ExamType::factory()->create();
+
+        return [
+            'exam_term_id' => $term->id,
+            'exam_type_id' => $type->id,
+            'exam_sub_type_id' => ExamSubType::factory()->create(['exam_type_id' => $type->id, 'exam_term_id' => $term->id])->id,
+        ];
     }
 
     /** A department the paper is tagged with — the upload must pick one of these. */
@@ -135,8 +153,7 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
             'question_paper_id' => $paper->id,
             'course_id' => Course::factory()->create()->id,
             'semester' => 5,
-            'exam_term_id' => ExamTerm::factory()->create()->id,
-            'exam_type_id' => ExamType::factory()->create()->id,
+            ...$this->examSession(),
             'program_name' => Program::factory()->create()->name,
             'packet_code' => 'PKT-777',
         ], $overrides);
@@ -162,8 +179,7 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
             'department_id' => $this->paperDepartment($paper),
             'course_id' => $course->id,
             'semester' => 5,
-            'exam_term_id' => ExamTerm::factory()->create()->id,
-            'exam_type_id' => ExamType::factory()->create()->id,
+            ...$this->examSession(),
             'program_name' => $program->name,
             'packet_code' => 'PKT-001',
         ]);
@@ -274,6 +290,7 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
         $program = Program::factory()->create();
         $examTerm = ExamTerm::factory()->create();
         $examType = ExamType::factory()->create();
+        $examSubType = ExamSubType::factory()->create(['exam_type_id' => $examType->id, 'exam_term_id' => $examTerm->id]);
 
         $sameCombo = fn () => $this->withApiKey()->postJson('/api/v1/answer-sheet-mappings', [
             'question_paper_id' => $paper->id,
@@ -282,6 +299,7 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
             'semester' => 5,
             'exam_term_id' => $examTerm->id,
             'exam_type_id' => $examType->id,
+            'exam_sub_type_id' => $examSubType->id,
             'program_name' => $program->name,
             'packet_code' => 'PKT-001',
         ]);
@@ -416,6 +434,24 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
         $this->assertSame(0, $mapping->answerSheets()->count());
     }
 
+    public function test_the_exam_sub_type_is_required_and_must_belong_to_the_exam_type_and_term(): void
+    {
+        $this->actingAdmin();
+        $paper = QuestionPaper::factory()->create();
+        $payload = fn (array $overrides) => $this->packetPayload($paper, ['department_id' => $this->paperDepartment($paper)] + $overrides);
+
+        $this->withApiKey()->postJson('/api/v1/answer-sheet-mappings', $payload(['exam_sub_type_id' => null]))
+            ->assertStatus(422)->assertJsonValidationErrors(['exam_sub_type_id']);
+
+        // A sub type of another exam type / term is refused.
+        $this->withApiKey()->postJson('/api/v1/answer-sheet-mappings', $payload(['exam_sub_type_id' => ExamSubType::factory()->create()->id]))
+            ->assertStatus(422)->assertJsonValidationErrors(['exam_sub_type_id']);
+
+        $session = $this->examSession();
+        $id = $this->withApiKey()->postJson('/api/v1/answer-sheet-mappings', $payload($session))->assertCreated()->json('data.id');
+        $this->assertSame($session['exam_sub_type_id'], QuestionAnswerSheetMapping::find($id)->exam_sub_type_id);
+    }
+
     public function test_requires_an_existing_question_paper_course_and_program(): void
     {
         $this->actingAdmin();
@@ -424,8 +460,7 @@ class QuestionAnswerSheetMappingControllerTest extends TestCase
             'question_paper_id' => 999999,
             'course_id' => 999999,
             'semester' => 5,
-            'exam_term_id' => ExamTerm::factory()->create()->id,
-            'exam_type_id' => ExamType::factory()->create()->id,
+            ...$this->examSession(),
             'program_name' => 'Nonexistent Program',
             'packet_code' => 'PKT-001',
         ]);

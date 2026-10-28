@@ -11,6 +11,7 @@ use App\Models\Program;
 use App\Models\QuestionPaper;
 use App\Models\Student;
 use App\Models\TeacherDetail;
+use App\Models\User;
 use App\Traits\ApiResponse;
 use App\Traits\HasExamTypeScope;
 use App\Traits\HasExamYearScope;
@@ -20,6 +21,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Backs DashboardView.vue's admin section (AdminDashboardView.vue) — one
@@ -55,6 +57,9 @@ class DashboardController extends Controller
     /** Rows shown on the teacher dashboard's two list cards before "See All". */
     private const TEACHER_LIST_LIMIT = 5;
 
+    /** A course whose evaluation window ends within this many days counts as "due soon". */
+    private const DUE_SOON_DAYS = 3;
+
     public function adminSummary(Request $request): JsonResponse
     {
         $examYear = $this->examYearScope($request);
@@ -77,6 +82,7 @@ class DashboardController extends Controller
             'department_progress_has_more' => $departmentProgressHasMore,
             'issue_summary' => $this->issueSummary($sheetQuery),
             'teacher_workload' => $this->mapTeacherWorkloadRows($teacherWorkload),
+            'teacher_progress' => $this->teacherProgress($sheetQuery),
             'teacher_workload_has_more' => $teacherWorkloadHasMore,
             'course_pending' => $this->mapCoursePendingRows($coursePending),
             'course_pending_has_more' => $coursePendingHasMore,
@@ -153,6 +159,7 @@ class DashboardController extends Controller
             'course_pending_has_more' => $coursePendingHasMore,
             'recent' => $this->mapTeacherRecentRows($recent),
             'recent_has_more' => $recentHasMore,
+            'recent_status' => $this->teacherRecentStatus($mineByCourse),
             'week' => $week['days'],
             'week_start' => $week['week_start'],
             'week_label' => $week['week_label'],
@@ -187,6 +194,152 @@ class DashboardController extends Controller
         $date = $request->filled('week_start') ? Carbon::createFromFormat('Y-m-d', $request->string('week_start')->toString()) : Carbon::now();
 
         return $this->success($this->teacherWeekData($mine, $date->startOfWeek(Carbon::MONDAY)->startOfDay()), 'Weekly performance fetched successfully.');
+    }
+
+    /**
+     * GET /dashboard/hod-summary — the HOD dashboard (designed_files/
+     * hod_dashboard.png). Everything is the HOD's own department(s) only —
+     * the departments they're mapped to (teacher_department_mappings, same
+     * as on the Teacher form): a sheet belongs to a department through its
+     * packet's department_id (required on both Upload Answer Sheets and
+     * Generate QR). Scoped to the header's exam year / examination like the
+     * other dashboards. The "My …" cards are the HOD's own evaluation work
+     * as a teacher (every sheet assigned to them, any department).
+     */
+    public function hodSummary(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $examYear = $this->examYearScope($request);
+        $examType = $this->examTypeScope($request);
+        $departments = $user->departments()->get(['departments.id', 'departments.name', 'departments.code']);
+        $departmentIds = $departments->pluck('id')->all();
+
+        $scoped = fn (Builder $q) => $q
+            ->when($examYear !== null, fn ($q) => $q->whereHas('mapping.questionPaper', fn ($q2) => $q2->where('exam_year', $examYear)))
+            ->when($examType !== null, fn ($q) => $q->whereHas('mapping', fn ($q2) => $q2->where('exam_type_id', $examType)));
+        // The department's answer sheets (none when the HOD has no department).
+        $dept = fn () => $scoped(AnswerSheet::query()->inEvaluation())
+            ->whereHas('mapping', fn ($q) => $q->whereIn('department_id', $departmentIds));
+        $mine = fn () => $scoped(AnswerSheet::query()->inEvaluation())->where('answer_sheets.teacher_id', $user->id);
+        $pendingSql = AnswerSheet::pendingSql();
+
+        $status = $this->evaluationStatus($dept);
+        $myTime = $mine()->whereNotNull('marks')->where('consumed_time', '>', 0)->avg('consumed_time');
+        $teachers = $this->mapTeacherWorkloadRows($this->teacherWorkloadQuery($dept)->get());
+        $totalTeachers = $departmentIds ? User::whereHas('departments', fn ($q) => $q->whereIn('departments.id', $departmentIds))->count() : 0;
+
+        // Last 7 days, oldest first.
+        $days = collect(range(6, 0))->map(fn (int $i) => Carbon::today()->subDays($i));
+        $between = fn (Carbon $day) => [$day, (clone $day)->endOfDay()];
+        $progress = $days->map(fn (Carbon $day) => [
+            'label' => $day->format('M d'),
+            'assigned' => $dept()->whereBetween('assigned_at', $between($day))->count(),
+            'evaluated' => $dept()->whereBetween('evaluated_at', $between($day))->count(),
+        ])->all();
+        // Issues raised each day, split by where they stand now.
+        $issueTrend = $days->map(function (Carbon $day) use ($dept, $between) {
+            $row = $dept()->whereNotNull('issue_master_id')->whereBetween('issue_raised_at', $between($day))
+                ->selectRaw("COUNT(*) as raised, COALESCE(SUM(CASE WHEN issue_status = 'open' THEN 1 ELSE 0 END), 0) as under_review, COALESCE(SUM(CASE WHEN issue_status = 'resolved' THEN 1 ELSE 0 END), 0) as resolved")
+                ->first();
+
+            return ['label' => $day->format('M d'), 'raised' => (int) $row->raised, 'under_review' => (int) $row->under_review, 'resolved' => (int) $row->resolved];
+        })->all();
+
+        // Per program + course: evaluated + pending + problem = sheets.
+        $courseRows = $dept()
+            ->join('question_answer_sheet_mappings as m', 'm.id', '=', 'answer_sheets.question_answer_sheet_mapping_id')
+            ->join('courses as c', 'c.id', '=', 'm.course_id')
+            ->groupBy('m.program_name', 'c.id', 'c.name', 'c.code', 'c.type')
+            ->orderByRaw("SUM(CASE WHEN {$pendingSql} THEN 1 ELSE 0 END) DESC")
+            ->orderBy('c.name')
+            ->selectRaw('m.program_name as program, c.name as name, c.code as code, c.type as type, COUNT(*) as sheets, '.
+                'SUM(CASE WHEN answer_sheets.marks IS NOT NULL THEN 1 ELSE 0 END) as evaluated, '.
+                "SUM(CASE WHEN {$pendingSql} THEN 1 ELSE 0 END) as pending, ".
+                'SUM(CASE WHEN '.AnswerSheet::problemSql().' THEN 1 ELSE 0 END) as problem')
+            ->get()
+            ->map(fn ($row) => [
+                'program' => $row->program,
+                'course' => CourseLabel::full($row->name, $row->code, $row->type),
+                'sheets' => (int) $row->sheets,
+                'evaluated' => (int) $row->evaluated,
+                'pending' => (int) $row->pending,
+                'problem' => (int) $row->problem,
+            ]);
+        // Course Wise Pending — the same rows merged across programs, most pending first.
+        $coursePending = $courseRows->groupBy('course')
+            ->map(fn (Collection $rows, string $course) => ['name' => $course, 'pending' => $rows->sum('pending')])
+            ->filter(fn (array $row) => $row['pending'] > 0)
+            ->sortByDesc('pending')
+            ->values();
+
+        return $this->success([
+            'departments' => $departments->map(fn ($d) => ['id' => $d->id, 'name' => $d->name, 'code' => $d->code])->values()->all(),
+            'kpis' => [
+                'total_teachers' => $totalTeachers,
+                'assigned_teachers' => count($teachers),
+                // Courses with answer sheets in the department's packets (the
+                // program-course mapping is too sparse to rely on).
+                'courses' => $courseRows->pluck('course')->unique()->count(),
+                'total_sheets' => $status['total'],
+                'evaluated' => $status['evaluated'],
+                'pending' => $status['pending_evaluation'],
+                'problem' => $status['problem'],
+                'resolved' => $dept()->where('issue_status', 'resolved')->count(),
+                'my_assigned' => $mine()->count(),
+                'my_completed' => $mine()->whereNotNull('marks')->count(),
+                'my_pending_subjects' => $mine()->whereRaw($pendingSql)
+                    ->join('question_answer_sheet_mappings as mm', 'mm.id', '=', 'answer_sheets.question_answer_sheet_mapping_id')
+                    ->distinct()->count('mm.course_id'),
+                'my_avg_review_seconds' => $myTime !== null ? (int) round($myTime) : null,
+            ],
+            'progress' => $progress,
+            'status' => $status,
+            'course_pending' => $coursePending->take(self::TEACHER_LIST_LIMIT)->all(),
+            'course_pending_total' => $coursePending->count(),
+            // Generic, no names (a department can have many teachers):
+            // teachers by share of their sheets evaluated, and how the
+            // department's sheets are spread across them.
+            'teacher_progress' => $this->teacherProgress($dept),
+            'teacher_allocation' => $this->teacherAllocation($teachers, $totalTeachers),
+            'issues' => [
+                'raised' => $dept()->whereNotNull('issue_master_id')->count(),
+                'under_review' => $dept()->where('issue_status', 'open')->count(),
+                'resolved' => $dept()->where('issue_status', 'resolved')->count(),
+                'trend' => $issueTrend,
+            ],
+            'courses' => $courseRows->values()->all(),
+        ], 'HOD dashboard fetched successfully.');
+    }
+
+    /** Sheets-per-teacher ranges for the HOD dashboard's allocation chart: [label, min, max|null]. */
+    private const LOAD_BUCKETS = [['1–10', 1, 10], ['11–25', 11, 25], ['26–50', 26, 50], ['51–100', 51, 100], ['100+', 101, null]];
+
+    /**
+     * HOD dashboard's Teacher Allocation Overview — how the department's
+     * sheets are spread over its teachers, without naming anyone: teachers
+     * with sheets vs all department teachers, sheets per teacher (avg / min
+     * / max) and how many teachers fall in each LOAD_BUCKETS range.
+     *
+     * @param  list<array{assigned: int}>  $teachers  mapTeacherWorkloadRows() rows
+     * @return array<string, mixed>
+     */
+    private function teacherAllocation(array $teachers, int $totalTeachers): array
+    {
+        $loads = collect($teachers)->pluck('assigned');
+
+        return [
+            'with_sheets' => $loads->count(),
+            // Never below the teachers actually holding sheets (one may be
+            // from outside the department's mapping).
+            'total_teachers' => max($totalTeachers, $loads->count()),
+            'avg' => $loads->isEmpty() ? 0 : (int) round($loads->avg()),
+            'min' => (int) ($loads->min() ?? 0),
+            'max' => (int) ($loads->max() ?? 0),
+            'buckets' => array_map(fn (array $b) => [
+                'label' => $b[0],
+                'count' => $loads->filter(fn (int $n) => $n >= $b[1] && ($b[2] === null || $n <= $b[2]))->count(),
+            ], self::LOAD_BUCKETS),
+        ];
     }
 
     /**
@@ -263,6 +416,38 @@ class DashboardController extends Controller
             ->orderByRaw('MAX(COALESCE(answer_sheets.evaluated_at, answer_sheets.assigned_at)) DESC')
             ->orderBy('c.name')
             ->selectRaw("c.name as name, c.code as code, c.type as type, MIN(answer_sheets.evaluation_start_date) as start_date, MAX(answer_sheets.evaluation_end_date) as end_date, SUM(CASE WHEN {$pendingSql} THEN 1 ELSE 0 END) as pending");
+    }
+
+    /**
+     * "Recent Evaluation Activity" chart — how many of the teacher's courses
+     * are at each stage of their evaluation window: completed (nothing
+     * pending), on track, due soon (window ends within DUE_SOON_DAYS days,
+     * today included) and overdue (window ended, sheets still pending). A
+     * course with no end date and something pending counts as on track.
+     *
+     * @return array<string, int>
+     */
+    private function teacherRecentStatus(Closure $mineByCourse): array
+    {
+        $today = Carbon::today();
+        $dueSoonBy = (clone $today)->addDays(self::DUE_SOON_DAYS);
+        $counts = ['courses' => 0, 'pending' => 0, 'completed' => 0, 'on_track' => 0, 'due_soon' => 0, 'overdue' => 0];
+
+        foreach ($this->teacherRecentQuery($mineByCourse)->reorder()->get() as $row) {
+            $pending = (int) $row->pending;
+            $end = $row->end_date ? Carbon::parse($row->end_date)->startOfDay() : null;
+            $stage = match (true) {
+                $pending === 0 => 'completed',
+                $end !== null && $end->lt($today) => 'overdue',
+                $end !== null && $end->lte($dueSoonBy) => 'due_soon',
+                default => 'on_track',
+            };
+            $counts[$stage]++;
+            $counts['courses']++;
+            $counts['pending'] += $pending;
+        }
+
+        return $counts;
     }
 
     private function mapTeacherCourseRows(iterable $rows): array
@@ -548,12 +733,16 @@ class DashboardController extends Controller
                 $join->on('teacher_details.user_id', '=', 'users.id')->whereNull('teacher_details.deleted_at');
             })
             ->whereNull('users.deleted_at')
-            ->groupBy('users.id', 'users.name', 'teacher_details.emp_code')
+            ->groupBy('users.id', 'users.name', 'teacher_details.emp_code', 'teacher_details.designation')
             ->orderByRaw('COUNT(*) DESC')
+            ->orderBy('users.name')
             ->selectRaw(
-                'users.name as teacher_name, teacher_details.emp_code as emp_code, COUNT(*) as assigned, '.
+                'users.id as teacher_id, users.name as teacher_name, teacher_details.emp_code as emp_code, teacher_details.designation as designation, COUNT(*) as assigned, '.
                 'SUM(CASE WHEN answer_sheets.marks IS NOT NULL THEN 1 ELSE 0 END) as evaluated, '.
                 'SUM(CASE WHEN '.AnswerSheet::pendingSql().' THEN 1 ELSE 0 END) as pending, '.
+                // Not evaluated and stuck on an open issue — with evaluated and
+                // pending, the three add up to assigned (the dashboard's chart).
+                'SUM(CASE WHEN '.AnswerSheet::problemSql().' THEN 1 ELSE 0 END) as problem, '.
                 'SUM(CASE WHEN answer_sheets.issue_master_id IS NOT NULL THEN 1 ELSE 0 END) as issues',
             );
     }
@@ -567,16 +756,52 @@ class DashboardController extends Controller
         $mapped = [];
         foreach ($rows as $row) {
             $mapped[] = [
+                'id' => (int) $row->teacher_id,
                 'name' => $row->teacher_name,
                 'emp_code' => $row->emp_code,
+                'designation' => $row->designation,
                 'assigned' => (int) $row->assigned,
                 'evaluated' => (int) $row->evaluated,
                 'pending' => (int) $row->pending,
+                'problem' => (int) $row->problem,
                 'issues' => (int) $row->issues,
             ];
         }
 
         return $mapped;
+    }
+
+    /**
+     * Teacher Workload card's chart — no names, just how many teachers are
+     * at each stage, by the share of their own assigned sheets evaluated:
+     * not started (0), under 50%, 50% or more, completed (all). Covers every
+     * teacher with sheets (not only the card's top 5), one aggregate query
+     * over teacherWorkloadQuery()'s per-teacher rows.
+     *
+     * @param  Closure(): Builder<AnswerSheet>  $sheetQuery
+     * @return array<string, int>
+     */
+    private function teacherProgress(Closure $sheetQuery): array
+    {
+        $row = DB::query()
+            ->fromSub($this->teacherWorkloadQuery($sheetQuery)->reorder()->toBase(), 't')
+            ->selectRaw(
+                'COUNT(*) as teachers, COALESCE(SUM(assigned), 0) as assigned, '.
+                'COALESCE(SUM(CASE WHEN evaluated = 0 THEN 1 ELSE 0 END), 0) as not_started, '.
+                'COALESCE(SUM(CASE WHEN evaluated > 0 AND evaluated * 2 < assigned THEN 1 ELSE 0 END), 0) as under_half, '.
+                'COALESCE(SUM(CASE WHEN evaluated * 2 >= assigned AND evaluated < assigned THEN 1 ELSE 0 END), 0) as over_half, '.
+                'COALESCE(SUM(CASE WHEN evaluated > 0 AND evaluated = assigned THEN 1 ELSE 0 END), 0) as completed',
+            )
+            ->first();
+
+        return [
+            'teachers' => (int) $row->teachers,
+            'assigned' => (int) $row->assigned,
+            'not_started' => (int) $row->not_started,
+            'under_half' => (int) $row->under_half,
+            'over_half' => (int) $row->over_half,
+            'completed' => (int) $row->completed,
+        ];
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Traits\SerializesDatesInAppTimezone;
 use App\Traits\HasAuditContext;
 use App\Traits\HasDateTimeTimestamps;
 use App\Traits\HasUserstamps;
@@ -21,6 +22,9 @@ use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable implements AuditableContract
 {
+    // JSON dates in the app timezone, not UTC — see the trait.
+    use SerializesDatesInAppTimezone;
+
     /** @use HasFactory<UserFactory> */
     use Auditable, HasApiTokens, HasAuditContext, HasDateTimeTimestamps, HasFactory, HasRoles, HasUserstamps, Notifiable, SoftDeletes {
         HasAuditContext::transformAudit insteadof Auditable;

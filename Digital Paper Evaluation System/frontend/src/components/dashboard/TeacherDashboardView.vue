@@ -10,6 +10,7 @@ import { useExamYearStore } from '../../stores/examYear'
 import { useExamTypeStore } from '../../stores/examType'
 import TeacherCoursePendingModal from './TeacherCoursePendingModal.vue'
 import TeacherRecentActivityModal from './TeacherRecentActivityModal.vue'
+import StageColumnChart from './StageColumnChart.vue'
 
 const examYearStore = useExamYearStore()
 const examTypeStore = useExamTypeStore()
@@ -20,6 +21,7 @@ const EMPTY = {
   status: { completed: 0, pending: 0, problem: 0 },
   course_pending: [],
   recent: [],
+  recent_status: { courses: 0, pending: 0, completed: 0, on_track: 0, due_soon: 0, overdue: 0 },
   week: [],
 }
 const summary = ref(EMPTY)
@@ -80,7 +82,17 @@ async function changeWeek(direction) {
 
 const kpis = computed(() => summary.value.kpis)
 const daily = computed(() => summary.value.daily)
-const recent = computed(() => summary.value.recent)
+// Recent Evaluation Activity — no course list on the card (it has to stay
+// readable with any number of courses): how many of my courses are at each
+// stage of their evaluation window (DashboardController::
+// teacherRecentStatus()). The course list itself is in the modal.
+const recentStatus = computed(() => summary.value.recent_status ?? { courses: 0, pending: 0 })
+const recentStages = computed(() => [
+  { key: 'completed', label: 'Completed', hint: 'fully evaluated', color: '#22c55e' },
+  { key: 'on_track', label: 'On Track', hint: 'pending, with more than 3 days left', color: '#2f56c0' },
+  { key: 'due_soon', label: 'Due Soon', hint: 'pending, window ends within 3 days', color: '#f9a228' },
+  { key: 'overdue', label: 'Overdue', hint: 'pending after the window ended', color: '#f43f5e' },
+].map((s) => ({ ...s, value: recentStatus.value[s.key] ?? 0 })))
 
 // "See All" modals — the two list cards show the first few rows only.
 const showCoursePendingModal = ref(false)
@@ -379,51 +391,24 @@ const weekBars = computed(() => week.value.days.map((d, i) => ({
         </div>
       </div>
 
-      <!-- Recent Evaluation Activity — same table style as Teacher Workload -->
-      <div class="bg-white rounded-2xl shadow-panel p-5 overflow-hidden">
+      <!-- Recent Evaluation Activity — my courses by evaluation-window stage -->
+      <div class="bg-white rounded-2xl shadow-panel p-5">
         <div class="flex items-center gap-2 mb-0.5">
-          <svg class="w-5 h-5 text-brand-blue" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></svg>
+          <svg class="w-5 h-5 text-brand-blue" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10" /><line x1="18" y1="20" x2="18" y2="4" /><line x1="6" y1="20" x2="6" y2="16" /></svg>
           <h3 class="font-semibold text-gray-900">Recent Evaluation Activity</h3>
-          <button v-if="summary.recent_has_more" type="button" class="ml-auto shrink-0 text-[11.5px] font-semibold text-brand-blue hover:underline" @click="showRecentModal = true">
-            See All
+          <!-- Always offered once there's data — the modal is the course list. -->
+          <button v-if="recentStatus.courses" type="button" class="ml-auto shrink-0 text-[11.5px] font-semibold text-brand-blue hover:underline" @click="showRecentModal = true">
+            {{ summary.recent_has_more ? 'See All' : 'View Table' }}
           </button>
         </div>
-        <p class="text-[12px] text-muted mb-3">Your courses with their evaluation window</p>
-        <div class="overflow-x-auto -mx-1">
-          <table class="w-full text-left text-[12px]">
-            <thead>
-              <tr class="text-muted">
-                <th class="px-1 py-1.5 font-medium w-px whitespace-nowrap">#</th>
-                <th class="px-1 py-1.5 font-medium">Course</th>
-                <th class="px-1 py-1.5 font-medium whitespace-nowrap">Start Date</th>
-                <th class="px-1 py-1.5 font-medium whitespace-nowrap">End Date</th>
-                <th class="px-1 py-1.5 font-medium text-center whitespace-nowrap">Status</th>
-                <th class="px-1 py-1.5 font-medium text-center w-px whitespace-nowrap">Pending</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="!recent.length">
-                <td colspan="6" class="px-1 py-6 text-center text-muted">No answer sheets assigned to you yet.</td>
-              </tr>
-              <tr v-for="(row, i) in recent" :key="i" class="border-t border-gray-100">
-                <td class="px-1 py-1.5 text-gray-500">{{ i + 1 }}</td>
-                <!-- Takes the remaining width; shortened with … only when it doesn't fit (full name on hover). -->
-                <td class="px-1 py-1.5 font-medium text-gray-800 w-full max-w-0 truncate" :title="row.course">{{ row.course }}</td>
-                <td class="px-1 py-1.5 text-gray-700 whitespace-nowrap">{{ row.start }}</td>
-                <td class="px-1 py-1.5 text-gray-700 whitespace-nowrap">{{ row.end }}</td>
-                <td class="px-1 py-1.5 text-center whitespace-nowrap">
-                  <span v-if="row.pending > 0" class="inline-flex justify-center rounded-full bg-amber-50 text-badge font-semibold px-2 py-0.5">Pending</span>
-                  <span v-else class="inline-flex justify-center rounded-full bg-emerald-50 text-success font-semibold px-2 py-0.5">Completed</span>
-                </td>
-                <!-- How many sheets are still pending — just "-" once completed. -->
-                <td class="px-1 py-1.5 text-center">
-                  <span v-if="row.pending > 0" class="inline-flex min-w-[28px] justify-center rounded-full bg-amber-50 text-badge font-semibold px-1.5 py-0.5">{{ row.pending }}</span>
-                  <span v-else class="text-gray-400">-</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <p v-if="!recentStatus.courses" class="text-[12px] text-muted text-center py-6">No answer sheets assigned to you yet.</p>
+        <template v-else>
+          <p class="text-[12px] text-muted mb-3">
+            <span class="font-semibold text-gray-900">{{ recentStatus.courses }}</span> course{{ recentStatus.courses === 1 ? '' : 's' }}
+            · <span class="font-semibold text-gray-900">{{ recentStatus.pending }}</span> sheet{{ recentStatus.pending === 1 ? '' : 's' }} pending
+          </p>
+          <StageColumnChart :stages="recentStages" unit="course" caption="Your courses by evaluation window" />
+        </template>
       </div>
 
       <!-- This Week's Performance -->

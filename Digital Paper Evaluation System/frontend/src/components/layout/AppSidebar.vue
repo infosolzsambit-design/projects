@@ -168,6 +168,8 @@ const reportItems = [
   // No permission yet — to be added later.
   { to: '/reports/problem-report', label: 'Problem Report' , permission: 'problem-report' },
   { to: '/reports/pending-report', label: 'Pending Report' , permission: 'pending-report' },
+  // No permission yet — to be added later.
+  { to: '/reports/evaluated-copy-download', label: 'Evaluated Copy' , permission: 'evaluated-copy-download' },
 ]
 const visibleReportItems = computed(() => reportItems.filter((item) => !item.permission || authStore.can(item.permission)))
 
@@ -198,8 +200,6 @@ const configurationsItems = [
   { to: '/configurations/permission-groups', label: 'Permission Group', permission: 'permission-group-list' },
   { to: '/configurations/permission-sub-groups', label: 'Permission Sub Group', permission: 'permission-sub-group-list' },
   { to: '/configurations/permissions', label: 'Permission', permission: 'permission-list' },
-  // No `permission` key — deliberately open to any signed-in user (see
-  // EmailLogsView.vue's own top docblock), unlike every other item here.
   { to: '/configurations/email-logs', label: 'Email Logs', permission: 'email-log-list' },
   { to: '/general-settings', label: 'General Settings', permission: 'general-settings' },
 ]
@@ -495,7 +495,7 @@ onMounted(() => nextTick(updateConfigurationsMaxHeight))
         </div>
       </div>
 
-      <button v-if="authStore.can('user-list') || authStore.can('role-list') || authStore.can('permission-group-list') || authStore.can('permission-sub-group-list') || authStore.can('permission-list') || authStore.can('general-settings')" type="button" :aria-expanded="configurationsOpen" aria-controls="configurations-submenu"
+      <button v-if="visibleConfigurationsItems.length" type="button" :aria-expanded="configurationsOpen" aria-controls="configurations-submenu"
         class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[13px] font-medium"
         :class="configurationsActive ? 'bg-page-bg text-gray-900 font-semibold' : 'text-white/95 hover:bg-white/10'"
         @click="configurationsOpen = !configurationsOpen">

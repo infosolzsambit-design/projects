@@ -31,6 +31,7 @@ import SearchableSelect from '../components/common/SearchableSelect.vue'
 import QuestionNodeViewer from '../components/questionPapers/QuestionNodeViewer.vue'
 import { useProgramsStore } from '../stores/programs'
 import { courseLabel } from '../utils/course'
+import { useExamSubTypes } from '../composables/useExamSubTypes'
 
 const router = useRouter()
 const toast = useToast()
@@ -94,15 +95,17 @@ const form = reactive({
   course_id: '',
   exam_term_id: '',
   exam_type_id: '',
+  // Our own exam_sub_types.id — offered only for the chosen exam type + term.
+  exam_sub_type_id: '',
   semester: '',
   program_name: '',
   packet_code: '',
 })
-const fieldErrors = reactive({ question_paper_id: '', department_id: '', course_id: '', exam_term_id: '', exam_type_id: '', semester: '', program_name: '', packet_code: '' })
+const fieldErrors = reactive({ question_paper_id: '', department_id: '', course_id: '', exam_term_id: '', exam_type_id: '', exam_sub_type_id: '', semester: '', program_name: '', packet_code: '' })
 // Order matters — matches the form's own top-to-bottom field order, so the
 // first of these (in this order) that has an error is the one that gets
 // focused after a failed check.
-const FIELD_ORDER = ['program_name', 'packet_code', 'exam_type_id', 'question_paper_id', 'department_id', 'course_id', 'exam_term_id', 'semester']
+const FIELD_ORDER = ['program_name', 'packet_code', 'exam_type_id', 'question_paper_id', 'department_id', 'course_id', 'exam_term_id', 'exam_sub_type_id', 'semester']
 const fieldRefs = {
   program_name: ref(null),
   packet_code: ref(null),
@@ -111,6 +114,7 @@ const fieldRefs = {
   course_id: ref(null),
   exam_term_id: ref(null),
   exam_type_id: ref(null),
+  exam_sub_type_id: ref(null),
   semester: ref(null),
 }
 function clearFieldError(field) {
@@ -122,6 +126,10 @@ function focusFirstError() {
   const field = FIELD_ORDER.find((key) => fieldErrors[key])
   fieldRefs[field]?.value?.focus()
 }
+
+// Exam Sub Type dropdown — only the chosen exam type + exam term's sub types
+// (cleared when either changes and it no longer fits).
+const { options: examSubTypeOptions, loading: examSubTypesLoading } = useExamSubTypes(form)
 
 // Department dropdown — only the selected question paper's departments.
 const paperDepartmentOptions = computed(() => {
@@ -464,6 +472,7 @@ async function submitToServer() {
       course_id: form.course_id,
       exam_term_id: form.exam_term_id,
       exam_type_id: form.exam_type_id,
+      exam_sub_type_id: form.exam_sub_type_id,
       semester: form.semester,
       program_name: form.program_name,
       packet_code: form.packet_code,
@@ -899,7 +908,7 @@ function cancel() {
                 <p v-else-if="fieldErrors.department_id" class="text-[12px] text-brand">{{ fieldErrors.department_id }}</p>
               </div>
             </div>
-            <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_minmax(0,0.7fr)] gap-3 mb-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.1fr)_minmax(0,1.1fr)_minmax(0,0.6fr)] gap-3 mb-3">
               <div class="flex flex-col gap-1.5 min-w-0">
                 <label for="course" class="text-[13px] text-label">Course <span class="text-brand">*</span></label>
                 <SearchableSelect
@@ -932,6 +941,23 @@ function cancel() {
                 />
                 <p v-if="examTermsError" class="text-[12px] text-brand">{{ examTermsError }}</p>
                 <p v-else-if="fieldErrors.exam_term_id" class="text-[12px] text-brand">{{ fieldErrors.exam_term_id }}</p>
+              </div>
+
+              <div class="flex flex-col gap-1.5 min-w-0">
+                <label for="exam_sub_type" class="text-[13px] text-label">Exam Sub Type <span class="text-brand">*</span></label>
+                <SearchableSelect
+                  id="exam_sub_type"
+                  :ref="(el) => (fieldRefs.exam_sub_type_id.value = el)"
+                  v-model="form.exam_sub_type_id"
+                  :options="examSubTypeOptions"
+                  :loading="examSubTypesLoading"
+                  :disabled="!form.exam_type_id || !form.exam_term_id"
+                  :error="!!fieldErrors.exam_sub_type_id"
+                  :placeholder="form.exam_type_id && form.exam_term_id ? (examSubTypeOptions.length ? 'Select exam sub type' : 'No sub types for this type / term') : 'Pick exam type and term first'"
+                  search-placeholder="Search exam sub types…"
+                  @change="clearFieldError('exam_sub_type_id')"
+                />
+                <p v-if="fieldErrors.exam_sub_type_id" class="text-[12px] text-brand">{{ fieldErrors.exam_sub_type_id }}</p>
               </div>
 
               <div class="flex flex-col gap-1.5 min-w-0">

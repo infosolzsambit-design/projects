@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AnswerSheet;
 use App\Models\Course;
 use App\Models\Department;
+use App\Models\ExamSubType;
 use App\Models\ExamTerm;
 use App\Models\ExamType;
 use App\Models\QuestionAnswerSheetMapping;
@@ -124,6 +125,25 @@ class AnswerBookTopSheetReportControllerTest extends TestCase
         $this->assertEquals(18.0, $evaluated['marks']);
         $this->assertFalse($pending['evaluated']);
         $this->assertNull($pending['marks']);
+    }
+
+    public function test_index_filters_by_the_optional_exam_sub_type(): void
+    {
+        $this->actingUser();
+        $spring = ExamSubType::factory()->create();
+        $autumn = ExamSubType::factory()->create();
+        ['mapping' => $inSpring, 'filters' => $filters] = $this->searchableMapping(['exam_sub_type_id' => $spring->id]);
+        $inAutumn = QuestionAnswerSheetMapping::factory()->create(
+            $inSpring->only(['program_name', 'course_id', 'exam_term_id', 'exam_type_id', 'semester', 'question_paper_id'])
+            + ['exam_sub_type_id' => $autumn->id],
+        );
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $inSpring->id, 'roll_no' => 'S001']);
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $inAutumn->id, 'roll_no' => 'A001']);
+
+        $this->withApiKey()->getJson('/api/v1/reports/answer-book-top-sheet?'.http_build_query($filters))
+            ->assertOk()->assertJsonCount(2, 'data.rows');
+        $this->withApiKey()->getJson('/api/v1/reports/answer-book-top-sheet?'.http_build_query($filters + ['exam_sub_type_id' => $autumn->id]))
+            ->assertOk()->assertJsonCount(1, 'data.rows')->assertJsonPath('data.rows.0.roll_no', 'A001');
     }
 
     public function test_index_filters_by_the_packet_department(): void

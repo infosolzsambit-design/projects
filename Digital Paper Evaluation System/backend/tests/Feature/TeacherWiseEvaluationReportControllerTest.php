@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AnswerSheet;
 use App\Models\Course;
 use App\Models\Department;
+use App\Models\ExamSubType;
 use App\Models\ExamTerm;
 use App\Models\ExamType;
 use App\Models\QuestionAnswerSheetMapping;
@@ -134,6 +135,26 @@ class TeacherWiseEvaluationReportControllerTest extends TestCase
         $rows = $response->json('data.rows');
         $this->assertCount(1, $rows);
         $this->assertSame('Teacher A', $rows[0]['teacher_name']);
+    }
+
+    public function test_index_filters_by_the_optional_exam_sub_type(): void
+    {
+        $this->actingUser();
+        $spring = ExamSubType::factory()->create();
+        $autumn = ExamSubType::factory()->create();
+        ['mapping' => $inSpring, 'filters' => $filters] = $this->searchableMapping(['exam_sub_type_id' => $spring->id]);
+        $inAutumn = QuestionAnswerSheetMapping::factory()->create(
+            $inSpring->only(['program_name', 'course_id', 'exam_term_id', 'exam_type_id', 'semester', 'question_paper_id'])
+            + ['exam_sub_type_id' => $autumn->id],
+        );
+        $teacher = TeacherDetail::factory()->create()->user_id;
+        AnswerSheet::factory()->count(2)->create(['question_answer_sheet_mapping_id' => $inSpring->id, 'teacher_id' => $teacher]);
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $inAutumn->id, 'teacher_id' => $teacher]);
+
+        $this->withApiKey()->getJson('/api/v1/reports/teacher-wise-evaluation?'.http_build_query($filters))
+            ->assertOk()->assertJsonCount(2, 'data.rows');
+        $this->withApiKey()->getJson('/api/v1/reports/teacher-wise-evaluation?'.http_build_query($filters + ['exam_sub_type_id' => $spring->id]))
+            ->assertOk()->assertJsonCount(1, 'data.rows')->assertJsonPath('data.rows.0.allotted_script', 2);
     }
 
     public function test_index_filters_by_the_packet_department_and_returns_it(): void

@@ -264,8 +264,49 @@ class DashboardControllerTest extends TestCase
         $this->assertSame(4, $rows[0]['assigned']);
         $this->assertSame(3, $rows[0]['evaluated']);
         $this->assertSame(1, $rows[0]['pending']);
+        $this->assertSame(0, $rows[0]['problem']);
         $this->assertSame(1, $rows[0]['issues']);
         $this->assertSame('Quiet Teacher', $rows[1]['name']);
+    }
+
+    public function test_teacher_workload_splits_assigned_into_evaluated_pending_and_problem(): void
+    {
+        $this->actingUser();
+        $mapping = $this->mappingThisYear()['mapping'];
+        $teacher = TeacherDetail::factory()->create()->user_id;
+
+        AnswerSheet::factory()->count(2)->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => 10]);
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => null]);
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => null, 'issue_master_id' => 1, 'issue_status' => 'open']);
+
+        $row = $this->withApiKey()->getJson('/api/v1/dashboard/admin-summary')->assertOk()->json('data.teacher_workload.0');
+
+        $this->assertSame(4, $row['assigned']);
+        $this->assertSame(2, $row['evaluated']);
+        $this->assertSame(1, $row['pending']);
+        $this->assertSame(1, $row['problem']);
+        $this->assertSame($row['assigned'], $row['evaluated'] + $row['pending'] + $row['problem']);
+    }
+
+    public function test_teacher_progress_counts_teachers_by_share_of_sheets_evaluated(): void
+    {
+        $this->actingUser();
+        $mapping = $this->mappingThisYear()['mapping'];
+        $sheets = function (int $evaluated, int $open) use ($mapping): void {
+            $teacher = TeacherDetail::factory()->create()->user_id;
+            AnswerSheet::factory()->count($evaluated)->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => 10]);
+            AnswerSheet::factory()->count($open)->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => $teacher, 'marks' => null]);
+        };
+        $sheets(0, 3);  // not started
+        $sheets(0, 1);  // not started
+        $sheets(1, 3);  // 25% — under half
+        $sheets(2, 2);  // 50% — half or more
+        $sheets(4, 0);  // completed
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $mapping->id, 'teacher_id' => null, 'marks' => null]);
+
+        $progress = $this->withApiKey()->getJson('/api/v1/dashboard/admin-summary')->assertOk()->json('data.teacher_progress');
+
+        $this->assertSame(['teachers' => 5, 'assigned' => 16, 'not_started' => 2, 'under_half' => 1, 'over_half' => 1, 'completed' => 1], $progress);
     }
 
     public function test_course_pending_excludes_courses_with_nothing_pending(): void
@@ -414,6 +455,97 @@ class DashboardControllerTest extends TestCase
         $this->assertSame(2, $data['recent'][0]['pending']);
         // Name (Code) – Type.
         $this->assertStringContainsString('('.$mapping->course->code.')', $data['recent'][0]['course']);
+    }
+
+    public function test_teacher_recent_status_counts_courses_by_evaluation_window_stage(): void
+    {
+        $teacher = $this->actingUser();
+        $course = function (?string $endDate, bool $done) use ($teacher): void {
+            $mapping = $this->mappingThisYear(['course_id' => Course::factory()->create()->id])['mapping'];
+            AnswerSheet::factory()->count(2)->create([
+                'question_answer_sheet_mapping_id' => $mapping->id,
+                'teacher_id' => $teacher->id,
+                'assigned_at' => now()->subDays(5),
+                'evaluation_end_date' => $endDate,
+                'marks' => $done ? 30 : null,
+                'evaluated_at' => $done ? now() : null,
+            ]);
+        };
+        $course(now()->subDay()->toDateString(), true);     // completed (even though the window ended)
+        $course(now()->subDay()->toDateString(), false);    // overdue
+        $course(now()->toDateString(), false);              // due soon — ends today
+        $course(now()->addDays(3)->toDateString(), false);  // due soon — last day of the 3-day window
+        $course(now()->addDays(10)->toDateString(), false); // on track
+        $course(null, false);                               // on track — no end date
+
+        $status = $this->withApiKey()->getJson('/api/v1/dashboard/teacher-summary?exam_year='.now()->year.'&exam_type_id='.$this->defaultExamTypeId())
+            ->assertOk()->json('data.recent_status');
+
+        $this->assertSame(['courses' => 6, 'pending' => 10, 'completed' => 1, 'on_track' => 2, 'due_soon' => 2, 'overdue' => 1], $status);
+    }
+
+    public function test_hod_summary_shows_only_the_hods_own_department(): void
+    {
+        $hod = $this->actingUser();
+        $mine = Department::factory()->create(['name' => 'Computer Applications']);
+        $other = Department::factory()->create();
+        $hod->departments()->attach($mine->id);
+
+        // Two more teachers in my department (one has sheets), one elsewhere.
+        $teacher = TeacherDetail::factory()->create(['designation' => 'Assistant Professor'])->user;
+        $teacher->departments()->attach($mine->id);
+        $idle = TeacherDetail::factory()->create()->user;
+        $idle->departments()->attach($mine->id);
+        TeacherDetail::factory()->create()->user->departments()->attach($other->id);
+
+        $course = Course::factory()->create(['name' => 'Data Structures']);
+
+        $packet = $this->mappingThisYear(['department_id' => $mine->id, 'course_id' => $course->id, 'program_name' => 'BCA'])['mapping'];
+        $sheet = ['question_answer_sheet_mapping_id' => $packet->id, 'teacher_id' => $teacher->id, 'assigned_at' => now()];
+        AnswerSheet::factory()->count(2)->create($sheet + ['marks' => 20, 'evaluated_at' => now()]);
+        AnswerSheet::factory()->create($sheet + ['marks' => null]);
+        AnswerSheet::factory()->create($sheet + ['marks' => null, 'issue_master_id' => 1, 'issue_status' => 'open', 'issue_raised_at' => now()]);
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $packet->id, 'teacher_id' => null, 'marks' => null]); // not assigned
+        // The HOD's own sheet in another department — "My" cards only.
+        $otherPacket = $this->mappingThisYear(['department_id' => $other->id])['mapping'];
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $otherPacket->id, 'teacher_id' => $hod->id, 'marks' => 30, 'evaluated_at' => now(), 'consumed_time' => 600]);
+        AnswerSheet::factory()->count(3)->create(['question_answer_sheet_mapping_id' => $otherPacket->id, 'marks' => null]);
+
+        $data = $this->withApiKey()->getJson('/api/v1/dashboard/hod-summary?exam_year='.now()->year.'&exam_type_id='.$this->defaultExamTypeId())
+            ->assertOk()->json('data');
+
+        $this->assertSame('Computer Applications', $data['departments'][0]['name']);
+        $k = $data['kpis'];
+        // Total teachers: the HOD, $teacher and $idle — the HOD is one of the department's teachers too.
+        $this->assertSame([3, 1, 1, 5, 2, 1, 1], [$k['total_teachers'], $k['assigned_teachers'], $k['courses'], $k['total_sheets'], $k['evaluated'], $k['pending'], $k['problem']]);
+        $this->assertSame([1, 1, 0, 600], [$k['my_assigned'], $k['my_completed'], $k['my_pending_subjects'], $k['my_avg_review_seconds']]);
+        $this->assertSame(1, $data['status']['not_assigned']);
+        $this->assertSame(['raised' => 1, 'under_review' => 1, 'resolved' => 0], array_diff_key($data['issues'], ['trend' => 1]));
+        $this->assertSame(1, end($data['issues']['trend'])['under_review']);
+        $this->assertSame(4, end($data['progress'])['assigned']);
+        $this->assertSame(2, end($data['progress'])['evaluated']);
+        // No teacher names — progress stages and how sheets are spread.
+        $this->assertArrayNotHasKey('teachers', $data);
+        $this->assertSame(['teachers' => 1, 'assigned' => 4, 'not_started' => 0, 'under_half' => 0, 'over_half' => 1, 'completed' => 0], $data['teacher_progress']);
+        $allocation = $data['teacher_allocation'];
+        $this->assertSame([1, 3, 4, 4, 4], [$allocation['with_sheets'], $allocation['total_teachers'], $allocation['avg'], $allocation['min'], $allocation['max']]);
+        $this->assertSame(['1–10' => 1, '11–25' => 0, '26–50' => 0, '51–100' => 0, '100+' => 0], array_column($allocation['buckets'], 'count', 'label'));
+        $this->assertCount(1, $data['courses']);
+        $this->assertSame(['program' => 'BCA', 'sheets' => 5, 'evaluated' => 2, 'pending' => 2, 'problem' => 1], array_diff_key($data['courses'][0], ['course' => 1]));
+        $this->assertSame(2, $data['course_pending'][0]['pending']);
+    }
+
+    public function test_hod_summary_is_empty_for_an_hod_without_a_department(): void
+    {
+        $this->actingUser();
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $this->mappingThisYear()['mapping']->id]);
+
+        $data = $this->withApiKey()->getJson('/api/v1/dashboard/hod-summary')->assertOk()->json('data');
+
+        $this->assertSame([], $data['departments']);
+        $this->assertSame(0, $data['kpis']['total_sheets']);
+        $this->assertSame(0, $data['teacher_progress']['teachers']);
+        $this->assertSame(0, $data['teacher_allocation']['with_sheets']);
     }
 
     public function test_teacher_summary_is_empty_for_a_teacher_with_nothing_assigned(): void

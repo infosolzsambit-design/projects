@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Traits\SerializesDatesInAppTimezone;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -11,6 +12,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class UserNotification extends Model
 {
+    // JSON dates in the app timezone, not UTC — see the trait.
+    use SerializesDatesInAppTimezone;
+
     public const ASSIGNED = 'answer_sheets_assigned';
 
     public const REASSIGNED = 'answer_sheets_reassigned';

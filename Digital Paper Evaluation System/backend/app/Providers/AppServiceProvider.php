@@ -4,10 +4,12 @@ namespace App\Providers;
 
 use App\Models\PersonalAccessToken;
 use App\Models\User;
+use App\Helpers\JsonDate;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Notifications\Messages\MailMessage;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
@@ -29,6 +31,11 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
+
+        // Dates put into API responses directly (a Carbon value in a
+        // resource / array) — same app-timezone format as model dates (see
+        // SerializesDatesInAppTimezone), not Laravel's default UTC "…Z".
+        Date::serializeUsing(fn ($date) => JsonDate::format($date));
 
         // Super Admin bypasses every permission check. Matched by role ID
         // (config('roles.super_admin_id')), never by role name.

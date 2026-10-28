@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\AnswerSheet;
 
+use App\Models\ExamSubType;
 use App\Models\QuestionPaper;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -35,6 +36,9 @@ class StoreQuestionAnswerSheetMappingRequest extends FormRequest
             'semester' => ['required', 'integer', 'min:1', 'max:12'],
             'exam_term_id' => ['required', 'integer', Rule::exists('exam_terms', 'id')->whereNull('deleted_at')],
             'exam_type_id' => ['required', 'integer', Rule::exists('exam_types', 'id')->whereNull('deleted_at')],
+            // Our own exam_sub_types.id (not the Ref Id) — one of the chosen
+            // exam type + exam term's sub types (checked in after()).
+            'exam_sub_type_id' => ['required', 'integer', Rule::exists('exam_sub_types', 'id')->whereNull('deleted_at')],
             'program_name' => ['required', 'string', 'max:255', Rule::exists('programs', 'name')->whereNull('deleted_at')],
             'packet_code' => ['required', 'string', 'max:255'],
             // One of the chosen question paper's departments (checked in after()).
@@ -43,14 +47,27 @@ class StoreQuestionAnswerSheetMappingRequest extends FormRequest
     }
 
     /**
-     * The department must be one the question paper is tagged with — the
-     * upload page only offers those, this enforces it.
+     * The department must be one the question paper is tagged with, and the
+     * exam sub type one of the chosen exam type + exam term's — the upload
+     * page only offers those, this enforces it.
      *
      * @return array<int, callable>
      */
     public function after(): array
     {
         return [
+            function (Validator $validator): void {
+                if ($validator->errors()->hasAny(['exam_sub_type_id', 'exam_type_id', 'exam_term_id'])) {
+                    return;
+                }
+                $matches = ExamSubType::whereKey($this->integer('exam_sub_type_id'))
+                    ->where('exam_type_id', $this->integer('exam_type_id'))
+                    ->where('exam_term_id', $this->integer('exam_term_id'))
+                    ->exists();
+                if (! $matches) {
+                    $validator->errors()->add('exam_sub_type_id', 'Select an exam sub type of the chosen exam type and exam term.');
+                }
+            },
             function (Validator $validator): void {
                 if ($validator->errors()->hasAny(['question_paper_id', 'department_id'])) {
                     return;

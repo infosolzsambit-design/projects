@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Traits\SerializesDatesInAppTimezone;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -19,6 +20,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class QuestionPaperNode extends Model
 {
+    // JSON dates in the app timezone, not UTC — see the trait.
+    use SerializesDatesInAppTimezone;
+
     /**
      * @var list<string>
      */

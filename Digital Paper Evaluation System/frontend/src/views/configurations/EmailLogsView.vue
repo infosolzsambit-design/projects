@@ -12,6 +12,7 @@ import { formatDateTime } from '../../utils/date'
 import RowActionMenu from '../../components/common/RowActionMenu.vue'
 import Pagination from '../../components/common/Pagination.vue'
 import ResendEmailModal from '../../components/emailLogs/ResendEmailModal.vue'
+import EmailViewModal from '../../components/emailLogs/EmailViewModal.vue'
 
 const authStore = useAuthStore()
 
@@ -98,6 +99,9 @@ function goToPage(page) {
 }
 
 const resendingLog = ref(null)
+
+// Subject click → the email as its recipient saw it (no permission needed).
+const viewingLog = ref(null)
 function openResend(log) {
   resendingLog.value = log
 }
@@ -265,7 +269,14 @@ onMounted(async () => {
                 </span>
               </td>
               <td class="px-4 py-1 max-w-[320px]">
-                <p class="font-semibold truncate">{{ log.subject }}</p>
+                <button
+                  type="button"
+                  class="block max-w-full text-left font-semibold truncate text-brand-blue hover:underline"
+                  :title="`Open — ${log.subject}`"
+                  @click="viewingLog = log"
+                >
+                  {{ log.subject }}
+                </button>
               </td>
               <td class="px-4 py-1">
                 {{ log.receiver_name || '—' }}
@@ -313,5 +324,6 @@ onMounted(async () => {
     />
 
     <ResendEmailModal v-if="resendingLog" :log="resendingLog" @close="closeResend" @resent="onResent" />
+    <EmailViewModal v-if="viewingLog" :log="viewingLog" :type-label="typeLabel(viewingLog.type)" @close="viewingLog = null" />
   </div>
 </template>

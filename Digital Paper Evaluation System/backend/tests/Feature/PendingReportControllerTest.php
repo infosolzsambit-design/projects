@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AnswerSheet;
 use App\Models\Course;
 use App\Models\Department;
+use App\Models\ExamSubType;
 use App\Models\ExamTerm;
 use App\Models\ExamType;
 use App\Models\QuestionAnswerSheetMapping;
@@ -105,6 +106,27 @@ class PendingReportControllerTest extends TestCase
         $this->assertSame(1, $rows[1]['pending']);
         $this->assertSame(1, $rows[1]['problem']);
         $this->assertSame(['Physics Dept'], $rows[1]['department_names']);
+    }
+
+    public function test_optional_exam_sub_type_filter_narrows_the_results(): void
+    {
+        $this->actingUser();
+        $spring = ExamSubType::factory()->create();
+        $autumn = ExamSubType::factory()->create();
+        ['mapping' => $inSpring, 'filters' => $filters] = $this->searchableMapping(['exam_sub_type_id' => $spring->id]);
+        $inAutumn = QuestionAnswerSheetMapping::factory()->create(
+            $inSpring->only(['program_name', 'course_id', 'exam_term_id', 'exam_type_id', 'semester', 'question_paper_id'])
+            + ['exam_sub_type_id' => $autumn->id],
+        );
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $inSpring->id, 'teacher_id' => $this->teacher('Teacher A'), 'marks' => null]);
+        AnswerSheet::factory()->create(['question_answer_sheet_mapping_id' => $inAutumn->id, 'teacher_id' => $this->teacher('Teacher B'), 'marks' => null]);
+
+        $this->withApiKey()->getJson('/api/v1/reports/pending-report?'.http_build_query($filters))
+            ->assertOk()->assertJsonCount(2, 'data.rows');
+        $this->withApiKey()->getJson('/api/v1/reports/pending-report?'.http_build_query($filters + ['exam_sub_type_id' => $autumn->id]))
+            ->assertOk()->assertJsonCount(1, 'data.rows')->assertJsonPath('data.rows.0.teacher_name', 'Teacher B');
+        $this->withApiKey()->getJson('/api/v1/reports/pending-report?'.http_build_query($filters + ['exam_sub_type_id' => 999999]))
+            ->assertStatus(422)->assertJsonValidationErrors(['exam_sub_type_id']);
     }
 
     public function test_department_and_teacher_filters_narrow_the_results(): void

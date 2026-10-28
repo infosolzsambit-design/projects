@@ -14,6 +14,7 @@ import { useExamTypeStore } from '../../stores/examType'
 import DepartmentProgressModal from './DepartmentProgressModal.vue'
 import TeacherWorkloadModal from './TeacherWorkloadModal.vue'
 import CoursePendingModal from './CoursePendingModal.vue'
+import StageColumnChart from './StageColumnChart.vue'
 import { courseLabel, typeSuffix } from '../../utils/course'
 
 const examYearStore = useExamYearStore()
@@ -159,8 +160,20 @@ const issueSummaryMeta = [
 const issueSummary = computed(() => issueSummaryMeta.map((stat) => ({ ...stat, value: summary.value?.issue_summary?.[stat.key] ?? 0 })))
 
 // --- Teacher Workload ----------------------------------------------------
-const teacherWorkload = computed(() => summary.value?.teacher_workload ?? [])
+// No names on the card (it has to stay readable with any number of
+// teachers) — a column chart of how many teachers are at each stage, by the
+// share of their own sheets evaluated (DashboardController::
+// teacherProgress()). Names and exact counts are in the modal's table.
+const teacherProgress = computed(() => summary.value?.teacher_progress ?? { teachers: 0, assigned: 0 })
 const teacherWorkloadHasMore = computed(() => summary.value?.teacher_workload_has_more ?? false)
+const progressStageMeta = [
+  { key: 'not_started', label: 'Not Started', hint: 'not evaluated any sheet yet' },
+  { key: 'under_half', label: 'Under 50%', hint: 'evaluated less than half of their sheets' },
+  { key: 'over_half', label: '50% or More', hint: 'evaluated half or more, not all' },
+  { key: 'completed', label: 'Completed', hint: 'evaluated all of their sheets' },
+]
+const progressStages = computed(() => progressStageMeta.map((s) => ({ ...s, value: teacherProgress.value[s.key] ?? 0 })))
+const avgSheetsPerTeacher = computed(() => (teacherProgress.value.teachers ? Math.round(teacherProgress.value.assigned / teacherProgress.value.teachers) : 0))
 
 // --- Course Wise Pending Evaluation ----------------------------------------
 const coursePending = computed(() => (summary.value?.course_pending ?? []).map((c) => ({ ...c, pendingPct: c.pending_pct })))
@@ -343,45 +356,24 @@ const showCoursePendingModal = ref(false)
         </div>
       </div>
 
-      <div class="bg-white rounded-2xl shadow-panel p-5 xl:col-span-1 overflow-hidden">
+      <div class="bg-white rounded-2xl shadow-panel p-5 xl:col-span-1">
         <div class="flex items-center gap-2 mb-3">
           <svg class="w-5 h-5 text-brand-blue" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
           <h3 class="font-semibold text-gray-900">Teacher Workload</h3>
-          <button v-if="teacherWorkloadHasMore" type="button" class="ml-auto shrink-0 text-[11.5px] font-semibold text-brand-blue hover:underline" @click="showTeacherWorkloadModal = true">
-            See All
+          <!-- Always offered once there's data — the modal is the table view. -->
+          <button v-if="teacherProgress.teachers" type="button" class="ml-auto shrink-0 text-[11.5px] font-semibold text-brand-blue hover:underline" @click="showTeacherWorkloadModal = true">
+            {{ teacherWorkloadHasMore ? 'See All' : 'View Table' }}
           </button>
         </div>
-        <div class="overflow-x-auto -mx-1">
-          <table class="w-full min-w-[420px] text-left text-[12px]">
-            <thead>
-              <tr class="text-muted">
-                <th class="px-1 py-1.5 font-medium w-px whitespace-nowrap">#</th>
-                <th class="px-1 py-1.5 font-medium">Teacher Name</th>
-                <th class="px-1 py-1.5 font-medium text-center">Assigned</th>
-                <th class="px-1 py-1.5 font-medium text-center">Evaluated</th>
-                <th class="px-1 py-1.5 font-medium text-center">Pending</th>
-                <th class="px-1 py-1.5 font-medium text-center">Issues</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="!teacherWorkload.length">
-                <td colspan="6" class="px-1 py-6 text-center text-muted">No answer sheets assigned to any teacher yet.</td>
-              </tr>
-              <tr v-for="(row, i) in teacherWorkload" :key="row.name" class="border-t border-gray-100">
-                <td class="px-1 py-1.5 text-gray-500">{{ i + 1 }}</td>
-                <td :title="row.emp_code" class="px-1 py-1.5 font-medium text-gray-800 whitespace-nowrap cursor-default">{{ row.name }}</td>
-                <td class="px-1 py-1.5 text-center text-gray-700">{{ row.assigned }}</td>
-                <td class="px-1 py-1.5 text-center text-gray-700">{{ row.evaluated }}</td>
-                <td class="px-1 py-1.5 text-center">
-                  <span class="inline-flex min-w-[28px] justify-center rounded-full bg-amber-50 text-badge font-semibold px-1.5 py-0.5">{{ row.pending }}</span>
-                </td>
-                <td class="px-1 py-1.5 text-center">
-                  <span class="inline-flex min-w-[22px] justify-center rounded-full bg-rose-50 text-brand font-semibold px-1.5 py-0.5">{{ row.issues }}</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <p v-if="!teacherProgress.teachers" class="text-[12px] text-muted text-center py-6">No answer sheets assigned to any teacher yet.</p>
+        <template v-else>
+          <p class="text-[12px] text-muted mb-3">
+            <span class="font-semibold text-gray-900">{{ fmt(teacherProgress.teachers) }}</span> teacher{{ teacherProgress.teachers === 1 ? '' : 's' }}
+            · <span class="font-semibold text-gray-900">{{ fmt(teacherProgress.assigned) }}</span> sheets assigned
+            · avg <span class="font-semibold text-gray-900">{{ fmt(avgSheetsPerTeacher) }}</span> each
+          </p>
+          <StageColumnChart :stages="progressStages" unit="teacher" caption="Teachers by share of their sheets evaluated" />
+        </template>
       </div>
 
       <div class="bg-white rounded-2xl shadow-panel p-5 overflow-hidden">

@@ -49,7 +49,7 @@ function close() {
         <p v-if="loadError" class="text-[13px] text-brand text-center py-8">{{ loadError }}</p>
 
         <div v-else class="overflow-x-auto">
-          <table class="w-full min-w-[420px] text-left text-[12.5px]">
+          <table class="w-full min-w-[480px] text-left text-[12.5px]">
             <thead>
               <tr class="bg-subject-header text-white text-[11px] font-medium">
                 <th class="px-2.5 py-2 rounded-tl-xl w-px whitespace-nowrap">#</th>
@@ -57,15 +57,16 @@ function close() {
                 <th class="px-2.5 py-2 text-center">Assigned</th>
                 <th class="px-2.5 py-2 text-center">Evaluated</th>
                 <th class="px-2.5 py-2 text-center">Pending</th>
+                <th class="px-2.5 py-2 text-center">Problem</th>
                 <th class="px-2.5 py-2 text-center rounded-tr-xl">Issues</th>
               </tr>
             </thead>
             <tbody class="bg-white">
               <tr v-if="loading">
-                <td colspan="6" class="px-2.5 py-10 text-center text-muted">Loading&hellip;</td>
+                <td colspan="7" class="px-2.5 py-10 text-center text-muted">Loading&hellip;</td>
               </tr>
               <tr v-else-if="!rows.length">
-                <td colspan="6" class="px-2.5 py-10 text-center text-muted">No answer sheets assigned to any teacher yet.</td>
+                <td colspan="7" class="px-2.5 py-10 text-center text-muted">No answer sheets assigned to any teacher yet.</td>
               </tr>
               <tr v-for="(row, i) in rows" v-else :key="row.name" class="text-gray-800 even:bg-gray-50 border-b border-gray-100 last:border-b-0">
                 <td class="px-2.5 py-2 text-gray-500">{{ i + 1 }}</td>
@@ -75,6 +76,7 @@ function close() {
                 <td class="px-2.5 py-2 text-center">
                   <span class="inline-flex min-w-[28px] justify-center rounded-full bg-amber-50 text-badge font-semibold px-1.5 py-0.5">{{ row.pending }}</span>
                 </td>
+                <td class="px-2.5 py-2 text-center">{{ row.problem ?? 0 }}</td>
                 <td class="px-2.5 py-2 text-center">
                   <span class="inline-flex min-w-[22px] justify-center rounded-full bg-rose-50 text-brand font-semibold px-1.5 py-0.5">{{ row.issues }}</span>
                 </td>

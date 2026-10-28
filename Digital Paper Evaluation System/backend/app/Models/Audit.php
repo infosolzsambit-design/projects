@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Traits\SerializesDatesInAppTimezone;
 use App\Traits\HasDateTimeTimestamps;
 use OwenIt\Auditing\Models\Audit as BaseAudit;
 
@@ -12,6 +13,9 @@ use OwenIt\Auditing\Models\Audit as BaseAudit;
  */
 class Audit extends BaseAudit
 {
+    // JSON dates in the app timezone, not UTC — see the trait.
+    use SerializesDatesInAppTimezone;
+
     use HasDateTimeTimestamps;
 
     /**

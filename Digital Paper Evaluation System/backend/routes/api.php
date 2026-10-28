@@ -28,6 +28,7 @@ use App\Http\Controllers\API\V1\Master\ProgramController;
 use App\Http\Controllers\API\V1\MyCompletedCourseController;
 use App\Http\Controllers\API\V1\MyProblemCourseController;
 use App\Http\Controllers\API\V1\ResetEvaluationController;
+use App\Http\Controllers\API\V1\ResultPublishController;
 use App\Http\Controllers\API\V1\GenerateMarksheetController;
 use App\Http\Controllers\API\V1\UserNotificationController;
 use App\Http\Controllers\API\V1\MyPendingCourseController;
@@ -35,6 +36,7 @@ use App\Http\Controllers\API\V1\NotificationController;
 use App\Http\Controllers\API\V1\QuestionAnswerSheetMappingController;
 use App\Http\Controllers\API\V1\QuestionPaperController;
 use App\Http\Controllers\API\V1\Report\AnswerBookTopSheetReportController;
+use App\Http\Controllers\API\V1\Report\EvaluatedCopyDownloadController;
 use App\Http\Controllers\API\V1\Report\PendingReportController;
 use App\Http\Controllers\API\V1\Report\ProblemReportController;
 use App\Http\Controllers\API\V1\Report\TeacherWiseEvaluationReportController;
@@ -45,7 +47,9 @@ use App\Http\Controllers\API\V1\TeacherController;
 use App\Http\Controllers\API\V1\TeacherEsignController;
 use App\Http\Controllers\API\V1\TeacherFaceController;
 use App\Http\Controllers\API\V1\User\UserController;
+use App\Http\Middleware\ApiKeyAuth;
 use App\Http\Middleware\PinTokenToClient;
+use App\Http\Middleware\SecurityCodeAuth;
 use Illuminate\Support\Facades\Route;
 
 // Every route below is automatically prefixed with /api/v1 (see bootstrap/app.php)
@@ -68,6 +72,13 @@ Route::post('reset-password', [AuthController::class, 'resetPassword'])
 // logos) before a visitor has logged in. See GeneralSettingController's
 // BRANDING_FIELDS for exactly what this can and can't return.
 Route::get('branding', [GeneralSettingController::class, 'branding']);
+
+// Public API for the main database — no user login and no X-API-KEY; the
+// "Security-Code" header must match General Settings' API Security Code
+// (see SecurityCodeAuth). Results by the main database's Ref Ids.
+Route::post('result-publish', [ResultPublishController::class, 'index'])
+    ->withoutMiddleware(ApiKeyAuth::class)
+    ->middleware(SecurityCodeAuth::class);
 
 Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function (): void {
     Route::post('refresh', [AuthController::class, 'refresh']);
@@ -139,6 +150,8 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     Route::get('dashboard/teacher-course-pending', [DashboardController::class, 'teacherCoursePending']);
     Route::get('dashboard/teacher-recent', [DashboardController::class, 'teacherRecent']);
     Route::get('dashboard/teacher-week', [DashboardController::class, 'teacherWeek']);
+    // HOD dashboard — only the HOD's own department(s).
+    Route::get('dashboard/hod-summary', [DashboardController::class, 'hodSummary']);
     // Each "See All" modal behind admin-summary's own capped lists.
     Route::get('dashboard/department-progress', [DashboardController::class, 'departments']);
     Route::get('dashboard/teacher-workload', [DashboardController::class, 'teacherWorkloadFull']);
@@ -275,6 +288,10 @@ Route::middleware(['auth:sanctum', PinTokenToClient::class])->group(function ():
     // No permission gate.
     Route::get('reports/pending-report', [PendingReportController::class, 'index']);
     Route::get('reports/pending-report/export', [PendingReportController::class, 'export']);
+
+    // Sidebar's Report → Evaluated Copy Download — see that controller's docblock.
+    Route::get('reports/evaluated-copies', [EvaluatedCopyDownloadController::class, 'index']);
+    Route::get('reports/evaluated-copies/{answerSheet}', [EvaluatedCopyDownloadController::class, 'sheet']);
 
     Route::get('reports/answer-book-top-sheet', [AnswerBookTopSheetReportController::class, 'index']);
     Route::get('reports/answer-book-top-sheet/export', [AnswerBookTopSheetReportController::class, 'export']);

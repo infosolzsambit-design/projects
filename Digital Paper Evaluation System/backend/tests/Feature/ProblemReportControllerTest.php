@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AnswerSheet;
 use App\Models\Course;
 use App\Models\Department;
+use App\Models\ExamSubType;
 use App\Models\ExamTerm;
 use App\Models\ExamType;
 use App\Models\IssueMaster;
@@ -149,6 +150,32 @@ class ProblemReportControllerTest extends TestCase
             ->assertOk()->assertJsonCount(2, 'data.rows');
         $this->withApiKey()->getJson('/api/v1/reports/problem-report?'.$this->filters(['course_id' => $courseB->id, 'teacher_id' => $teacherB->id]))
             ->assertOk()->assertJsonCount(1, 'data.rows')->assertJsonPath('data.rows.0.status', 'Open');
+    }
+
+    public function test_optional_exam_sub_type_filter_narrows_the_results(): void
+    {
+        $issue = IssueMaster::factory()->create();
+        $course = Course::factory()->create();
+        $teacher = $this->teacher('Teacher A', 'A1');
+        $spring = ExamSubType::factory()->create();
+        $autumn = ExamSubType::factory()->create();
+
+        foreach ([$spring, $autumn, $autumn] as $subType) {
+            $mapping = $this->mapping($course);
+            $mapping->update(['exam_sub_type_id' => $subType->id]);
+            AnswerSheet::factory()->create([
+                'question_answer_sheet_mapping_id' => $mapping->id,
+                'teacher_id' => $teacher->id,
+                'issue_master_id' => $issue->id,
+                'issue_raised_by' => $teacher->id,
+                'issue_status' => 'open',
+            ]);
+        }
+
+        $this->withApiKey()->getJson('/api/v1/reports/problem-report?'.$this->filters())
+            ->assertOk()->assertJsonCount(3, 'data.rows');
+        $this->withApiKey()->getJson('/api/v1/reports/problem-report?'.$this->filters(['exam_sub_type_id' => $autumn->id]))
+            ->assertOk()->assertJsonCount(2, 'data.rows');
     }
 
     public function test_department_filter_narrows_the_results(): void

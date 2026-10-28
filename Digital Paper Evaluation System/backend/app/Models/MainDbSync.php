@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Traits\SerializesDatesInAppTimezone;
 use App\Traits\HasDateTimeTimestamps;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -13,6 +14,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class MainDbSync extends Model
 {
+    // JSON dates in the app timezone, not UTC — see the trait.
+    use SerializesDatesInAppTimezone;
+
     use HasDateTimeTimestamps;
 
     protected $fillable = [

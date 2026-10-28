@@ -237,7 +237,7 @@ async function loadTeachers() {
       emp_code: t.emp_code || '—',
       designation: t.designation || '—',
       department: t.department || '—',
-      selected: true, // every active teacher starts selected — deselect to exclude one
+      selected: false, // nobody starts selected — the user ticks the teachers to assign
       assignQuantity: 0,
       // Sheets still waiting (nobody started them) in shared pools this teacher is in.
       poolPendingCount: t.pool_waiting_answer_sheet_count || 0,
@@ -810,6 +810,7 @@ const courseOptions = useProgramCourses(filters, availableCourses)
                 <span v-if="!isPoolMode" class="inline-flex items-center rounded-full bg-success/10 text-success text-[10px] font-semibold px-2 py-0.5">Equal split, then editable</span>
                 <span v-else class="inline-flex items-center rounded-full bg-brand-blue/10 text-brand-blue text-[10px] font-semibold px-2 py-0.5">Shared, first to start gets it</span>
               </div>
+              <div class="flex items-center">
               <div class="inline-flex rounded-lg border border-input-border bg-input-bg p-0.5 text-[12px] font-semibold" role="radiogroup" aria-label="Assignment mode">
                 <button
                   v-for="mode in [{ id: 'distribution', label: 'Distribution' }, { id: 'pool', label: 'Pool' }]"
@@ -823,6 +824,32 @@ const courseOptions = useProgramCourses(filters, availableCourses)
                 >
                   {{ mode.label }}
                 </button>
+              </div>
+              <!-- "How does Pool work?" — on hover / keyboard focus, or a tap on touch screens. -->
+              <div class="relative group ml-1 shrink-0">
+                <button
+                  type="button"
+                  class="w-5 h-5 rounded-full border border-brand-blue/40 text-brand-blue flex items-center justify-center hover:bg-brand-blue/10 focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+                  aria-label="How does Pool work?"
+                  aria-describedby="pool-help"
+                >
+                  <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="11" x2="12" y2="17" /><line x1="12" y1="7" x2="12.01" y2="7" /></svg>
+                </button>
+                <div
+                  id="pool-help"
+                  role="tooltip"
+                  class="hidden group-hover:block group-focus-within:block absolute right-0 top-full mt-2 z-30 w-72 rounded-xl bg-white border border-gray-200 shadow-lg p-3 text-[12px] text-gray-700 leading-snug"
+                >
+                  <p class="font-semibold text-gray-900 mb-1.5">How Pool works</p>
+                  <ul class="list-disc pl-4 space-y-1">
+                    <li>The answer sheets (all pending ones, or the quantity you enter) go into one shared pool.</li>
+                    <li>Every selected teacher (at least 2) sees all the pool sheets in My Pending Course, marked <span class="font-semibold">Pool</span>.</li>
+                    <li>The first teacher to click <span class="font-semibold">Start Evaluate</span> on a sheet gets it, and it disappears for the others.</li>
+                    <li>No fixed share per teacher — whoever evaluates faster takes more sheets.</li>
+                    <li>A sheet nobody has started yet stays in the pool; once started, it belongs to that teacher like a normally assigned sheet.</li>
+                  </ul>
+                </div>
+              </div>
               </div>
             </div>
             <p v-if="!isPoolMode" class="text-[12px] text-muted mb-3">Click "Distribute Equally" to split papers evenly across selected teachers below, then fine-tune any teacher's quantity by hand.</p>

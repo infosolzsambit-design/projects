@@ -166,6 +166,12 @@ const router = createRouter({
           meta: { title: 'Pending Report' },
         },
         {
+          path: 'reports/evaluated-copy-download',
+          name: 'reports-evaluated-copy-download',
+          component: () => import('../views/reports/EvaluatedCopyDownloadView.vue'),
+          meta: { title: 'Evaluated Copy' },
+        },
+        {
           path: 'reports/answer-book-top-sheet',
           name: 'reports-answer-book-top-sheet',
           component: () => import('../views/reports/AnswerBookTopSheetReportView.vue'),

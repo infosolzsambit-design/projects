@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Traits\SerializesDatesInAppTimezone;
 use App\Traits\HasAuditContext;
 use App\Traits\HasDateTimeTimestamps;
 use App\Traits\HasUserstamps;
@@ -15,6 +16,9 @@ use OwenIt\Auditing\Contracts\Auditable as AuditableContract;
 
 class Department extends Model implements AuditableContract
 {
+    // JSON dates in the app timezone, not UTC — see the trait.
+    use SerializesDatesInAppTimezone;
+
     /** @use HasFactory<DepartmentFactory> */
     use Auditable, HasAuditContext, HasDateTimeTimestamps, HasFactory, HasUserstamps, SoftDeletes {
         HasAuditContext::transformAudit insteadof Auditable;

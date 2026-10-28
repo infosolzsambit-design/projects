@@ -12,6 +12,7 @@ import { useToast } from '../../composables/useToast'
 import SearchableSelect from '../../components/common/SearchableSelect.vue'
 import { useProgramsStore } from '../../stores/programs'
 import { useProgramCourses } from '../../composables/useProgramCourses'
+import { useExamSubTypes } from '../../composables/useExamSubTypes'
 import { courseLabel, typeSuffix } from '../../utils/course'
 import { ordinal } from '../../utils/ordinal'
 
@@ -28,6 +29,7 @@ const filters = reactive({
   department_id: '', // optional — the packet's department
   exam_term_id: '',
   exam_type_id: '',
+  exam_sub_type_id: '', // optional — the packet's exam sub type (Generate QR)
   semester: '',
   exam_year: new Date().getFullYear(),
   teacher_id: '',
@@ -217,6 +219,7 @@ function exportParams() {
   if (!params.teacher_id) delete params.teacher_id
   if (!params.course_id) delete params.course_id
   if (!params.department_id) delete params.department_id
+  if (!params.exam_sub_type_id) delete params.exam_sub_type_id
   return params
 }
 
@@ -278,6 +281,7 @@ async function downloadReport() {
 
 // Course dropdown follows Program — its mapped courses, or every course if it has none.
 const courseOptions = useProgramCourses(filters, availableCourses)
+const { options: examSubTypeOptions, loading: examSubTypesLoading } = useExamSubTypes(filters)
 </script>
 
 <template>
@@ -316,9 +320,9 @@ const courseOptions = useProgramCourses(filters, availableCourses)
         <h3 class="text-[14px] sm:text-[15px] font-semibold text-gray-900">Select Exam Details</h3>
       </div>
 
-      <!-- Row 1: Program · Course · Exam Type · Exam Term (same layout as
+      <!-- Row 1: Program · Course · Exam Type · Exam Term · Exam Sub Type (same layout as
            the other search panels — Program and Course wider). -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_1fr_1fr] gap-x-2.5 gap-y-1.5">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_1fr_1fr_1fr] gap-x-2.5 gap-y-1.5">
         <div class="flex flex-col gap-0.5 min-w-0">
           <label for="pr_program" class="text-[11px] text-label">Program <span class="text-brand">*</span></label>
           <SearchableSelect
@@ -381,6 +385,19 @@ const courseOptions = useProgramCourses(filters, availableCourses)
             @change="clearFieldError('exam_term_id')"
           />
           <p v-if="fieldErrors.exam_term_id" class="text-[10.5px] text-brand leading-tight">{{ fieldErrors.exam_term_id }}</p>
+        </div>
+
+        <div class="flex flex-col gap-0.5 min-w-0">
+          <label for="pr_exam_sub_type" class="text-[11px] text-label">Exam Sub Type <span class="text-muted">(optional)</span></label>
+          <SearchableSelect
+            dense
+            id="pr_exam_sub_type"
+            v-model="filters.exam_sub_type_id"
+            :options="examSubTypeOptions"
+            :loading="examSubTypesLoading"
+            placeholder="All sub types"
+            search-placeholder="Search exam sub types…"
+          />
         </div>
       </div>
 
